@@ -60,7 +60,7 @@
     <string name="delete_audio_message_fmt">Are you sure you want to delete %1$s?</string>
 
     <!-- Lexicon Activity -->
-    <string name="lexicon_title">Pronunciation Dictionary</string>
+    <string name="lexicon_title">Settings</string>
     <string name="lexicon_empty_state">No custom rules yet.\nAdd terms to fix pronunciations.</string>
     <string name="add_term_button">Add Term</string>
     <string name="add_rule_title">Add Pronunciation Rule</string>
@@ -87,7 +87,7 @@
     <string name="action_saved">Saved Audio</string>
     <string name="action_history">History</string>
     <string name="action_queue">Queue</string>
-    <string name="action_lexicon">Lexicon</string>
+    <string name="action_lexicon">Settings</string>
     <string name="action_tts_settings">System TTS Settings</string>
     <string name="tts_settings_unavailable">Could not open TTS settings on this device</string>
     <string name="accent_dict_import_title">Accent Dictionary Imported</string>
@@ -161,12 +161,38 @@
     <string name="punct_tight_cp_title">Tight commas and periods</string>
     <string name="punct_tight_cp_desc">Skip the legacy `,/;` spacing stabilisation at end of chunk and the closing-quote+period split. Cleaner phrasing but slightly higher glitch risk on rare punctuation.</string>
     <string name="dict_offer_title">Download the accent dictionary?</string>
-    <string name="dict_offer_msg">Correct stress needs a dictionary: 3.3 million word forms built by the silero-stress network (%1$d MB, once). Homographs (замок/замок) are resolved by context anyway. You can also do this later: Lexicon → menu → Download dictionary.</string>
+    <string name="dict_offer_msg">Correct stress needs a dictionary: 3.3 million word forms built by the silero-stress network (%1$d MB, once). Homographs (замок/замок) are resolved by context anyway. You can also do this later: Settings → menu (⋮) → Download dictionary.</string>
     <string name="dict_offer_download">Download</string>
     <string name="dict_offer_later">Later</string>
+    <string name="stop_button">Stop</string>
     <string name="fg_reading_aloud">Running — smooth reading with the screen off</string>
     <string name="fg_turn_off">Turn off</string>
     <string name="fg_speed_status">Synthesis speed: screen on ×%1$s, off ×%2$s (over 1 = keeps up)</string>
+    <string name="player_toggle_list">Phrase list / text</string>
+    <string name="player_prev">Phrase back (hold: 5 phrases)</string>
+    <string name="player_next">Phrase forward (hold: 5 phrases)</string>
+    <string name="characters_title">Characters</string>
+    <string name="characters_open">Characters of the book →</string>
+    <string name="characters_empty">Open a book in the TeraTTS reader — its characters will appear here.</string>
+    <string name="characters_hint">Characters of the text open in the reader. Changes apply the next time reading starts. If one character goes by two names, merge them.</string>
+    <string name="characters_merged">Merged</string>
+    <string name="characters_unmerge">Undo</string>
+    <string name="characters_as_narrator">as narrator</string>
+    <string name="characters_auto">automatic</string>
+    <string name="characters_male">male</string>
+    <string name="characters_female">female</string>
+    <string name="characters_hero">I (the hero)</string>
+    <string name="characters_lines_fmt">lines: %1$d</string>
+    <string name="characters_merge">Merge</string>
+    <string name="characters_voice">Voice</string>
+    <string name="roles_title">Reading by roles</string>
+    <string name="roles_desc">Built-in reader: author text by the narrator, male and female lines in their own voices. Gender comes from the author words (said, he or she) and from names the book itself reveals.</string>
+    <string name="roles_characters_title">A voice for every character</string>
+    <string name="roles_characters_desc">Characters (Peter, Lena, the old man, the computer…) get different voices automatically and keep them in every chapter. Their pace follows the text: old people slower, «blurted out» faster, «whispered» quieter. Off: voices by gender only.</string>
+    <string name="roles_narrator">Narrator</string>
+    <string name="roles_narrator_main">as on the main screen</string>
+    <string name="roles_male">Male lines</string>
+    <string name="roles_female">Female lines</string>
     <string name="punct_pause_scale_title">Pause length</string>
     <string name="punct_pause_scale_desc">Pauses after . ! ? : ; — … and around (brackets). ×1 is the default; ×0 leaves only the voice model’s own pauses.</string>
     <string name="punct_paragraph_pause_title">Pause between paragraphs</string>

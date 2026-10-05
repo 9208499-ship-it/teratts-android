@@ -60,7 +60,7 @@
     <string name="delete_audio_message_fmt">Удалить файл %1$s?</string>
 
     <!-- Lexicon Activity -->
-    <string name="lexicon_title">Словарь произношения</string>
+    <string name="lexicon_title">Настройки</string>
     <string name="lexicon_empty_state">Пока нет своих правил.\nДобавьте слова, чтобы исправить произношение.</string>
     <string name="add_term_button">Добавить слово</string>
     <string name="add_rule_title">Добавить правило произношения</string>
@@ -87,7 +87,7 @@
     <string name="action_saved">Сохранённое аудио</string>
     <string name="action_history">История</string>
     <string name="action_queue">Очередь</string>
-    <string name="action_lexicon">Словарь</string>
+    <string name="action_lexicon">Настройки</string>
     <string name="action_tts_settings">Системные настройки TTS</string>
     <string name="tts_settings_unavailable">Не удалось открыть настройки TTS на этом устройстве</string>
     <string name="accent_dict_import_title">Словарь ударений импортирован</string>
@@ -173,12 +173,38 @@
     <string name="punct_tight_cp_title">Без пробела перед запятой и точкой</string>
     <string name="punct_tight_cp_desc">Пропускать стандартную стабилизацию пробелов перед «,/;» в конце куска и разделение последовательностей «.»/«!»/«?» в кавычках. Чище фраза, но чуть выше риск артефактов на редкой пунктуации.</string>
     <string name="dict_offer_title">Скачать словарь ударений?</string>
-    <string name="dict_offer_msg">Для правильных ударений нужен словарь: 3,3 млн словоформ, размеченных нейросетью silero-stress (%1$d МБ, один раз). Омографы (за́мок/замо́к) движок всё равно решает по контексту. Можно и позже: Лексикон → меню → Скачать словарь.</string>
+    <string name="dict_offer_msg">Для правильных ударений нужен словарь: 3,3 млн словоформ, размеченных нейросетью silero-stress (%1$d МБ, один раз). Омографы (за́мок/замо́к) движок всё равно решает по контексту. Можно и позже: Настройки → меню (⋮) → Скачать словарь.</string>
     <string name="dict_offer_download">Скачать</string>
     <string name="dict_offer_later">Позже</string>
+    <string name="stop_button">Стоп</string>
     <string name="fg_reading_aloud">Работает — чтение без пауз при выключенном экране</string>
     <string name="fg_turn_off">Выключить</string>
     <string name="fg_speed_status">Скорость синтеза: экран вкл ×%1$s, выкл ×%2$s (больше 1 — успевает)</string>
+    <string name="player_toggle_list">Список фраз / текст</string>
+    <string name="player_prev">Фраза назад (удерживать — 5 фраз)</string>
+    <string name="player_next">Фраза вперёд (удерживать — 5 фраз)</string>
+    <string name="characters_title">Персонажи</string>
+    <string name="characters_open">Персонажи книги →</string>
+    <string name="characters_empty">Откройте книгу в читалке TeraTTS — здесь появятся её персонажи.</string>
+    <string name="characters_hint">Персонажи текста, открытого в читалке. Изменения действуют со следующего запуска чтения. Если один персонаж назван по‑разному («искин» и «896‑й»), объедините их.</string>
+    <string name="characters_merged">Объединённые</string>
+    <string name="characters_unmerge">Отменить</string>
+    <string name="characters_as_narrator">как рассказчик</string>
+    <string name="characters_auto">автоматически</string>
+    <string name="characters_male">муж.</string>
+    <string name="characters_female">жен.</string>
+    <string name="characters_hero">Я (герой)</string>
+    <string name="characters_lines_fmt">реплик: %1$d</string>
+    <string name="characters_merge">Объединить</string>
+    <string name="characters_voice">Голос</string>
+    <string name="roles_title">Чтение по ролям</string>
+    <string name="roles_desc">Встроенная читалка: авторский текст — голосом рассказчика, реплики мужчин и женщин — своими голосами. Пол определяется по авторским словам («сказал / сказала», «он / она») и по именам, которые книга сама подсказывает.</string>
+    <string name="roles_characters_title">Свой голос каждому персонажу</string>
+    <string name="roles_characters_desc">Персонажи (Пётр, Лена, старик, компьютер…) автоматически получают разные голоса и сохраняют их во всех главах. Темп — по тексту: старики медленнее, «выпалил» — быстрее, «прошептал» — тише. Выключено — голоса только по полу.</string>
+    <string name="roles_narrator">Рассказчик</string>
+    <string name="roles_narrator_main">как на главном экране</string>
+    <string name="roles_male">Мужские реплики</string>
+    <string name="roles_female">Женские реплики</string>
     <string name="punct_pause_scale_title">Длина пауз</string>
     <string name="punct_pause_scale_desc">Паузы после . ! ? : ; — … и вокруг (скобок). ×1 — по умолчанию; ×0 — только паузы самой модели.</string>
     <string name="punct_paragraph_pause_title">Пауза между абзацами</string>

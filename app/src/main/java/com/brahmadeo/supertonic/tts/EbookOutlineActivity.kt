@@ -87,6 +87,8 @@ import kotlin.math.max
 import androidx.core.graphics.createBitmap
 
 class EbookOutlineActivity : ComponentActivity() {
+    private var bookPath: String? = null
+
 
     private lateinit var ebookParser: EbookParser
 
@@ -102,12 +104,18 @@ class EbookOutlineActivity : ComponentActivity() {
         }
 
         val ebookFile = File(ebookPath)
+        bookPath = ebookFile.absolutePath
 
         setContent {
             SupertonicTheme {
                 OutlineScreen(
                     ebookFile = ebookFile,
                     onTextExtracted = { text ->
+                        // a chapter has just started a book session; pages picked by hand
+                        // (PDF) do not continue into the book, so the session ends
+                        if (!com.brahmadeo.supertonic.tts.utils.BookSession.matches(this, text)) {
+                            com.brahmadeo.supertonic.tts.utils.BookSession.clear(this)
+                        }
                         val resultIntent = Intent()
                         resultIntent.putExtra(EXTRA_TEXT, text)
                         setResult(RESULT_OK, resultIntent)
@@ -256,7 +264,26 @@ class EbookOutlineActivity : ComponentActivity() {
                 CoroutineScope(Dispatchers.Main).launch {
                     val result = ebookParser.extractText(publication, link)
                     setExtracting(false)
-                    result.onSuccess { onTextExtracted(it) }
+                    result.onSuccess { text ->
+                        // remember the book and the chapter: the next one follows by itself
+                        val order = publication.readingOrder
+                        val path = link.url().toString().substringBefore('#')
+                        // the TOC and the reading order may spell one file differently
+                        fun sameResource(a: String, b: String) =
+                            a == b || a.endsWith("/$b") || b.endsWith("/$a") ||
+                                a.substringAfterLast('/') == b.substringAfterLast('/')
+                        val index = order.indexOfFirst { sameResource(it.url().toString().substringBefore('#'), path) }
+                        if (index < 0) {
+                            com.brahmadeo.supertonic.tts.utils.BookSession.log(this@EbookOutlineActivity,
+                                "chapter not found in reading order: toc=$path; order=" +
+                                    order.take(5).joinToString { it.url().toString() })
+                        }
+                        val book = bookPath
+                        if (index >= 0 && book != null) {
+                            com.brahmadeo.supertonic.tts.utils.BookSession.start(this@EbookOutlineActivity, book, index, text)
+                        }
+                        onTextExtracted(text)
+                    }
                         .onFailure { Toast.makeText(this@EbookOutlineActivity, it.message, Toast.LENGTH_SHORT).show() }
                 }
             }

@@ -577,6 +577,7 @@ use ort::{
 #[cfg(feature = "xnnpack")]
 use ort::execution_providers::{CPUExecutionProvider, XNNPACKExecutionProvider};
 
+#[derive(Clone)]
 pub struct Style {
     pub ttl: Array3<f32>,
     pub dp: Array3<f32>,

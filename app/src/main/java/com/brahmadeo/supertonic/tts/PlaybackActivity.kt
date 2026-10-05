@@ -84,6 +84,18 @@ class PlaybackActivity : ComponentActivity() {
             }
         }
 
+        override fun onTextChanged() {
+            // the next chapter started by itself: show its text
+            runOnUiThread {
+                val newText = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "") ?: ""
+                if (newText.isNotEmpty() && newText != currentText) {
+                    currentText = newText
+                    setupList(currentText)
+                    currentIndexState.intValue = 0
+                }
+            }
+        }
+
         override fun onExportComplete(success: Boolean, path: String) {
             runOnUiThread {
                 if (!isExportingState.value) return@runOnUiThread
@@ -168,6 +180,21 @@ class PlaybackActivity : ComponentActivity() {
                     onPlayPauseClick = { handlePlayPause() },
                     onStopClick = { handleStop() },
                     onExportClick = { startExport() },
+                    speed = currentSpeed,
+                    onSpeedChange = { v ->
+                        currentSpeed = v
+                        try { playbackService?.setSpeed(v) } catch (e: Exception) { }
+                        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
+                            .putFloat("last_speed", v).putFloat("speed", v).apply()
+                    },
+                    onCharactersClick = {
+                        saveState()
+                        startActivity(android.content.Intent(this@PlaybackActivity, CharactersActivity::class.java))
+                    },
+                    onPrevClick = { if (currentIndexState.intValue > 0) playFromIndex(currentIndexState.intValue - 1) },
+                    onNextClick = {
+                        if (currentIndexState.intValue < sentencesState.value.size - 1) playFromIndex(currentIndexState.intValue + 1)
+                    },
                     onCancelExportClick = {
                         try { playbackService?.stop() } catch (e: Exception) {}
                         if (isExportingState.value) {
@@ -248,7 +275,9 @@ class PlaybackActivity : ComponentActivity() {
         if (currentText.isEmpty()) return
         saveState()
         try {
-            playbackService?.synthesizeAndPlay(currentText, currentLang, currentVoicePath, currentSpeed, currentSteps, 0)
+            // continue where this text was left off (or from the start if it is new / finished)
+            playbackService?.synthesizeAndPlay(currentText, currentLang, currentVoicePath, currentSpeed, currentSteps,
+                com.brahmadeo.supertonic.tts.service.PlaybackService.RESUME_INDEX)
         } catch (e: RemoteException) {
             e.printStackTrace()
         }

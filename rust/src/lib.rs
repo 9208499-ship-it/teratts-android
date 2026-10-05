@@ -31,7 +31,31 @@ mod homo;
 mod stretch;
 mod thermal;
 
-use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech};
+use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech, Style};
+
+/// Parsed voice files, so reading by roles does not re-parse JSON for every piece.
+static STYLE_CACHE: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<String, Style>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn style_cache_key(style_path: &str) -> String {
+    let stamp: Vec<String> = style_path.split(';').take(2).map(|p| {
+        std::fs::metadata(p).and_then(|m| m.modified()).map(|t| format!("{:?}", t)).unwrap_or_default()
+    }).collect();
+    format!("{}|{}", style_path, stamp.join("|"))
+}
+
+fn cached_style(style_path: &str, load: impl FnOnce() -> anyhow::Result<Style>) -> anyhow::Result<Style> {
+    let key = style_cache_key(style_path);
+    if let Ok(cache) = STYLE_CACHE.lock() {
+        if let Some(s) = cache.get(&key) { return Ok(s.clone()); }
+    }
+    let s = load()?;
+    if let Ok(mut cache) = STYLE_CACHE.lock() {
+        if cache.len() >= 48 { cache.clear(); }
+        cache.insert(key, s.clone());
+    }
+    Ok(s)
+}
 use thermal::{UnifiedThermalManager, SocClass};
 
 use std::panic;
@@ -133,7 +157,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
             let p1 = parts[0];
             let p2 = parts[1];
             let alpha = parts[2].parse::<f32>().unwrap_or(0.5);
-            match load_and_mix_voice_styles(p1, p2, alpha) {
+            match cached_style(&style_path, || load_and_mix_voice_styles(p1, p2, alpha)) {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("Failed to mix voice styles: {:?}", e);
@@ -145,7 +169,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
             return env.new_byte_array(0).unwrap().into_raw();
         }
     } else {
-        match load_voice_style(&[style_path], false) {
+        match cached_style(&style_path, || load_voice_style(&[style_path.clone()], false)) {
             Ok(s) => s,
             Err(e) => {
                 log::error!("Failed to load voice style: {:?}", e);

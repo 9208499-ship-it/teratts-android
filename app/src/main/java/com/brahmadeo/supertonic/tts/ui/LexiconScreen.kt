@@ -295,6 +295,7 @@ fun LexiconScreen(
                 )
             }
 
+            item { RolesSection() }
             item { PauseScaleRow() }
             item { ParagraphPauseRow() }
 
@@ -547,6 +548,86 @@ private fun ParagraphPauseRow() {
                 valueRange = 0f..2f,
                 steps = 19
             )
+        }
+    }
+}
+
+/** Reading by roles (built-in reader): switch + voices for male and female lines. */
+@Composable
+private fun RolesSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = com.brahmadeo.supertonic.tts.utils.RolePrefs
+    var enabled by remember { mutableStateOf(prefs.enabled(context)) }
+    var male by remember { mutableStateOf(prefs.maleVoice(context)) }
+    var female by remember { mutableStateOf(prefs.femaleVoice(context)) }
+    var narrator by remember { mutableStateOf(prefs.narratorVoice(context)) }
+    var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
+    val voices = remember { prefs.availableVoices(context) }
+    Column {
+        PunctuationToggleRow(
+            title = stringResource(AppR.string.roles_title),
+            description = stringResource(AppR.string.roles_desc),
+            checked = enabled,
+            onToggle = { enabled = it; prefs.setEnabled(context, it) }
+        )
+        if (enabled) {
+            PunctuationToggleRow(
+                title = stringResource(AppR.string.roles_characters_title),
+                description = stringResource(AppR.string.roles_characters_desc),
+                checked = perCharacter,
+                onToggle = { perCharacter = it; prefs.setCharactersEnabled(context, it) }
+            )
+            RoleVoicePicker(stringResource(AppR.string.roles_narrator), narrator, voices,
+                mainLabel = stringResource(AppR.string.roles_narrator_main)) { narrator = it; prefs.setNarratorVoice(context, it) }
+            RoleVoicePicker(stringResource(AppR.string.roles_male), male, voices) { male = it; prefs.setMaleVoice(context, it) }
+            RoleVoicePicker(stringResource(AppR.string.roles_female), female, voices) { female = it; prefs.setFemaleVoice(context, it) }
+            TextButton(
+                onClick = {
+                    context.startActivity(android.content.Intent(context, com.brahmadeo.supertonic.tts.CharactersActivity::class.java))
+                },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            ) { Text(stringResource(AppR.string.characters_open)) }
+        }
+    }
+}
+
+@Composable
+private fun RoleVoicePicker(
+    label: String,
+    current: String,
+    voices: List<String>,
+    mainLabel: String? = null,   // non-null: offer "" = the main voice
+    onPick: (String) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Box {
+                TextButton(onClick = { open = true }) {
+                    Text(if (current.isEmpty() && mainLabel != null) mainLabel else current.removeSuffix(".json"))
+                }
+                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    if (mainLabel != null) {
+                        DropdownMenuItem(text = { Text(mainLabel) }, onClick = { open = false; onPick("") })
+                    }
+                    for (v in voices) {
+                        DropdownMenuItem(
+                            text = { Text(v.removeSuffix(".json")) },
+                            onClick = { open = false; onPick(v) }
+                        )
+                    }
+                }
+            }
         }
     }
 }

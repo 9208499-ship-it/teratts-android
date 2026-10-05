@@ -4,10 +4,10 @@ import android.util.Log
 import java.util.concurrent.atomic.AtomicReference
 
 object SupertonicTTS {
-    @Volatile
-    private var nativePtr: Long = 0
-    @Volatile
-    private var currentModelPath: String? = null
+    @Volatile private var nativePtr: Long = 0
+    @Volatile private var currentModelPath: String? = null
+    /** Read once at start-up: asking the engine later would wait for its lock (synthesis). */
+    @Volatile private var cachedSampleRate: Int = 44100
 
     init {
         try {
@@ -27,11 +27,12 @@ object SupertonicTTS {
     private external fun setPauseScale(scale: Float)
     private external fun setParagraphPause(seconds: Float)
 
-    @Synchronized
-    fun isInitialized(modelPath: String): Boolean {
-        if (nativePtr == 0L || currentModelPath != modelPath) return false
-        return getSocClass(nativePtr) != -1
-    }
+    /**
+     * No lock: called from the main thread, and the engine lock can be held for
+     * seconds by model loading or a running synthesis ("приложение не отвечает").
+     */
+    fun isInitialized(modelPath: String): Boolean =
+        nativePtr != 0L && currentModelPath == modelPath
 
     /**
      * XNNPACK accelerator switch. With it the heavy ops run in XNNPACK's own
@@ -78,6 +79,7 @@ object SupertonicTTS {
         } catch (e: Exception) { }
         val success = nativePtr != 0L
         if (success) {
+            cachedSampleRate = getSampleRate(nativePtr)
             currentModelPath = modelPath
             Log.i("SupertonicTTS", "Engine initialized successfully (ORT: $ortThreads, XNN: $xnnThreads) with model: $modelPath")
         } else {
@@ -181,11 +183,8 @@ object SupertonicTTS {
         return getSocClass(nativePtr)
     }
 
-    @Synchronized
-    fun getAudioSampleRate(): Int {
-        if (nativePtr == 0L) return 44100
-        return getSampleRate(nativePtr)
-    }
+    /** No lock, for the same reason as isInitialized(). */
+    fun getAudioSampleRate(): Int = if (nativePtr == 0L) 44100 else cachedSampleRate
 
     // True once the engine has run one full synthesize() pass since process
     // start. That first pass is where XNNPACK JITs its kernels for the current

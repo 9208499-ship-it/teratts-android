@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         override fun onExportComplete(success: Boolean, path: String) { }
+        override fun onTextChanged() { }
     }
 
     private val connection = object : ServiceConnection {
@@ -284,8 +285,7 @@ class MainActivity : ComponentActivity() {
                             if (viewModel.selectedVoiceFile.value != it) {
                                 viewModel.selectedVoiceFile.value = it
                                 saveStringPref("selected_voice", it)
-                                val resetIntent = Intent(this, PlaybackService::class.java).apply { action = "RESET_ENGINE" }
-                                startService(resetIntent)
+                                // no engine reload: the voice goes with every phrase, the models stay the same
                             }
                         },
 
@@ -315,6 +315,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
 
+                        onStopClick = { try { playbackService?.stop() } catch (e: Exception) { } },
                         speed = viewModel.currentSpeed.floatValue,
                         onSpeedChange = { viewModel.currentSpeed.floatValue = it },
                         steps = viewModel.currentSteps.intValue,

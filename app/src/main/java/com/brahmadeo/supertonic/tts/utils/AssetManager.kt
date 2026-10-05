@@ -22,6 +22,10 @@ object AssetManager {
     const val MODEL_VERSION = "tera2"
     private const val REVISION = "f05ea799094571a3553904a555df3834fb0b963b"
     private const val BASE_URL = "https://huggingface.co/TeraSpace/TeraTTSv2/resolve/$REVISION"
+    private const val INT8_SAMPLER_URL =
+        "https://github.com/9208499-ship-it/teratts-android/releases/download/models-v1/sampler_distilled_int8.onnx"
+    /** The original fp32 sampler (256 MB) is no longer used once the int8 one is present. */
+    private const val OLD_SAMPLER = "onnx/sampler_distilled_cfg3_8step.onnx"
 
     /** Voices shipped with TeraTTS v2; ru_f1 and ru_m5 are the recommended Russian ones. */
     val VOICES = listOf(
@@ -43,7 +47,8 @@ object AssetManager {
     private val MODEL_FILES = listOf(
         "models/text_encoder.onnx" to "onnx/text_encoder.onnx",
         "models/duration_predictor.onnx" to "onnx/duration_predictor.onnx",
-        "models/sampler_distilled_cfg3_8step.onnx" to "onnx/sampler_distilled_cfg3_8step.onnx",
+        // int8 sampler built from TeraTTSv2 by tools/quantize_tera2.py, hosted with the app's releases
+        "$INT8_SAMPLER_URL" to "onnx/sampler_distilled_int8.onnx",
         "models/vocoder.onnx" to "onnx/vocoder.onnx",
         "unicode_indexer.json" to "onnx/unicode_indexer.json"
     )
@@ -55,7 +60,18 @@ object AssetManager {
     fun isReady(context: Context): Boolean {
         val baseDir = File(context.filesDir, MODEL_VERSION)
         if (!baseDir.exists()) return false
-        return localTargets().all { File(baseDir, it).exists() }
+        val ready = localTargets().all { File(baseDir, it).exists() }
+        if (ready) removeOldSampler(context)
+        return ready
+    }
+
+    /** Free 256 MB: delete the fp32 sampler once the int8 one is in place. */
+    private fun removeOldSampler(context: Context) {
+        val baseDir = File(context.filesDir, MODEL_VERSION)
+        val old = File(baseDir, OLD_SAMPLER)
+        if (old.exists() && File(baseDir, "onnx/sampler_distilled_int8.onnx").exists()) {
+            if (old.delete()) Log.i(TAG, "Removed the fp32 sampler (int8 in use)")
+        }
     }
 
     suspend fun download(context: Context, onProgress: (String, Float) -> Unit) {
@@ -68,8 +84,9 @@ object AssetManager {
             for ((remote, local) in MODEL_FILES) {
                 val target = File(baseDir, local)
                 onProgress("Downloading ${target.name}...", step++ / total)
-                if (!target.exists()) fetch("$BASE_URL/$remote", target)
+                if (!target.exists()) fetch(if (remote.startsWith("https://")) remote else "$BASE_URL/$remote", target)
             }
+            removeOldSampler(context)
 
             // Voice styles: two small .npy files per voice → one Supertonic-style JSON.
             for (voice in VOICES) {

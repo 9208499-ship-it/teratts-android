@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.MoreVert
@@ -87,7 +88,8 @@ fun MainScreen(
     miniPlayerTitle: String,
     miniPlayerIsPlaying: Boolean,
     onMiniPlayerClick: () -> Unit,
-    onMiniPlayerPlayPauseClick: () -> Unit
+    onMiniPlayerPlayPauseClick: () -> Unit,
+    onStopClick: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
@@ -164,6 +166,26 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // While something is playing: Stop and Pause/Continue right next to "Synthesize"
+                if (showMiniPlayer) {
+                    SmallFloatingActionButton(
+                        onClick = onStopClick,
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ) {
+                        Icon(Icons.Default.Stop, contentDescription = stringResource(AppR.string.stop_button))
+                    }
+                    SmallFloatingActionButton(
+                        onClick = onMiniPlayerPlayPauseClick,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ) {
+                        Icon(
+                            if (miniPlayerIsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (miniPlayerIsPlaying) "Pause" else "Play"
+                        )
+                    }
+                }
                 if (canResume && !isLoading) {
                     val resumeContentDesc = stringResource(AppR.string.resume_content_description)
                     SmallFloatingActionButton(
@@ -331,8 +353,8 @@ fun MainScreen(
                             label = stringResource(AppR.string.speed_label),
                             value = speed,
                             onValueChange = onSpeedChange,
-                            valueRange = 0.9f..1.5f,
-                            steps = 11,
+                            valueRange = 0.5f..2.5f,
+                            steps = 19,
                             displayValue = String.format(Locale.US, "%.2fx", speed),
                             leadingIcon = Icons.Default.Speed
                         )

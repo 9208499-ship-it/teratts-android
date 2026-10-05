@@ -77,6 +77,10 @@
             android:parentActivityName=".MainActivity"
             android:label="Saved Audio" />
 
+        <activity android:name=".CharactersActivity"
+            android:parentActivityName=".PlaybackActivity"
+            android:exported="false" />
+
         <activity android:name=".LexiconActivity"
             android:parentActivityName=".MainActivity"
             android:label="Pronunciation Dictionary" />

@@ -27,7 +27,9 @@ pub const GUIDANCE: f32 = 3.0;
 /// The model was trained on ≤25 s utterances; ~200 chars keeps well inside.
 pub const MAX_CHUNK_CHARS: usize = 200;
 
-pub const SAMPLER_FILE: &str = "sampler_distilled_cfg3_8step.onnx";
+/// int8 sampler: the Loop unrolled, 1x1 Conv1d -> MatMul, MatMul quantized to int8
+/// (tools/tera_graph_tools.py). ~3.5x faster on ARM with i8mm, 256 MB -> 72 MB.
+pub const SAMPLER_FILE: &str = "sampler_distilled_int8.onnx";
 
 /// Parenthetical asides ("(как будто фамилия должна была что-то сказать)") are
 /// voiced as their own phrase: a pause around them, slightly faster and quieter.
