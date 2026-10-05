@@ -185,6 +185,10 @@
     <string name="characters_lines_fmt">lines: %1$d</string>
     <string name="characters_merge">Merge</string>
     <string name="characters_voice">Voice</string>
+    <string name="roles_unknown">Unknown speaker</string>
+    <string name="roles_unknown_main">as male lines</string>
+    <string name="characters_scope_book">Book: %1$s</string>
+    <string name="characters_scope_global">Not from a book — shared settings</string>
     <string name="roles_title">Reading by roles</string>
     <string name="roles_desc">Built-in reader: author text by the narrator, male and female lines in their own voices. Gender comes from the author words (said, he or she) and from names the book itself reveals.</string>
     <string name="roles_characters_title">A voice for every character</string>

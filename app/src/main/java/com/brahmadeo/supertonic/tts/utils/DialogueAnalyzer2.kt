@@ -52,7 +52,8 @@ object DialogueAnalyzer2 {
 
     /** Content of a bare «…» message that reads like a system report rather than the hero's thought. */
     private val systemContent = Regex(
-        """(?i)\b(подключен|инсталлирован|вероятност|опци|операци|выполнено|принято|завершен|""" +
+        // (?<![а-яё]) instead of \b: Java's \b does not see Cyrillic letters as word characters
+        """(?i)(?<![а-яё])(подключен|инсталлирован|вероятност|опци|операци|выполнено|принято|завершен|""" +
             """уровень|модул|параметр|загрузк|доступ|обнаружен|активирован|установлен|ошибк|предупреждени)|%"""
     )
     private val firstPersonThought = Regex("""(?i)(^|[^а-яё])(я|мне|меня|мой|моя|моё|мои|мы|нам|нас)([^а-яё]|$)""")
@@ -148,6 +149,7 @@ object DialogueAnalyzer2 {
         val lineCount = HashMap<String, Int>()
         val mannerCount = HashMap<String, IntArray>()  // per speaker, by Manner.ordinal
         var pendingQuoteSpeaker: String? = null        // set by "В голове прозвучало:" for the next «…»
+        var pendingFromIntro = false                   // true only for an introduction ending with ":"
 
         for (p in parsed) {
             if (p.speech.isEmpty()) {
@@ -158,6 +160,7 @@ object DialogueAnalyzer2 {
                 }
                 // "В голове прозвучало:" / "Раздался голос 896‑го:" → who speaks in the next «…»
                 pendingQuoteSpeaker = introSpeaker(text.substring(p.start, p.end))
+                pendingFromIntro = pendingQuoteSpeaker != null
                 if (p.end - p.start > 300) run.clear()
                 out.addAll(p.spans(null, null, Manner.NORMAL))
                 continue
@@ -179,19 +182,21 @@ object DialogueAnalyzer2 {
                 if (speaker == null && authors.isEmpty()) {
                     val body = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
                     speaker = when {
-                        firstPersonThought.containsMatchIn(body) -> null      // the hero thinking: narrator
+                        firstPersonThought.containsMatchIn(body) -> HERO      // the hero thinking: narrator's voice
                         pendingQuoteSpeaker != null -> pendingQuoteSpeaker     // a run of messages
                         systemContent.containsMatchIn(body) -> SYSTEM
                         else -> null
                     }
                 }
                 pendingQuoteSpeaker = if (authors.isEmpty()) speaker else null
+                pendingFromIntro = false   // a run of «…» messages does not carry over to dash lines
                 gender = if (speaker == SYSTEM) G.F else h?.verbGender ?: genderOf(speaker)
-            } else if (authors.isEmpty() && pendingQuoteSpeaker != null) {
+            } else if (authors.isEmpty() && pendingQuoteSpeaker != null && pendingFromIntro) {
                 // "Раздался голос 896‑го:" followed by a dash line
                 speaker = pendingQuoteSpeaker
                 gender = genderOf(speaker)
                 pendingQuoteSpeaker = null
+                pendingFromIntro = false
             } else if (h != null) {
                 when {
                     h.hero -> { speaker = HERO; gender = h.verbGender }
@@ -516,21 +521,25 @@ object DialogueAnalyzer2 {
         return Parsed(pStart, end, pieces)
     }
 
+    /** Opening quote → its closing pair: «ёлочки», „лапки“, “English”, "straight". */
+    private val quotePairs = mapOf('«' to '»', '„' to '“', '“' to '”', '"' to '"')
+
     private fun parseQuotes(text: String, start: Int, end: Int): Parsed {
         val pieces = ArrayList<Triple<Int, Int, Boolean>>()
         var pos = start
         var i = start
         while (i < end) {
-            if (text[i] == '«') {
-                val close = text.indexOf('»', i + 1).let { if (it < 0 || it > end) -1 else it }
-                if (close < 0) break
+            val close = quotePairs[text[i]]
+            if (close != null) {
+                val at = text.indexOf(close, i + 1).let { if (it < 0 || it >= end) -1 else it }
+                if (at < 0) break
                 val before = text.substring(start, i).trimEnd()
                 if (before.isEmpty() || before.endsWith(":")) {
                     if (i > pos) pieces.add(Triple(pos, i, false))
-                    pieces.add(Triple(i, close + 1, true))
-                    pos = close + 1
+                    pieces.add(Triple(i, at + 1, true))
+                    pos = at + 1
                 }
-                i = close + 1
+                i = at + 1
                 continue
             }
             i++

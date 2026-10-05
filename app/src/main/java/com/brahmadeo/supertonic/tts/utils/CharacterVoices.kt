@@ -3,13 +3,24 @@ package com.brahmadeo.supertonic.tts.utils
 import android.content.Context
 
 /**
- * A voice for every character, assigned once and remembered (by name), so that
- * Пётр sounds the same in every chapter. Main characters (most lines) pick first;
- * Russian voices before Supertonic ones, English-recorded voices last (accent);
- * whispers and the narrator's voice are not handed out automatically.
+ * Voices, paces and merges of characters, kept PER BOOK ([scope] = the book's file
+ * name, see BookSession.scopeFor; "" = text not from a book). A voice is assigned
+ * once and remembered, so Пётр sounds the same in every chapter — and a Пётр in
+ * another book gets his own. Main characters (most lines) pick first; Russian
+ * voices before Supertonic ones, English-recorded voices last (accent); whispers
+ * and the narrator's voice are not handed out automatically.
  */
 object CharacterVoices {
+    const val GLOBAL = ""
     private const val PREFS = "TeraCharacterVoices"
+    private const val ALIASES = "TeraCharacterAliases"
+    private const val SPEEDS = "TeraCharacterSpeeds"
+
+    private fun name(base: String, scope: String) =
+        if (scope.isEmpty()) base else base + "@" + Integer.toHexString(scope.hashCode())
+
+    private fun prefs(context: Context, base: String, scope: String) =
+        context.getSharedPreferences(name(base, scope), Context.MODE_PRIVATE)
 
     private fun isMale(v: String) = Regex("""(^|_)m\d""").containsMatchIn(v) || v.startsWith("st3_M")
     private fun isFemale(v: String) = Regex("""(^|_)f\d""").containsMatchIn(v) || v.startsWith("st3_F")
@@ -22,10 +33,10 @@ object CharacterVoices {
     /** Voice file for [name] (assigning a free one the first time), or null if the gender is unknown. */
     fun voiceFor(
         context: Context, name: String, role: DialogueAnalyzer2.Role, available: List<String>,
-        genderDefault: String, narrator: String
+        genderDefault: String, narrator: String, scope: String = GLOBAL
     ): String? {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.getString(name, null)?.let { if (it in available) return it }
+        val p = prefs(context, PREFS, scope)
+        p.getString(name, null)?.let { if (it in available) return it }
         val pool = available.filter {
             when (role) {
                 DialogueAnalyzer2.Role.MALE -> isMale(it)
@@ -35,48 +46,44 @@ object CharacterVoices {
         }.sortedWith(compareBy({ rank(it) }, { it }))
         if (pool.isEmpty()) return null
         val ordered = (listOf(genderDefault).filter { it in pool } + pool).distinct()
-        val used = prefs.all.values.filterIsInstance<String>().toSet()
+        val used = p.all.values.filterIsInstance<String>().toSet()
         val pick = ordered.firstOrNull { it !in used } ?: ordered[Math.floorMod(name.hashCode(), ordered.size)]
-        prefs.edit().putString(name, pick).apply()
+        p.edit().putString(name, pick).apply()
         return pick
     }
 
-    private const val ALIASES = "TeraCharacterAliases"
-    private const val SPEEDS = "TeraCharacterSpeeds"
-
     /** The voice set for [name] (by hand or assigned earlier), or null for "automatic". */
-    fun explicit(context: Context, name: String): String? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(name, null)
+    fun explicit(context: Context, name: String, scope: String = GLOBAL): String? =
+        prefs(context, PREFS, scope).getString(name, null)
+
+    fun set(context: Context, name: String, voice: String, scope: String = GLOBAL) =
+        prefs(context, PREFS, scope).edit().putString(name, voice).apply()
 
     /** Back to automatic (for the hero: back to the narrator's voice). */
-    fun clear(context: Context, name: String) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(name).apply()
+    fun clear(context: Context, name: String, scope: String = GLOBAL) =
+        prefs(context, PREFS, scope).edit().remove(name).apply()
 
     /** Merges made by the user: "искин" → "896‑й". */
-    fun aliases(context: Context): Map<String, String> =
-        context.getSharedPreferences(ALIASES, Context.MODE_PRIVATE).all
-            .mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+    fun aliases(context: Context, scope: String = GLOBAL): Map<String, String> =
+        prefs(context, ALIASES, scope).all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
 
-    fun merge(context: Context, from: String, into: String) {
+    fun merge(context: Context, from: String, into: String, scope: String = GLOBAL) {
         if (from == into) return
-        context.getSharedPreferences(ALIASES, Context.MODE_PRIVATE).edit().putString(from, into).apply()
+        prefs(context, ALIASES, scope).edit().putString(from, into).apply()
     }
 
-    fun unmerge(context: Context, from: String) =
-        context.getSharedPreferences(ALIASES, Context.MODE_PRIVATE).edit().remove(from).apply()
+    fun unmerge(context: Context, from: String, scope: String = GLOBAL) =
+        prefs(context, ALIASES, scope).edit().remove(from).apply()
 
     /** Pace set by hand (×0.7…×1.3), or null for the one worked out from the text. */
-    fun speedOverride(context: Context, name: String): Float? {
-        val p = context.getSharedPreferences(SPEEDS, Context.MODE_PRIVATE)
+    fun speedOverride(context: Context, name: String, scope: String = GLOBAL): Float? {
+        val p = prefs(context, SPEEDS, scope)
         return if (p.contains(name)) p.getFloat(name, 1f) else null
     }
 
-    fun setSpeed(context: Context, name: String, speed: Float) =
-        context.getSharedPreferences(SPEEDS, Context.MODE_PRIVATE).edit().putFloat(name, speed).apply()
+    fun setSpeed(context: Context, name: String, speed: Float, scope: String = GLOBAL) =
+        prefs(context, SPEEDS, scope).edit().putFloat(name, speed).apply()
 
-    fun set(context: Context, name: String, voice: String) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(name, voice).apply()
-
-    fun all(context: Context): Map<String, String> =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+    fun all(context: Context, scope: String = GLOBAL): Map<String, String> =
+        prefs(context, PREFS, scope).all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
 }

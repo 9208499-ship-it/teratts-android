@@ -561,6 +561,7 @@ private fun RolesSection() {
     var male by remember { mutableStateOf(prefs.maleVoice(context)) }
     var female by remember { mutableStateOf(prefs.femaleVoice(context)) }
     var narrator by remember { mutableStateOf(prefs.narratorVoice(context)) }
+    var unknown by remember { mutableStateOf(prefs.unknownVoice(context)) }
     var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
     val voices = remember { prefs.availableVoices(context) }
     Column {
@@ -581,6 +582,8 @@ private fun RolesSection() {
                 mainLabel = stringResource(AppR.string.roles_narrator_main)) { narrator = it; prefs.setNarratorVoice(context, it) }
             RoleVoicePicker(stringResource(AppR.string.roles_male), male, voices) { male = it; prefs.setMaleVoice(context, it) }
             RoleVoicePicker(stringResource(AppR.string.roles_female), female, voices) { female = it; prefs.setFemaleVoice(context, it) }
+            RoleVoicePicker(stringResource(AppR.string.roles_unknown), unknown, voices,
+                mainLabel = stringResource(AppR.string.roles_unknown_main)) { unknown = it; prefs.setUnknownVoice(context, it) }
             TextButton(
                 onClick = {
                     context.startActivity(android.content.Intent(context, com.brahmadeo.supertonic.tts.CharactersActivity::class.java))

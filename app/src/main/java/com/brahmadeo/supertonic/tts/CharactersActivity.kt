@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.brahmadeo.supertonic.tts.ui.theme.SupertonicTheme
+import com.brahmadeo.supertonic.tts.utils.BookSession
 import com.brahmadeo.supertonic.tts.utils.CharacterVoices
 import com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2
 import com.brahmadeo.supertonic.tts.utils.RolePrefs
@@ -71,13 +72,15 @@ class CharactersActivity : ComponentActivity() {
 @Composable
 private fun CharactersScreen(text: String, onBack: () -> Unit) {
     val context = LocalContext.current
+    // settings are kept per book: the book of the text open in the reader ("" = not a book)
+    val scope = remember(text) { BookSession.scopeFor(context, text) }
     var version by remember { mutableIntStateOf(0) }          // bumped after a merge → re-analyse
     var characters by remember { mutableStateOf<List<DialogueAnalyzer2.Character>?>(null) }
-    var aliases by remember { mutableStateOf(CharacterVoices.aliases(context)) }
+    var aliases by remember { mutableStateOf(CharacterVoices.aliases(context, scope)) }
     val voices = remember { RolePrefs.availableVoices(context) }
 
     LaunchedEffect(version) {
-        aliases = CharacterVoices.aliases(context)
+        aliases = CharacterVoices.aliases(context, scope)
         characters = withContext(Dispatchers.Default) {
             if (text.isBlank()) emptyList()
             else DialogueAnalyzer2.applyAliases(DialogueAnalyzer2.analyze(text), aliases).characters
@@ -111,13 +114,20 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
             ) {
                 item {
                     Text(
+                        if (scope.isEmpty()) stringResource(AppR.string.characters_scope_global)
+                        else stringResource(AppR.string.characters_scope_book, scope),
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                }
+                item {
+                    Text(
                         stringResource(AppR.string.characters_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 items(list, key = { it.name }) { c ->
-                    CharacterCard(c, list, voices, onMerged = { version++ })
+                    CharacterCard(c, list, voices, scope, onMerged = { version++ })
                 }
                 if (aliases.isNotEmpty()) {
                     item {
@@ -130,7 +140,7 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
                     items(aliases.entries.toList(), key = { "alias:" + it.key }) { (from, into) ->
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                             Text("$from → $into", modifier = Modifier.weight(1f))
-                            TextButton(onClick = { CharacterVoices.unmerge(context, from); version++ }) {
+                            TextButton(onClick = { CharacterVoices.unmerge(context, from, scope); version++ }) {
                                 Text(stringResource(AppR.string.characters_unmerge))
                             }
                         }
@@ -146,12 +156,13 @@ private fun CharacterCard(
     c: DialogueAnalyzer2.Character,
     all: List<DialogueAnalyzer2.Character>,
     voices: List<String>,
+    scope: String,
     onMerged: () -> Unit
 ) {
     val context = LocalContext.current
     val isHero = c.name == DialogueAnalyzer2.HERO
-    var voice by remember(c.name) { mutableStateOf(CharacterVoices.explicit(context, c.name)) }
-    var speed by remember(c.name) { mutableFloatStateOf(CharacterVoices.speedOverride(context, c.name) ?: c.speed) }
+    var voice by remember(c.name) { mutableStateOf(CharacterVoices.explicit(context, c.name, scope)) }
+    var speed by remember(c.name) { mutableFloatStateOf(CharacterVoices.speedOverride(context, c.name, scope) ?: c.speed) }
     var voiceMenu by remember { mutableStateOf(false) }
     var mergeMenu by remember { mutableStateOf(false) }
 
@@ -181,7 +192,7 @@ private fun CharacterCard(
                         for (o in all) if (o.name != c.name) {
                             DropdownMenuItem(
                                 text = { Text(if (o.name == DialogueAnalyzer2.HERO) stringResource(AppR.string.characters_hero) else o.name) },
-                                onClick = { mergeMenu = false; CharacterVoices.merge(context, c.name, o.name); onMerged() }
+                                onClick = { mergeMenu = false; CharacterVoices.merge(context, c.name, o.name, scope); onMerged() }
                             )
                         }
                     }
@@ -194,12 +205,12 @@ private fun CharacterCard(
                     DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
                         DropdownMenuItem(
                             text = { Text(defaultLabel) },
-                            onClick = { voiceMenu = false; voice = null; CharacterVoices.clear(context, c.name) }
+                            onClick = { voiceMenu = false; voice = null; CharacterVoices.clear(context, c.name, scope) }
                         )
                         for (v in voices) {
                             DropdownMenuItem(
                                 text = { Text(v.removeSuffix(".json")) },
-                                onClick = { voiceMenu = false; voice = v; CharacterVoices.set(context, c.name, v) }
+                                onClick = { voiceMenu = false; voice = v; CharacterVoices.set(context, c.name, v, scope) }
                             )
                         }
                     }
@@ -215,7 +226,7 @@ private fun CharacterCard(
                 Slider(
                     value = speed,
                     onValueChange = { speed = Math.round(it * 20f) / 20f },
-                    onValueChangeFinished = { CharacterVoices.setSpeed(context, c.name, speed) },
+                    onValueChangeFinished = { CharacterVoices.setSpeed(context, c.name, speed, scope) },
                     valueRange = 0.7f..1.3f,
                     steps = 11,
                     modifier = Modifier.weight(1f)

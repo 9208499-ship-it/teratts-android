@@ -197,6 +197,10 @@
     <string name="characters_lines_fmt">реплик: %1$d</string>
     <string name="characters_merge">Объединить</string>
     <string name="characters_voice">Голос</string>
+    <string name="roles_unknown">Неопознанные реплики</string>
+    <string name="roles_unknown_main">как мужские</string>
+    <string name="characters_scope_book">Книга: %1$s</string>
+    <string name="characters_scope_global">Текст не из книги — общие настройки</string>
     <string name="roles_title">Чтение по ролям</string>
     <string name="roles_desc">Встроенная читалка: авторский текст — голосом рассказчика, реплики мужчин и женщин — своими голосами. Пол определяется по авторским словам («сказал / сказала», «он / она») и по именам, которые книга сама подсказывает.</string>
     <string name="roles_characters_title">Свой голос каждому персонажу</string>

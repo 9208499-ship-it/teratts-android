@@ -11,6 +11,14 @@ object RolePrefs {
     private const val KEY_FEMALE = "roles_female_voice"
     private const val KEY_NARRATOR = "roles_narrator_voice"
     private const val KEY_CHARACTERS = "roles_per_character"
+    private const val KEY_UNKNOWN = "roles_unknown_voice"
+
+    /** Voice for lines whose speaker is not known; "" = the male lines' voice. Never the narrator. */
+    fun unknownVoice(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_UNKNOWN, "") ?: ""
+
+    fun setUnknownVoice(context: Context, file: String) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_UNKNOWN, file).apply()
 
     /** Each character gets their own voice (default on); off = voices by gender only. */
     fun charactersEnabled(context: Context): Boolean =

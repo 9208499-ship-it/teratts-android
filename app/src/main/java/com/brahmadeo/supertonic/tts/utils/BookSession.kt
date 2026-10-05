@@ -36,6 +36,14 @@ object BookSession {
         log(context, "start: chapter $index of $path, ${chapterText.length} chars, begins «${chapterText.trim().take(40)}»")
     }
 
+    /** The book [text] belongs to (its file name) — character settings are kept per book; "" = not a book. */
+    fun scopeFor(context: Context, text: String): String {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefix = p.getString(KEY_PREFIX, null)
+        val path = p.getString(KEY_PATH, null) ?: return ""
+        return if (!prefix.isNullOrEmpty() && text.trim().startsWith(prefix)) File(path).name else ""
+    }
+
     fun clear(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
 
