@@ -34,76 +34,22 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
     }
 
     companion object {
-        const val VOLUME_BOOST_FACTOR = 2.5f
+        // TeraTTS outputs full-scale speech; the 2.5× boost tuned for Supertonic clipped it
+        const val VOLUME_BOOST_FACTOR = 1.0f
+        /** First chunk of every utterance is cut near this length (see fastStart). */
+        const val FAST_START_CHARS = 70
 
         // ISO-639-2/3 language codes Android may pass us → our internal 2-letter Supertonic codes.
         private val LANG_PREFIX_MAP: Map<String, String> = mapOf(
-            "en" to "en", "eng" to "en",
-            "ko" to "ko", "kor" to "ko",
-            "ja" to "ja", "jpn" to "ja",
-            "ar" to "ar", "ara" to "ar",
-            "bg" to "bg", "bul" to "bg",
-            "cs" to "cs", "ces" to "cs", "cze" to "cs",
-            "da" to "da", "dan" to "da",
-            "de" to "de", "deu" to "de", "ger" to "de",
-            "el" to "el", "ell" to "el", "gre" to "el",
-            "es" to "es", "spa" to "es",
-            "et" to "et", "est" to "et",
-            "fi" to "fi", "fin" to "fi",
-            "fr" to "fr", "fra" to "fr", "fre" to "fr",
-            "hi" to "hi", "hin" to "hi",
-            "hr" to "hr", "hrv" to "hr",
-            "hu" to "hu", "hun" to "hu",
-            "id" to "id", "ind" to "id",
-            "it" to "it", "ita" to "it",
-            "lt" to "lt", "lit" to "lt",
-            "lv" to "lv", "lav" to "lv",
-            "nl" to "nl", "nld" to "nl", "dut" to "nl",
-            "pl" to "pl", "pol" to "pl",
-            "pt" to "pt", "por" to "pt",
-            "ro" to "ro", "ron" to "ro", "rum" to "ro",
+            // TeraTTS v2 speaks Russian and English only
             "ru" to "ru", "rus" to "ru",
-            "sk" to "sk", "slk" to "sk", "slo" to "sk",
-            "sl" to "sl", "slv" to "sl",
-            "sv" to "sv", "swe" to "sv",
-            "tr" to "tr", "tur" to "tr",
-            "uk" to "uk", "ukr" to "uk",
-            "vi" to "vi", "vie" to "vi"
+            "en" to "en", "eng" to "en"
         )
 
         // Reverse map: our 2-letter codes → preferred ISO-639-3 form to advertise to Android (with country).
         private val ANDROID_LOCALE_TRIPLES: List<Triple<String, String, String>> = listOf(
-            Triple("en", "eng", "USA"),
-            Triple("ko", "kor", "KOR"),
-            Triple("ja", "jpn", "JPN"),
-            Triple("ar", "ara", "ARA"),
-            Triple("bg", "bul", "BGR"),
-            Triple("cs", "ces", "CZE"),
-            Triple("da", "dan", "DNK"),
-            Triple("de", "deu", "DEU"),
-            Triple("el", "ell", "GRC"),
-            Triple("es", "spa", "ESP"),
-            Triple("et", "est", "EST"),
-            Triple("fi", "fin", "FIN"),
-            Triple("fr", "fra", "FRA"),
-            Triple("hi", "hin", "IND"),
-            Triple("hr", "hrv", "HRV"),
-            Triple("hu", "hun", "HUN"),
-            Triple("id", "ind", "IDN"),
-            Triple("it", "ita", "ITA"),
-            Triple("lt", "lit", "LTU"),
-            Triple("lv", "lav", "LVA"),
-            Triple("nl", "nld", "NLD"),
-            Triple("pl", "pol", "POL"),
-            Triple("pt", "por", "PRT"),
-            Triple("ro", "ron", "ROU"),
-            Triple("ru", "rus", "RUS"),
-            Triple("sk", "slk", "SVK"),
-            Triple("sl", "slv", "SVN"),
-            Triple("sv", "swe", "SWE"),
-            Triple("tr", "tur", "TUR"),
-            Triple("uk", "ukr", "UKR"),
-            Triple("vi", "vie", "VNM")
+            Triple("ru", "rus", "RUS"),  // first = fallback
+            Triple("en", "eng", "USA")
         )
     }
 
@@ -118,11 +64,12 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         initJob = serviceScope.launch(Dispatchers.IO) {
             val modelPath = File(filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
+            com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             SupertonicTTS.initialize(modelPath, libPath)
             // Prewarm (see PlaybackService for rationale). Idempotent — if
             // PlaybackService was up first and warmed, this is a no-op.
             val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-            val voiceFile = prefs.getString("selected_voice", "F3.json") ?: "F3.json"
+            val voiceFile = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
             val stylePath = File(filesDir,
                 "${AssetManager.MODEL_VERSION}/voice_styles/$voiceFile").absolutePath
             SupertonicTTS.prewarm(stylePath)
@@ -148,9 +95,9 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
     override fun onGetLanguage(): Array<String> {
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-        val selectedLang = prefs.getString("selected_lang", "en") ?: "en"
+        val selectedLang = prefs.getString("selected_lang", "ru") ?: "ru"
         val triple = ANDROID_LOCALE_TRIPLES.find { it.first == selectedLang }
-            ?: ANDROID_LOCALE_TRIPLES.first() // fall back to English
+            ?: ANDROID_LOCALE_TRIPLES.first() // fall back to Russian
         return arrayOf(triple.second, triple.third, "")
     }
 
@@ -168,7 +115,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
     override fun onGetDefaultVoiceNameFor(lang: String?, country: String?, variant: String?): String {
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-        val selected = prefs.getString("selected_voice", "F3.json") ?: "F3.json"
+        val selected = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
         val voiceName = if (selected.endsWith(".json")) selected.substringBeforeLast(".") else selected
         val prefix = normalizeLanguage(lang)
         return "$prefix-supertonic-$voiceName"
@@ -176,7 +123,11 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
     override fun onGetVoices(): List<Voice> {
         val voicesList = mutableListOf<Voice>()
-        val voiceNames = listOf("M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5")
+        // built-in voices first, then anything else in the voice folder (custom voices like my_voice.json)
+        val styleDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
+        val onDisk = styleDir.listFiles { _, n -> n.endsWith(".json") }
+            ?.map { it.name.removeSuffix(".json") }?.sorted() ?: emptyList()
+        val voiceNames = (AssetManager.VOICES + AssetManager.SUPERTONIC_VOICES.map { "st3_$it" } + onDisk).distinct()
         if (!AssetManager.isReady(this)) return voicesList
 
         ANDROID_LOCALE_TRIPLES.forEach { (twoLetter, _, _) ->
@@ -202,9 +153,9 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
     }
 
     private fun normalizeLanguage(lang: String?): String {
-        if (lang == null) return "en"
+        if (lang == null) return "ru"
         val l = lang.lowercase(Locale.ROOT)
-        return LANG_PREFIX_MAP.entries.firstOrNull { l.startsWith(it.key) }?.value ?: "en"
+        return LANG_PREFIX_MAP.entries.firstOrNull { l.startsWith(it.key) }?.value ?: "ru"
     }
 
     /**
@@ -232,8 +183,48 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
     private val textNormalizer = com.brahmadeo.supertonic.tts.utils.TextNormalizer()
 
+    /**
+     * Readers hand the engine the next utterance only when the current one is
+     * almost played out (~0.5 s of audio left in the system queue). A long first
+     * sentence then takes longer than that to synthesize and leaves a gap, so the
+     * first sentence is cut at a comma (or a space) near FAST_START_CHARS: its audio
+     * starts quickly and the rest is synthesized while it plays.
+     */
+    private fun fastStart(sentences: List<String>): List<String> {
+        val first = sentences.firstOrNull() ?: return sentences
+        if (first.length <= FAST_START_CHARS + 20) return sentences
+        val window = first.substring(0, FAST_START_CHARS)
+        var cut = window.indexOfLast { it == ',' || it == ';' || it == ':' || it == '—' }
+        cut = if (cut >= 25) cut + 1 else window.lastIndexOf(' ')
+        if (cut < 25) return sentences
+        val head = first.substring(0, cut).trim()
+        val tail = first.substring(cut).trim()
+        if (head.isEmpty() || tail.isEmpty()) return sentences
+        return listOf(head, tail) + sentences.drop(1)
+    }
+
+    /**
+     * Keeps the CPU running while an utterance is synthesized. With the screen
+     * off the phone may otherwise suspend or slow the CPU between phrases, which
+     * turned into long pauses in readers.
+     */
+    private val synthWakeLock: android.os.PowerManager.WakeLock by lazy {
+        (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "TeraTTS:synthesis")
+            .apply { setReferenceCounted(false) }
+    }
+
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
         if (request == null || callback == null) return
+        synthWakeLock.acquire(2 * 60 * 1000L)
+        try {
+            synthesizeLocked(request, callback)
+        } finally {
+            if (synthWakeLock.isHeld) synthWakeLock.release()
+        }
+    }
+
+    private fun synthesizeLocked(request: SynthesisRequest, callback: SynthesisCallback) {
         SupertonicTTS.setCancelled(false)
         runBlocking {
             withTimeoutOrNull(5000) {
@@ -253,7 +244,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             // Sanitize fileName to prevent path traversal
             File(fileName).name + ".json"
         } else {
-            prefs.getString("selected_voice", "F3.json") ?: "F3.json"
+            prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
         }
 
         val voiceStyleDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
@@ -261,12 +252,12 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
         // Ensure stylePath is within the intended directory
         if (!File(stylePath).canonicalPath.startsWith(voiceStyleDir.canonicalPath)) {
-            stylePath = File(voiceStyleDir, "F3.json").absolutePath
+            stylePath = File(voiceStyleDir, "ru_f1.json").absolutePath
         }
 
         val isMixing = prefs.getBoolean("is_mixing_enabled", false)
         if (isMixing) {
-            val voice2 = prefs.getString("selected_voice_2", "M2.json") ?: "M2.json"
+            val voice2 = prefs.getString("selected_voice_2", "ru_m5.json") ?: "ru_m5.json"
             val stylePath2 = File(voiceStyleDir, voice2).absolutePath
             val alpha = prefs.getFloat("mix_alpha", 0.5f)
             if (File(stylePath).exists() && File(stylePath2).exists()) {
@@ -279,6 +270,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         if (SupertonicTTS.getSoC() == -1) {
             val modelPath = File(filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
+            com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             SupertonicTTS.initialize(modelPath, libPath)
         }
 
@@ -332,7 +324,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
         var success = true
         try {
-            val sentences = textNormalizer.splitIntoSentences(rawText, requestedLang)
+            val sentences = fastStart(textNormalizer.splitIntoSentences(rawText, requestedLang))
             for (sentence in sentences) {
                 if (SupertonicTTS.isCancelled()) { success = false; break }
 

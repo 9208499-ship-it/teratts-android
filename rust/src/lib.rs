@@ -6,12 +6,27 @@ use log::LevelFilter;
 use std::time::Instant;
 
 mod helper;
+mod tera;
+mod homo;
 mod thermal;
 
 use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech};
 use thermal::{UnifiedThermalManager, SocClass};
 
 use std::panic;
+
+/// Transparent below 0.9, then a smooth knee instead of hard clipping
+/// (hard clipping is what makes speech sound metallic and buzzy).
+#[inline]
+fn soft_limit(x: f32) -> f32 {
+    const T: f32 = 0.9;
+    let a = x.abs();
+    if a <= T {
+        x
+    } else {
+        x.signum() * (T + (1.0 - T) * ((a - T) / (1.0 - T)).tanh())
+    }
+}
 
 struct SupertonicEngine {
     tts: TextToSpeech,
@@ -133,8 +148,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
         if let Some(audio) = audio_chunk {
             let mut pcm_data = Vec::with_capacity(audio.len() * 2);
             for &sample in audio {
-                let clamped = (sample * gain).max(-1.0).min(1.0);
-                let val = (clamped * 32767.0) as i16;
+                let val = (soft_limit(sample * gain) * 32767.0) as i16;
                 pcm_data.extend_from_slice(&val.to_le_bytes());
             }
             
@@ -172,8 +186,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
 
             let mut pcm_data = Vec::with_capacity(wav_data.len() * 2);
             for &sample in &wav_data {
-                let clamped = (sample * gain).max(-1.0).min(1.0);
-                let val = (clamped * 32767.0) as i16;
+                let val = (soft_limit(sample * gain) * 32767.0) as i16;
                 pcm_data.extend_from_slice(&val.to_le_bytes());
             }
 

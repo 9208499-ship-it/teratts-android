@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Supertonic TTS (Fork)</string>
+    <string name="app_name">TeraTTS</string>
     
     <!-- Main Activity -->
     <string name="default_input_text">Hello world, this is Supertonic TTS on Android. Select a voice and speed below!</string>
@@ -37,11 +37,11 @@
     <string name="play_now">Play Now</string>
     <string name="added_to_queue">Added to queue</string>
 
-    <string name="model_download_title">Download Supertonic 3 Models?</string>
-    <string name="model_download_message">Supertonic 3 supports 31 languages and requires a one-time download (~400MB). Do you want to download it now?</string>
+    <string name="model_download_title">Download TeraTTS models?</string>
+    <string name="model_download_message">TeraTTS speaks Russian and English and needs a one-time download (~390 MB). Download now?</string>
     <string name="model_download_button">Download</string>
     <string name="model_delete_title">Delete TTS Models?</string>
-    <string name="model_delete_message">This will remove all Supertonic 3 models and voice styles to free up space (~400MB). You can download them again later if needed.</string>
+    <string name="model_delete_message">This will remove the TeraTTS models and voices to free up space (~390 MB). You can download them again later.</string>
     <string name="model_deleted_msg">TTS models deleted</string>
 
     <!-- Playback Activity -->
@@ -201,7 +201,7 @@
     <string name="clear_history_msg">Are you sure you want to delete all history items?</string>
     <string name="search_history_placeholder">Search history...</string>
     <string name="action_retry_download">Retry Download</string>
-    <string name="download_intro">Downloading Supertonic 3 TTS models (~400MB). Supports 31 languages — this download happens only once.</string>
+    <string name="download_intro">Downloading TeraTTS models (~390 MB, Russian and English). This happens only once.</string>
     <string name="download_failed">Download Failed</string>
     <string name="download_in_progress">Downloading Models</string>
     <string name="edit_rule_title">Edit Rule</string>

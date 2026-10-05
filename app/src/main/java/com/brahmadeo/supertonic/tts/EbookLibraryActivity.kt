@@ -74,7 +74,7 @@ class EbookLibraryActivity : ComponentActivity() {
             SupertonicTheme {
                 LibraryScreen(
                     onBack = { finish() },
-                    onOpenNew = { ebookPickerLauncher.launch(arrayOf("application/epub+zip", "application/pdf")) },
+                    onOpenNew = { ebookPickerLauncher.launch(arrayOf("*/*")) },
                     onBookClick = { openBook(it.path) }
                 )
             }

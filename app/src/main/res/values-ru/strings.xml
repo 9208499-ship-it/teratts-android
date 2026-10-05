@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Supertonic TTS (Fork)</string>
+    <string name="app_name">TeraTTS</string>
 
     <!-- Main Activity -->
     <string name="default_input_text">Привет, мир. Это Supertonic TTS для Android. Выберите голос и скорость ниже.</string>
@@ -37,11 +37,11 @@
     <string name="play_now">Воспроизвести сейчас</string>
     <string name="added_to_queue">Добавлено в очередь</string>
 
-    <string name="model_download_title">Скачать модели Supertonic 3?</string>
-    <string name="model_download_message">Supertonic 3 поддерживает 31 язык и требует одноразовой загрузки (~400 МБ). Скачать сейчас?</string>
+    <string name="model_download_title">Скачать модели TeraTTS?</string>
+    <string name="model_download_message">TeraTTS говорит по-русски и по-английски, нужна разовая загрузка (~390 МБ). Скачать сейчас?</string>
     <string name="model_download_button">Скачать</string>
     <string name="model_delete_title">Удалить TTS-модели?</string>
-    <string name="model_delete_message">Это удалит все модели Supertonic 3 и стили голосов, чтобы освободить место (~400 МБ). Их можно будет скачать заново позже.</string>
+    <string name="model_delete_message">Это удалит модели и голоса TeraTTS, чтобы освободить место (~390 МБ). Их можно будет скачать заново.</string>
     <string name="model_deleted_msg">TTS-модели удалены</string>
 
     <!-- Playback Activity -->
@@ -213,7 +213,7 @@
     <string name="clear_history_msg">Удалить все записи из истории?</string>
     <string name="search_history_placeholder">Поиск в истории…</string>
     <string name="action_retry_download">Повторить загрузку</string>
-    <string name="download_intro">Загрузка моделей Supertonic 3 (~400 МБ). Поддерживает 31 язык — это разовая загрузка.</string>
+    <string name="download_intro">Загрузка моделей TeraTTS (~390 МБ, русский и английский). Это разовая загрузка.</string>
     <string name="download_failed">Ошибка загрузки</string>
     <string name="download_in_progress">Загрузка моделей</string>
     <string name="edit_rule_title">Изменить правило</string>

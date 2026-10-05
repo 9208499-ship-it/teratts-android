@@ -43,9 +43,9 @@ class MainViewModel : ViewModel() {
     val voiceFiles = mutableStateMapOf<String, String>()
 
     companion object {
-        const val DEFAULT_VOICE = "F3.json"
-        const val DEFAULT_VOICE_2 = "M2.json"
-        const val DEFAULT_LANG = "en"
+        const val DEFAULT_VOICE = "ru_f1.json"
+        const val DEFAULT_VOICE_2 = "ru_m5.json"
+        const val DEFAULT_LANG = "ru"
         const val DEFAULT_SPEED = 1.1f
         const val DEFAULT_STEPS = 3
     }

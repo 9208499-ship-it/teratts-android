@@ -105,7 +105,7 @@
 
         <service android:name=".service.SupertonicTextToSpeechService"
             android:exported="true"
-            android:label="Supertonic TTS"
+            android:label="TeraTTS"
             android:permission="android.permission.BIND_TEXT_TO_SPEECH_SERVICE">
             <intent-filter android:priority="100">
                 <action android:name="android.intent.action.TTS_SERVICE" />

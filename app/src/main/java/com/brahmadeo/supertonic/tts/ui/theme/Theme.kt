@@ -74,7 +74,7 @@ fun SupertonicTheme(
     val context = LocalContext.current
     val effectiveVoiceFile = voiceFile ?: remember(voiceFile) {
         context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
-            .getString("selected_voice", "F3.json")
+            .getString("selected_voice", "ru_f1.json")
     }
 
     val colorScheme = when {

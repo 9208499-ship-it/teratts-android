@@ -114,7 +114,7 @@ class LexiconActivity : ComponentActivity() {
                 }
 
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-                val selectedLang = remember { prefs.getString("selected_lang", "en") ?: "en" }
+                val selectedLang = remember { prefs.getString("selected_lang", "ru") ?: "ru" }
                 val canDownload = remember { AccentDictionaryManager.hasPrebuiltFor(selectedLang) }
 
                 var showProgress by remember { mutableStateOf(false) }
@@ -539,14 +539,14 @@ class LexiconActivity : ComponentActivity() {
         }
 
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-        val selectedLang = prefs.getString("selected_lang", "en") ?: "en"
+        val selectedLang = prefs.getString("selected_lang", "ru") ?: "ru"
 
         if (!AssetManager.isReady(this)) {
             Toast.makeText(this, getString(R.string.assets_not_ready), Toast.LENGTH_LONG).show()
             return
         }
 
-        val voiceFile = prefs.getString("selected_voice", "F3.json") ?: "F3.json"
+        val voiceFile = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
         val stylePath = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles/$voiceFile").absolutePath
         val steps = prefs.getInt("diffusion_steps", 5)
 

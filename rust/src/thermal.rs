@@ -1,3 +1,6 @@
+/// Move synthesis between big/little cores by measured speed (see apply_affinity).
+const ADAPTIVE_AFFINITY: bool = false;
+
 use std::time::{Duration, Instant};
 #[allow(unused_imports)]
 use anyhow::Result;
@@ -380,6 +383,13 @@ impl UnifiedThermalManager {
     }
     
     fn apply_affinity(&self) -> anyhow::Result<()> {
+        // Disabled: a slowdown is not necessarily heat. With the screen off the
+        // phone itself cuts background CPU; moving synthesis to little cores on
+        // top of that ("Efficiency" → "Emergency", ≥120 s) turned it into long
+        // gaps between phrases. The OS already manages thermals.
+        if !ADAPTIVE_AFFINITY {
+            return Ok(());
+        }
         let cores = self.get_cores_for_mode();
         set_cpu_affinity(&cores)?;
         

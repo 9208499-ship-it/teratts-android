@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Supertonic TTS (Fork)</string>
+    <string name="app_name">TeraTTS</string>
     
     <!-- Main Activity -->
     <string name="default_input_text">안녕하세요, 안드로이드용 Supertonic TTS입니다. 아래에서 목소리와 속도를 선택하세요!</string>

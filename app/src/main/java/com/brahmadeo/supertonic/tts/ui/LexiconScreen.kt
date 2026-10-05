@@ -284,23 +284,7 @@ fun LexiconScreen(
                 )
             }
 
-            item {
-                PunctuationToggleRow(
-                    title = stringResource(AppR.string.punct_double_marks_title),
-                    description = stringResource(AppR.string.punct_double_marks_desc),
-                    checked = strengthenIntonation,
-                    onToggle = onDoubleMarksToggle
-                )
-            }
 
-            item {
-                PunctuationToggleRow(
-                    title = stringResource(AppR.string.punct_tight_ellipsis_title),
-                    description = stringResource(AppR.string.punct_tight_ellipsis_desc),
-                    checked = tightEllipsis,
-                    onToggle = onTightEllipsisToggle
-                )
-            }
 
             item {
                 PunctuationToggleRow(
@@ -311,14 +295,6 @@ fun LexiconScreen(
                 )
             }
 
-            item {
-                PunctuationToggleRow(
-                    title = stringResource(AppR.string.punct_force_space_title),
-                    description = stringResource(AppR.string.punct_force_space_desc),
-                    checked = forceSpaceBeforePunctuation,
-                    onToggle = onForceSpaceBeforePunctToggle
-                )
-            }
 
             // ─── Playback section ────────────────────────────────────────
             // Independent of Lexicon/Punctuation — controls how text is

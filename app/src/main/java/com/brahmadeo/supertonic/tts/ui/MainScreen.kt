@@ -285,7 +285,7 @@ fun MainScreen(
                             label = stringResource(AppR.string.voice_style_label),
                             options = voices.keys.toList().sorted(),
                             selectedOption = voices.entries.find { it.value == selectedVoiceFile }?.key ?: "",
-                            onOptionSelected = { name -> onVoiceChange(voices[name] ?: "M1.json") }
+                            onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") }
                         )
 
                         Row(
@@ -306,7 +306,7 @@ fun MainScreen(
                                     label = stringResource(AppR.string.voice_style_2_label),
                                     options = voices.keys.toList().sorted(),
                                     selectedOption = voices.entries.find { it.value == selectedVoiceFile2 }?.key ?: "",
-                                    onOptionSelected = { name -> onVoice2Change(voices[name] ?: "M2.json") }
+                                    onOptionSelected = { name -> onVoice2Change(voices[name] ?: "ru_m5.json") }
                                 )
 
                                 SliderWithLabel(
@@ -335,20 +335,6 @@ fun MainScreen(
                             steps = 11,
                             displayValue = String.format(Locale.US, "%.2fx", speed),
                             leadingIcon = Icons.Default.Speed
-                        )
-
-                        SliderWithLabel(
-                            label = stringResource(AppR.string.quality_label),
-                            value = steps.toFloat(),
-                            onValueChange = { onStepsChange(it.toInt()) },
-                            valueRange = 1f..10f,
-                            steps = 8,
-                            displayValue = "$steps steps"
-                        )
-                        Text(
-                            text = stringResource(AppR.string.quality_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         if (currentLangCode != "en" && currentLangCode != "ko") {

@@ -79,19 +79,26 @@ object EbookManager {
             // Try to get correct extension
             val mimeType = contentResolver.getType(uri)
             val uriString = uri.toString().lowercase()
+            val lowerName = displayName?.lowercase() ?: ""
             val extension = when {
                 mimeType == "application/pdf" -> "pdf"
                 mimeType == "application/epub+zip" -> "epub"
-                displayName?.lowercase()?.endsWith(".pdf") == true -> "pdf"
-                displayName?.lowercase()?.endsWith(".epub") == true -> "epub"
+                lowerName.endsWith(".pdf") -> "pdf"
+                lowerName.endsWith(".epub") -> "epub"
+                lowerName.endsWith(".fb2.zip") -> "fb2.zip"
+                lowerName.endsWith(".fb2") -> "fb2"
+                lowerName.endsWith(".fb3") -> "fb3"
+                lowerName.endsWith(".txt") -> "txt"
+                lowerName.endsWith(".zip") -> "zip"
                 uriString.endsWith(".pdf") || uriString.contains(".pdf?") -> "pdf"
                 uriString.endsWith(".epub") || uriString.contains(".epub?") -> "epub"
+                mimeType == "text/plain" -> "txt"
                 mimeType != null -> MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "epub"
                 else -> "epub"
             }
-            
-            val fileName = "book_${System.currentTimeMillis()}.$extension"
-            val destFile = File(context.filesDir, "ebooks/$fileName")
+
+            val stamp = System.currentTimeMillis()
+            val destFile = File(context.filesDir, "ebooks/book_$stamp.$extension")
             destFile.parentFile?.mkdirs()
 
             contentResolver.openInputStream(uri)?.use { input ->
@@ -99,7 +106,25 @@ object EbookManager {
                     input.copyTo(output)
                 }
             } ?: return null
-            
+
+            // FB2 / FB3 / TXT: convert to EPUB so the Readium reader can open it.
+            val header = destFile.inputStream().use { val b = ByteArray(512); val n = it.read(b); b.copyOf(maxOf(n, 0)) }
+            val format = if (extension == "pdf" || extension == "epub") null
+                         else BookConverter.detectFormat(displayName ?: destFile.name, header)
+            if (format != null) {
+                val epub = File(context.filesDir, "ebooks/book_$stamp.epub")
+                try {
+                    BookConverter.convert(destFile, format, epub)
+                    destFile.delete()
+                    return epub.absolutePath
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    epub.delete()
+                    destFile.delete()
+                    return null
+                }
+            }
+
             return destFile.absolutePath
         } catch (e: Exception) {
             e.printStackTrace()

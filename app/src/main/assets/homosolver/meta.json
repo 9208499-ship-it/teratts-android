@@ -1,0 +1,21 @@
+{
+ "unk_token": "[UNK]",
+ "sep_token": "[SEP]",
+ "pad_token": "[PAD]",
+ "cls_token": "[CLS]",
+ "mask_token": "[MASK]",
+ "unk_id": 1,
+ "cls_id": 2,
+ "sep_id": 3,
+ "pad_id": 0,
+ "homo_start_id": 83828,
+ "homo_end_id": 83829,
+ "never_split": [
+  "[/HOMO]",
+  "[HOMO]"
+ ],
+ "tokenize_chinese_chars": true,
+ "model_max_length": 2048,
+ "window_size": 300,
+ "hidden_size": 312
+}

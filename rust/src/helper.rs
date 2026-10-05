@@ -13,6 +13,8 @@ use unicode_normalization::UnicodeNormalization;
 use hound::{WavWriter, WavSpec, SampleFormat};
 use rand_distr::{Distribution, Normal};
 use regex::Regex;
+use crate::tera;
+use crate::homo::HomoData;
 
 // ============================================================================ 
 // Configuration Structures
@@ -72,6 +74,10 @@ pub struct UnicodeProcessor {
 }
 
 impl UnicodeProcessor {
+    pub fn table(&self) -> &[i64] {
+        &self.indexer
+    }
+
     pub fn new<P: AsRef<Path>>(unicode_indexer_json_path: P) -> Result<Self> {
         let file = File::open(unicode_indexer_json_path)?;
         let reader = BufReader::new(file);
@@ -576,144 +582,206 @@ pub struct Style {
     pub dp: Array3<f32>,
 }
 
+/// silero-stress homograph resolver: BERT encoder + head (ONNX) and its data.
+pub struct HomoRuntime {
+    data: HomoData,
+    enc: Session,
+    head: Session,
+}
+
+impl HomoRuntime {
+    pub fn load(dir: &Path, threads: usize) -> Result<Self> {
+        let data = HomoData::load(dir)?;
+        let enc = create_session(&dir.join("homo_encoder.onnx").to_string_lossy(), false, threads, 0)?;
+        let head = create_session(&dir.join("homo_head.onnx").to_string_lossy(), false, 1, 0)?;
+        Ok(HomoRuntime { data, enc, head })
+    }
+
+    /// Put context-dependent stress on homographs ("замок" → "з+амок"/"зам+ок").
+    pub fn resolve(&mut self, text: &str) -> Result<String> {
+        let candidates = self.data.find(text);
+        if candidates.is_empty() {
+            return Ok(text.to_string());
+        }
+        let mut decided = Vec::with_capacity(candidates.len());
+        for c in candidates {
+            // pinned stress (tera::FIXED_STRESS) wins over the model
+            if crate::tera::is_pinned(&c.word_lower) {
+                continue;
+            }
+            let variant = match c.phrase_choice.clone() {
+                Some(v) => v,
+                None => {
+                    let Some(vars) = self.data.variants(&c.word_lower).cloned() else { continue };
+                    let ids = self.data.encode(&c.raw_mark);
+                    let (Some(st), Some(en)) = (
+                        ids.iter().position(|&x| x == self.data.homo_start_id),
+                        ids.iter().position(|&x| x == self.data.homo_end_id),
+                    ) else { continue };
+                    if en <= st + 1 || vars.is_empty() {
+                        continue;
+                    }
+                    let n = ids.len();
+                    let ids_value = Value::from_array(Array::from_shape_vec((1, n), ids)?)?;
+                    let features = {
+                        let out = self.enc.run(ort::inputs!{ "input_ids" => &ids_value })?;
+                        let (shape, hidden) = out["hidden"].try_extract_tensor::<f32>()?;
+                        let h = shape[2] as usize;
+                        let row = |t: usize| &hidden[t * h..(t + 1) * h];
+                        // [marker embedding ; mean of the word's sub-tokens]
+                        let mut f = Vec::with_capacity(2 * h);
+                        f.extend_from_slice(row(st));
+                        let cnt = (en - st - 1) as f32;
+                        for k in 0..h {
+                            f.push((st + 1..en).map(|t| row(t)[k]).sum::<f32>() / cnt);
+                        }
+                        f
+                    };
+                    let dim = features.len();
+                    let feat_value = Value::from_array(Array::from_shape_vec((1, dim), features)?)?;
+                    let out = self.head.run(ort::inputs!{ "features" => &feat_value })?;
+                    let logit = out["logits"].try_extract_tensor::<f32>()?.1[0];
+                    // torch.round(sigmoid(x)): 1 only when x > 0
+                    vars[((logit > 0.0) as usize).min(vars.len() - 1)].clone()
+                }
+            };
+            decided.push((c, variant));
+        }
+        Ok(HomoData::apply(text, &decided))
+    }
+}
+
 pub struct TextToSpeech {
-    cfgs: Config,
+    homo: Option<HomoRuntime>,
     text_processor: UnicodeProcessor,
     dp_ort: Session,
     text_enc_ort: Session,
-    vector_est_ort: Session,
+    sampler_ort: Session,
     vocoder_ort: Session,
     pub sample_rate: i32,
 }
 
 impl TextToSpeech {
     pub fn new(
-        cfgs: Config,
+        homo: Option<HomoRuntime>,
         text_processor: UnicodeProcessor,
         dp_ort: Session,
         text_enc_ort: Session,
-        vector_est_ort: Session,
+        sampler_ort: Session,
         vocoder_ort: Session,
     ) -> Self {
-        let sample_rate = cfgs.ae.sample_rate;
         TextToSpeech {
-            cfgs,
+            homo,
             text_processor,
             dp_ort,
             text_enc_ort,
-            vector_est_ort,
+            sampler_ort,
             vocoder_ort,
-            sample_rate,
+            sample_rate: tera::SAMPLE_RATE,
         }
     }
 
+    /// One utterance through the TeraTTS graphs (spec: teratts.py `_generate_latent`).
+    /// `_total_step` is ignored: the distilled sampler has its 8-step Euler
+    /// schedule baked in. `speed` > 1 speaks faster (duration_scale = 1/speed).
     fn _infer(
         &mut self,
         text_list: &[String],
         lang_list: &[String],
         style: &Style,
-        total_step: usize,
+        _total_step: usize,
         speed: f32,
     ) -> Result<(Vec<f32>, Vec<f32>)> {
-        let bsz = text_list.len();
+        if text_list.len() != 1 {
+            anyhow::bail!("TeraTTS runtime synthesizes one utterance at a time");
+        }
 
-        // Process text
-        let (text_ids, text_mask) = self.text_processor.call(text_list, lang_list)?;
-        
-        let text_ids_array = {
-            let text_ids_shape = (bsz, text_ids[0].len());
-            let mut flat = Vec::new();
-            for row in &text_ids {
-                flat.extend_from_slice(row);
+        // 0. Homographs by context (overrides a fixed dictionary stress)
+        let lang = lang_list.first().map(String::as_str).unwrap_or("ru").to_string();
+        let mut source = tera::pre_normalize(&text_list[0]);
+        if lang.starts_with("ru") {
+            if let Some(h) = self.homo.as_mut() {
+                match h.resolve(&source) {
+                    Ok(t) => source = t,
+                    Err(e) => log::warn!("homograph pass failed: {e:?}"),
+                }
             }
-            Array::from_shape_vec(text_ids_shape, flat)?
-        };
+        }
 
-        let text_ids_value = Value::from_array(text_ids_array)?;
-        let text_mask_value = Value::from_array(text_mask.clone())?;
+        // 1. Text → token ids (with '+' for the encoder, without for durations)
+        let (ids, dids) = {
+            let table = self.text_processor.table();
+            let Some(model_text) = tera::prepare(&source, &lang, table) else {
+                return Ok((Vec::new(), vec![0.0]));
+            };
+            let dur_text = tera::strip_stress(&model_text);
+            (tera::token_ids(&model_text, table)?, tera::token_ids(&dur_text, table)?)
+        };
+        let (n_ids, n_dids) = (ids.len(), dids.len());
+
+        let ids_value = Value::from_array(Array::from_shape_vec((1, n_ids), ids)?)?;
+        let mask_value = Value::from_array(Array3::<f32>::ones((1, 1, n_ids)))?;
+        let dids_value = Value::from_array(Array::from_shape_vec((1, n_dids), dids)?)?;
+        let dmask_value = Value::from_array(Array3::<f32>::ones((1, 1, n_dids)))?;
+        let style_ttl_value = Value::from_array(style.ttl.clone())?;
         let style_dp_value = Value::from_array(style.dp.clone())?;
 
-        // Predict duration
-        let dp_outputs = self.dp_ort.run(ort::inputs!{
-            "text_ids" => &text_ids_value,
-            "style_dp" => &style_dp_value,
-            "text_mask" => &text_mask_value
-        })?;
-
-        let duration_data = dp_outputs["duration"].try_extract_tensor::<f32>()?;
-        let mut duration: Vec<f32> = duration_data.1.to_vec();
-        
-        // Apply speed factor to duration
-        for dur in duration.iter_mut() {
-            *dur /= speed;
-        }
-
-        // Encode text
-        let style_ttl_value = Value::from_array(style.ttl.clone())?;
-        let text_enc_outputs = self.text_enc_ort.run(ort::inputs!{
-            "text_ids" => &text_ids_value,
+        // 2. Text encoder
+        let enc_outputs = self.text_enc_ort.run(ort::inputs!{
+            "text_ids" => &ids_value,
             "style_ttl" => &style_ttl_value,
-            "text_mask" => &text_mask_value
+            "text_mask" => &mask_value
         })?;
-
-        let text_emb_data = text_enc_outputs["text_emb"].try_extract_tensor::<f32>()?;
-        let text_emb_shape = text_emb_data.0;
+        let (emb_shape, emb_data) = enc_outputs["output"].try_extract_tensor::<f32>()?;
         let text_emb = Array3::from_shape_vec(
-            (text_emb_shape[0] as usize, text_emb_shape[1] as usize, text_emb_shape[2] as usize),
-            text_emb_data.1.to_vec()
+            (emb_shape[0] as usize, emb_shape[1] as usize, emb_shape[2] as usize),
+            emb_data.to_vec(),
         )?;
 
-        // Sample noisy latent
-        let (mut xt, latent_mask) = sample_noisy_latent(
-            &duration,
-            self.sample_rate,
-            self.cfgs.ae.base_chunk_size,
-            self.cfgs.ttl.chunk_compress_factor,
-            self.cfgs.ttl.latent_dim,
-        );
-
-        // Prepare constant arrays
-        let total_step_array = Array::from_elem(bsz, total_step as f32);
-
-        // Denoising loop
-        for step in 0..total_step {
-            let current_step_array = Array::from_elem(bsz, step as f32);
-
-            let xt_value = Value::from_array(xt.clone())?;
-            let text_emb_value = Value::from_array(text_emb.clone())?;
-            let latent_mask_value = Value::from_array(latent_mask.clone())?;
-            let text_mask_value2 = Value::from_array(text_mask.clone())?;
-            let current_step_value = Value::from_array(current_step_array)?;
-            let total_step_value = Value::from_array(total_step_array.clone())?;
-
-            let vector_est_outputs = self.vector_est_ort.run(ort::inputs!{
-                "noisy_latent" => &xt_value,
-                "text_emb" => &text_emb_value,
-                "style_ttl" => &style_ttl_value,
-                "latent_mask" => &latent_mask_value,
-                "text_mask" => &text_mask_value2,
-                "current_step" => &current_step_value,
-                "total_step" => &total_step_value
-            })?;
-
-            let denoised_data = vector_est_outputs["denoised_latent"].try_extract_tensor::<f32>()?;
-            let denoised_shape = denoised_data.0;
-            xt = Array3::from_shape_vec(
-                (denoised_shape[0] as usize, denoised_shape[1] as usize, denoised_shape[2] as usize),
-                denoised_data.1.to_vec()
-            )?;
+        // 3. Duration (seconds)
+        let dp_outputs = self.dp_ort.run(ort::inputs!{
+            "text_ids" => &dids_value,
+            "style_dp" => &style_dp_value,
+            "text_mask" => &dmask_value
+        })?;
+        let raw = dp_outputs["output"].try_extract_tensor::<f32>()?.1[0];
+        let duration = raw / speed.max(0.1) / tera::SPEED;
+        if !duration.is_finite() || duration <= 0.0 {
+            anyhow::bail!("duration predictor returned {raw}");
         }
 
-        // Generate waveform
-        let final_latent_value = Value::from_array(xt)?;
-        let vocoder_outputs = self.vocoder_ort.run(ort::inputs!{
-            "latent" => &final_latent_value
+        // 4. Sampler: N(0,1) noise → latent in one call
+        let frames = tera::latent_len(duration);
+        let normal = Normal::new(0.0f32, 1.0f32).unwrap();
+        let mut rng = rand::thread_rng();
+        let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
+        let noise_value = Value::from_array(noise)?;
+        let emb_value = Value::from_array(text_emb)?;
+        let lmask_value = Value::from_array(Array3::<f32>::ones((1, 1, frames)))?;
+        let guidance_value = Value::from_array(Array::from_elem(1, tera::GUIDANCE))?;
+        let sampler_outputs = self.sampler_ort.run(ort::inputs!{
+            "initial_latent" => &noise_value,
+            "text_emb" => &emb_value,
+            "style_ttl" => &style_ttl_value,
+            "latent_mask" => &lmask_value,
+            "text_mask" => &mask_value,
+            "guidance" => &guidance_value
         })?;
+        let (lat_shape, lat_data) = sampler_outputs["latent"].try_extract_tensor::<f32>()?;
+        let latent = Array3::from_shape_vec(
+            (lat_shape[0] as usize, lat_shape[1] as usize, lat_shape[2] as usize),
+            lat_data.to_vec(),
+        )?;
 
-        let wav_data = vocoder_outputs["wav_tts"].try_extract_tensor::<f32>()?;
-        let wav: Vec<f32> = wav_data.1.to_vec();
+        // 5. Vocoder, trimmed to the predicted duration
+        let latent_value = Value::from_array(latent)?;
+        let vocoder_outputs = self.vocoder_ort.run(ort::inputs!{
+            "latent" => &latent_value
+        })?;
+        let wav_all = vocoder_outputs["output"].try_extract_tensor::<f32>()?.1;
+        let keep = ((duration * tera::SAMPLE_RATE as f32).round() as usize).min(wav_all.len());
 
-        Ok((wav, duration))
+        Ok((wav_all[..keep].to_vec(), vec![duration]))
     }
 
     pub fn call<F>(
@@ -727,45 +795,70 @@ impl TextToSpeech {
         mut callback: F,
     ) -> Result<(Vec<f32>, f32)> 
     where F: FnMut(usize, usize, Option<&[f32]>) -> bool {
-        let max_len = if lang == "ko" { 120 } else { MAX_CHUNK_LENGTH };
-        let chunks = chunk_text(text, Some(max_len));
+        let max_len = tera::MAX_CHUNK_CHARS;
+        // (chunk, is_aside): text in round brackets is voiced as its own phrase
+        let mut chunks: Vec<(String, bool)> = Vec::new();
+        for (segment, aside) in tera::split_asides(text) {
+            for c in chunk_text(&segment, Some(max_len)) {
+                chunks.push((c, aside));
+            }
+        }
         let num_chunks = chunks.len();
-        
+        let sr = self.sample_rate as f32;
+        let pause = vec![0.0f32; (tera::ASIDE_PAUSE_S * sr) as usize];
+
         let mut wav_cat: Vec<f32> = Vec::new();
         let mut dur_cat: f32 = 0.0;
 
-        for (i, chunk) in chunks.iter().enumerate() {
+        for i in 0..num_chunks {
+            let (chunk, aside) = (&chunks[i].0, chunks[i].1);
             // Notify start of chunk (audio is None)
             if !callback(i, num_chunks, None) {
                 return Err(anyhow::anyhow!("Synthesis cancelled by user"));
             }
-            
-            let (wav, duration) = self._infer(&[chunk.clone()], &[lang.to_string()], style, total_step, speed)?;
+
+            let enters_aside = aside && i > 0 && !chunks[i - 1].1;
+            let leaves_aside = aside && i + 1 < num_chunks && !chunks[i + 1].1;
+            if enters_aside {
+                if !callback(i, num_chunks, Some(&pause)) {
+                    return Err(anyhow::anyhow!("Synthesis cancelled by user"));
+                }
+                wav_cat.extend_from_slice(&pause);
+                dur_cat += tera::ASIDE_PAUSE_S;
+            }
+
+            let chunk_speed = if aside { speed * tera::ASIDE_SPEED } else { speed };
+            let (mut wav, duration) = self._infer(&[chunk.clone()], &[lang.to_string()], style, total_step, chunk_speed)?;
 
             // Truncate audio based on predicted duration to remove trailing silence
             let dur = duration[0];
-            let sample_count = (dur * self.sample_rate as f32) as usize;
-            let wav_chunk = if sample_count < wav.len() {
-                &wav[..sample_count]
-            } else {
-                &wav[..]
-            };
-
-            // Send audio chunk
-            if !callback(i, num_chunks, Some(wav_chunk)) {
-                 return Err(anyhow::anyhow!("Synthesis cancelled by user"));
+            let sample_count = ((dur * sr) as usize).min(wav.len());
+            wav.truncate(sample_count);
+            if aside {
+                for x in wav.iter_mut() {
+                    *x *= tera::ASIDE_GAIN;
+                }
             }
 
-            if i == 0 {
-                wav_cat.extend_from_slice(wav_chunk);
-                dur_cat = dur;
-            } else {
-                let silence_len = (silence_duration * self.sample_rate as f32) as usize;
-                let silence = vec![0.0f32; silence_len];
-                
+            // Send audio chunk
+            if !callback(i, num_chunks, Some(&wav)) {
+                return Err(anyhow::anyhow!("Synthesis cancelled by user"));
+            }
+
+            if i > 0 && silence_duration > 0.0 {
+                let silence = vec![0.0f32; (silence_duration * sr) as usize];
                 wav_cat.extend_from_slice(&silence);
-                wav_cat.extend_from_slice(wav_chunk);
-                dur_cat += silence_duration + dur;
+                dur_cat += silence_duration;
+            }
+            wav_cat.extend_from_slice(&wav);
+            dur_cat += dur;
+
+            if leaves_aside {
+                if !callback(i, num_chunks, Some(&pause)) {
+                    return Err(anyhow::anyhow!("Synthesis cancelled by user"));
+                }
+                wav_cat.extend_from_slice(&pause);
+                dur_cat += tera::ASIDE_PAUSE_S;
             }
         }
         callback(num_chunks, num_chunks, None);
@@ -791,7 +884,27 @@ impl TextToSpeech {
 // ============================================================================ 
 
 /// Load voice style from JSON files
+/// TeraTTS voice: a directory with style_ttl.npy (1×50×256) and style_dp.npy (1×8×16).
+fn load_npy_style_dir(dir: &Path) -> Result<Style> {
+    let read = |name: &str, want: [usize; 3]| -> Result<Array3<f32>> {
+        let path = dir.join(name);
+        let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let (shape, data) = tera::read_npy_f32(&bytes)?;
+        if shape != want {
+            anyhow::bail!("{}: shape {:?}, expected {:?}", path.display(), shape, want);
+        }
+        Ok(Array3::from_shape_vec((want[0], want[1], want[2]), data)?)
+    };
+    Ok(Style {
+        ttl: read("style_ttl.npy", [1, 50, 256])?,
+        dp: read("style_dp.npy", [1, 8, 16])?,
+    })
+}
+
 pub fn load_voice_style(voice_style_paths: &[String], verbose: bool) -> Result<Style> {
+    if voice_style_paths.len() == 1 && Path::new(&voice_style_paths[0]).is_dir() {
+        return load_npy_style_dir(Path::new(&voice_style_paths[0]));
+    }
     let bsz = voice_style_paths.len();
 
     // Read first file to get dimensions
@@ -921,27 +1034,42 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
         log::info!("Using CPU for inference with {} threads", ort_threads);
     }
 
-    let cfgs = load_cfgs(onnx_dir)?;
-
     let dp_path = format!("{}/duration_predictor.onnx", onnx_dir);
     let text_enc_path = format!("{}/text_encoder.onnx", onnx_dir);
-    let vector_est_path = format!("{}/vector_estimator.onnx", onnx_dir);
+    let sampler_path = format!("{}/{}", onnx_dir, tera::SAMPLER_FILE);
     let vocoder_path = format!("{}/vocoder.onnx", onnx_dir);
 
     let dp_ort = create_session(&dp_path, use_xnnpack, ort_threads, xnn_threads)?;
     let text_enc_ort = create_session(&text_enc_path, use_xnnpack, ort_threads, xnn_threads)?;
-    let vector_est_ort = create_session(&vector_est_path, use_xnnpack, ort_threads, xnn_threads)?;
+    let sampler_ort = create_session(&sampler_path, use_xnnpack, ort_threads, xnn_threads)?;
     let vocoder_ort = create_session(&vocoder_path, use_xnnpack, ort_threads, xnn_threads)?;
 
     let unicode_indexer_path = format!("{}/unicode_indexer.json", onnx_dir);
     let text_processor = UnicodeProcessor::new(&unicode_indexer_path)?;
 
+    let homo_dir = Path::new(onnx_dir).join("homo");
+    let homo = if homo_dir.join("homo_encoder.onnx").exists() {
+        match HomoRuntime::load(&homo_dir, 1) {
+            Ok(h) => {
+                log::info!("Homograph resolver loaded");
+                Some(h)
+            }
+            Err(e) => {
+                log::warn!("Homograph resolver unavailable: {e:?}");
+                None
+            }
+        }
+    } else {
+        log::info!("No homograph resolver at {}", homo_dir.display());
+        None
+    };
+
     Ok(TextToSpeech::new(
-        cfgs,
+        homo,
         text_processor,
         dp_ort,
         text_enc_ort,
-        vector_est_ort,
+        sampler_ort,
         vocoder_ort,
     ))
 }

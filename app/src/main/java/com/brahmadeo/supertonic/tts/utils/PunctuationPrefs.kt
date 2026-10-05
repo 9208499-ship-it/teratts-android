@@ -56,10 +56,12 @@ object PunctuationPrefs {
     fun load(context: Context) {
         val p = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         tightQuestionExclamation = p.getBoolean(KEY_TIGHT_QUESTION, false)
-        strengthenIntonation = p.getBoolean(KEY_DOUBLE_MARKS, false)
-        tightEllipsis = p.getBoolean(KEY_TIGHT_ELLIPSIS, false)
         tightCommasAndPeriods = p.getBoolean(KEY_TIGHT_COMMAS_PERIODS, false)
-        forceSpaceBeforePunctuation = p.getBoolean(KEY_FORCE_SPACE_BEFORE_PUNCT, false)
+        // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
+        // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
+        strengthenIntonation = false
+        tightEllipsis = false
+        forceSpaceBeforePunctuation = false
     }
 
     fun setTightQuestionExclamation(context: Context, value: Boolean) {

@@ -14,9 +14,9 @@ configurations {
 cargo {
     module = "../rust"
     libname = "supertonic_tts"
-    targets = ["arm64", "arm", "x86", "x86_64"]
+    targets = ["arm64"]
     profile = "release"
-    pythonCommand = "python"
+    pythonCommand = "python3"
 
     // F-Droid Fix: Robustly find rustc/cargo
     def home = System.getenv("HOME")
@@ -100,7 +100,7 @@ android {
         // unchanged so the JNI signatures in rust/src/lib.rs
         // (Java_com_brahmadeo_supertonic_tts_SupertonicTTS_*) continue to
         // resolve — applicationId and namespace are independent in modern AGP.
-        applicationId "com.davnozdu.supertonic.tts.fork"
+        applicationId "ru.tolyos.teratts"
         minSdk 24
         targetSdk 36
         versionCode 31

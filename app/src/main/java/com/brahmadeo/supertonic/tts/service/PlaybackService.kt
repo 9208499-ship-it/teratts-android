@@ -180,7 +180,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         const val CHANNEL_ID = "supertonic_playback"
         const val NOTIFICATION_ID = 1
         const val TAG = "PlaybackService"
-        const val VOLUME_BOOST_FACTOR = 2.5f
+        // TeraTTS outputs full-scale speech; the 2.5× boost tuned for Supertonic clipped it
+        const val VOLUME_BOOST_FACTOR = 1.0f
         const val AUDIO_WRITE_CHUNK_SIZE = 8192
     }
 
@@ -220,6 +221,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
         val modelPath = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/onnx").absolutePath
         val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
+        com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
         SupertonicTTS.initialize(modelPath, libPath)
         // Prewarm: synthesize a throwaway "." in the background so XNNPACK
         // JITs its kernels and ORT lays out activation buffers before the
@@ -228,7 +230,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // against double-prewarming).
         serviceScope.launch(Dispatchers.IO) {
             val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-            val voiceFile = prefs.getString("selected_voice", "F3.json") ?: "F3.json"
+            val voiceFile = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
             val stylePath = File(filesDir,
                 "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/voice_styles/$voiceFile"
             ).absolutePath
@@ -243,6 +245,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             SupertonicTTS.release()
             val modelPath = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/onnx").absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
+            com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             SupertonicTTS.initialize(modelPath, libPath)
         }
         return START_NOT_STICKY

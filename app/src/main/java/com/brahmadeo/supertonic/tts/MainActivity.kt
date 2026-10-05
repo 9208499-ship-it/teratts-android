@@ -51,38 +51,8 @@ class MainActivity : ComponentActivity() {
 
     // Data — Supertonic 3 supports 31 languages + an "na" fallback for unknown.
     private val languages = mapOf(
-        R.string.lang_english to "en",
-        R.string.lang_korean to "ko",
-        R.string.lang_japanese to "ja",
-        R.string.lang_arabic to "ar",
-        R.string.lang_bulgarian to "bg",
-        R.string.lang_czech to "cs",
-        R.string.lang_danish to "da",
-        R.string.lang_german to "de",
-        R.string.lang_greek to "el",
-        R.string.lang_spanish to "es",
-        R.string.lang_estonian to "et",
-        R.string.lang_finnish to "fi",
-        R.string.lang_french to "fr",
-        R.string.lang_hindi to "hi",
-        R.string.lang_croatian to "hr",
-        R.string.lang_hungarian to "hu",
-        R.string.lang_indonesian to "id",
-        R.string.lang_italian to "it",
-        R.string.lang_lithuanian to "lt",
-        R.string.lang_latvian to "lv",
-        R.string.lang_dutch to "nl",
-        R.string.lang_polish to "pl",
-        R.string.lang_portuguese to "pt",
-        R.string.lang_romanian to "ro",
         R.string.lang_russian to "ru",
-        R.string.lang_slovak to "sk",
-        R.string.lang_slovenian to "sl",
-        R.string.lang_swedish to "sv",
-        R.string.lang_turkish to "tr",
-        R.string.lang_ukrainian to "uk",
-        R.string.lang_vietnamese to "vi",
-        R.string.lang_other to "na"
+        R.string.lang_english to "en"
     )
 
     // Service
@@ -383,14 +353,14 @@ class MainActivity : ComponentActivity() {
                         onOpenEbookClick = {
                             try {
                                 if (EbookManager.getRecentBooks(this).isEmpty()) {
-                                    ebookLauncher.launch(arrayOf("application/epub+zip", "application/pdf"))
+                                    ebookLauncher.launch(arrayOf("*/*"))
                                 } else {
                                     val intent = Intent(this, EbookLibraryActivity::class.java)
                                     ebookOutlineLauncher.launch(intent)
                                 }
                             } catch (e: Exception) {
                                 Log.e("MainActivity", "Failed to open ebook library", e)
-                                ebookLauncher.launch(arrayOf("application/epub+zip", "application/pdf"))
+                                ebookLauncher.launch(arrayOf("*/*"))
                             }
                         },
 
@@ -525,6 +495,7 @@ class MainActivity : ComponentActivity() {
                 setupVoicesMap(viewModel.currentLang.value)
             }
 
+            com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             if (SupertonicTTS.initialize(modelPath, libPath)) {
                 withContext(Dispatchers.Main) {
                     viewModel.isInitializing.value = false
@@ -535,18 +506,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setupVoicesMap(lang: String) {
         viewModel.voiceFiles.clear()
-        val voiceResources = mapOf(
-            "M1.json" to R.string.voice_m1,
-            "M2.json" to R.string.voice_m2,
-            "M3.json" to R.string.voice_m3,
-            "M4.json" to R.string.voice_m4,
-            "M5.json" to R.string.voice_m5,
-            "F1.json" to R.string.voice_f1,
-            "F2.json" to R.string.voice_f2,
-            "F3.json" to R.string.voice_f3,
-            "F4.json" to R.string.voice_f4,
-            "F5.json" to R.string.voice_f5
-        )
+        val voiceResources = emptyMap<String, Int>() // TeraTTS voices are listed by file name (ru_f1, ru_m5, …)
 
         voiceResources.forEach { (filename, resId) ->
             viewModel.voiceFiles[getLocalizedResource(this, lang, resId)] = filename

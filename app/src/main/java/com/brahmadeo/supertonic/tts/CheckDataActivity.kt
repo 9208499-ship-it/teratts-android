@@ -43,14 +43,6 @@ class CheckDataActivity : Activity() {
     companion object {
         // BCP-47 / ISO-639 codes for all languages supported by Supertonic 3.
         // The country part is intentionally generic; finer locales are advertised by SupertonicTextToSpeechService.
-        private val SUPPORTED_TTS_LOCALES = listOf(
-            "eng-USA", "kor-KOR", "jpn-JPN", "ara-ARA", "bul-BGR",
-            "ces-CZE", "dan-DNK", "deu-DEU", "ell-GRC", "spa-ESP",
-            "est-EST", "fin-FIN", "fra-FRA", "hin-IND", "hrv-HRV",
-            "hun-HUN", "ind-IDN", "ita-ITA", "lit-LTU", "lav-LVA",
-            "nld-NLD", "pol-POL", "por-PRT", "ron-ROU", "rus-RUS",
-            "slk-SVK", "slv-SVN", "swe-SWE", "tur-TUR", "ukr-UKR",
-            "vie-VNM"
-        )
+        private val SUPPORTED_TTS_LOCALES = listOf("rus-RUS", "eng-USA")
     }
 }
