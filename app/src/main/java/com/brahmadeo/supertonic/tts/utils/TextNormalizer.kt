@@ -310,6 +310,19 @@ class TextNormalizer {
         }
     }
 
+    // Footnote marks are not read aloud: "[12]", "{3}", "[4, 5]", superscript "¹²"
+    // (but not "м²"), and asterisks glued to a word ("слово*"), never "* * *".
+    private val footnoteBracket = Regex("\\s?[\\[{]\\s*\\d{1,4}(?:\\s*[,–-]\\s*\\d{1,4})*\\s*[\\]}]")
+    private val footnoteSuperscript = Regex("(?<![мМ])[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
+    private val footnoteAsterisk = Regex("(?<=[\\p{L}.,!?»\")])\\*{1,3}(?![\\p{L}*])")
+
+    fun stripFootnoteMarks(text: String): String {
+        var t = footnoteBracket.replace(text, "")
+        t = footnoteSuperscript.replace(t, "")
+        t = footnoteAsterisk.replace(t, "")
+        return t
+    }
+
     fun normalize(text: String, lang: String = "en", isAdvancedEnabled: Boolean = false): String {
         val lowerLang = lang.lowercase()
 
@@ -317,7 +330,7 @@ class TextNormalizer {
         // so any rules the user writes still match against the original text,
         // and *before* number/accent passes so stressed Russian numbers don't
         // get double-`?` artefacts on the second cycle.
-        var inputText = applyPunctuationTweaks(text)
+        var inputText = applyPunctuationTweaks(stripFootnoteMarks(text))
 
         // Pipeline for everything except Korean (whose tokenisation does not
         // play nicely with whole-word patches):

@@ -397,6 +397,25 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         checkResumeState()
+        startKeepAlive()
+    }
+
+    /**
+     * Keep the TTS engine in the foreground (SmartVoice-style ongoing notification).
+     * Started from the open app it is always allowed; from the background Huawei /
+     * Android 12+ may refuse, and with the screen off the engine would then be
+     * throttled. Turned off with the button in the notification.
+     */
+    private fun startKeepAlive() {
+        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        if (!prefs.getBoolean(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.PREF_KEEP_ALIVE, true)) return
+        try {
+            val intent = android.content.Intent(this, com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService::class.java)
+                .setAction(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.ACTION_KEEP_ALIVE)
+            androidx.core.content.ContextCompat.startForegroundService(this, intent)
+        } catch (e: Exception) {
+            android.util.Log.w("TeraTTS", "keep-alive start failed: ${e.message}")
+        }
     }
 
     private fun loadPreferences() {

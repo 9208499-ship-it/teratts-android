@@ -295,6 +295,9 @@ fun LexiconScreen(
                 )
             }
 
+            item { PauseScaleRow() }
+            item { ParagraphPauseRow() }
+
 
             // ─── Playback section ────────────────────────────────────────
             // Independent of Lexicon/Punctuation — controls how text is
@@ -501,6 +504,92 @@ private fun PunctuationToggleRow(
                 )
             }
             Switch(checked = checked, onCheckedChange = onToggle)
+        }
+    }
+}
+
+/** "Pause between paragraphs" slider, seconds. */
+@Composable
+private fun ParagraphPauseRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var seconds by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(AppR.string.punct_paragraph_pause_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = String.format(java.util.Locale.US, "%.1f", seconds) + " s",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                text = stringResource(AppR.string.punct_paragraph_pause_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = seconds,
+                onValueChange = { seconds = Math.round(it * 10f) / 10f },
+                onValueChangeFinished = {
+                    com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setParagraphPause(context, seconds)
+                },
+                valueRange = 0f..2f,
+                steps = 19
+            )
+        }
+    }
+}
+
+/** "Pause length" slider: multiplies the pauses the engine adds at punctuation. */
+@Composable
+private fun PauseScaleRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var scale by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.pauseScale) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(AppR.string.punct_pause_scale_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "×" + String.format(java.util.Locale.US, "%.1f", scale),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Text(
+                text = stringResource(AppR.string.punct_pause_scale_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Slider(
+                value = scale,
+                onValueChange = { scale = Math.round(it * 10f) / 10f },
+                onValueChangeFinished = {
+                    com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setPauseScale(context, scale)
+                },
+                valueRange = 0f..2f,
+                steps = 19
+            )
         }
     }
 }

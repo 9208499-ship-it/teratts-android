@@ -24,6 +24,8 @@ object SupertonicTTS {
     private external fun getSampleRate(ptr: Long): Int
     private external fun close(ptr: Long)
     private external fun reset(ptr: Long)
+    private external fun setPauseScale(scale: Float)
+    private external fun setParagraphPause(seconds: Float)
 
     @Synchronized
     fun isInitialized(modelPath: String): Boolean {
@@ -31,8 +33,20 @@ object SupertonicTTS {
         return getSocClass(nativePtr) != -1
     }
 
+    /**
+     * XNNPACK accelerator switch. With it the heavy ops run in XNNPACK's own
+     * pool (4 threads) and plain ORT gets 1 thread so the pools don't fight
+     * over cores (ONNX Runtime's recommendation). false = plain ORT, 4 threads.
+     */
+    const val USE_XNNPACK = false
+
     @Synchronized
-    fun initialize(modelPath: String, libPath: String, ortThreads: Int = 4, xnnThreads: Int = 1): Boolean {
+    fun initialize(
+        modelPath: String,
+        libPath: String,
+        ortThreads: Int = if (USE_XNNPACK) 1 else 4,
+        xnnThreads: Int = if (USE_XNNPACK) 4 else 0
+    ): Boolean {
         if (nativePtr != 0L) {
             // Health check: Can we still talk to the engine?
             if (getSocClass(nativePtr) != -1) {
@@ -49,7 +63,17 @@ object SupertonicTTS {
             }
         }
         
+        // ONNX Runtime creates its worker threads here; on Linux they inherit the
+        // creating thread's priority, so raise it for the duration of init.
+        val tid = android.os.Process.myTid()
+        val previousPriority = android.os.Process.getThreadPriority(tid)
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+        } catch (e: Exception) { }
         nativePtr = init(modelPath, libPath, ortThreads, xnnThreads)
+        try {
+            android.os.Process.setThreadPriority(previousPriority)
+        } catch (e: Exception) { }
         val success = nativePtr != 0L
         if (success) {
             currentModelPath = modelPath
@@ -137,6 +161,8 @@ object SupertonicTTS {
         currentSession.set(SessionContext(sid, listener))
         
         try {
+            setPauseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.pauseScale)
+            setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             val data = synthesize(nativePtr, text, lang, stylePath, speed, bufferDuration, steps, gain)
             return if (data.isNotEmpty()) data else null
         } catch (e: Exception) {

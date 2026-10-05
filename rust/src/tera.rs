@@ -34,6 +34,86 @@ pub const SAMPLER_FILE: &str = "sampler_distilled_cfg3_8step.onnx";
 pub const ASIDE_PAUSE_S: f32 = 0.25;
 pub const ASIDE_SPEED: f32 = 1.08;
 pub const ASIDE_GAIN: f32 = 0.85;
+/// Silence after punctuation, seconds. The model's own pauses are weak and the
+/// audio is cut at the predicted duration, so pauses are added explicitly.
+/// Ratios follow reading-aloud practice (comma < dash < ; < : < . < …).
+pub const PAUSE_COMMA: f32 = 0.15;
+pub const PAUSE_DASH: f32 = 0.25;
+pub const PAUSE_SEMICOLON: f32 = 0.30;
+pub const PAUSE_COLON: f32 = 0.35;
+pub const PAUSE_SENTENCE: f32 = 0.50;
+pub const PAUSE_ELLIPSIS: f32 = 0.65;
+
+/// Scene break ("* * *", "***", "⁂", "— — —"): a longer stop, like a narrator's.
+pub const PAUSE_SCENE: f32 = 1.3;
+/// Kotlin marks the last sentence of a paragraph with U+2029 PARAGRAPH SEPARATOR.
+pub const PARAGRAPH_MARK: char = '\u{2029}';
+
+/// Pause after a paragraph, seconds (settings slider; default 0.9).
+static PARAGRAPH_PAUSE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F66_6666);
+
+pub fn set_paragraph_pause(v: f32) {
+    let v = if v.is_finite() { v.clamp(0.0, 3.0) } else { 0.9 };
+    PARAGRAPH_PAUSE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn paragraph_pause() -> f32 {
+    f32::from_bits(PARAGRAPH_PAUSE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The whole text is a scene-break ornament.
+pub fn is_scene_break(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let marks = t.chars().filter(|c| !c.is_whitespace()).count();
+    let only_ornament = t.chars().all(|c| c.is_whitespace() || matches!(c, '*' | '⁂' | '#' | '~' | '—' | '–' | '-' | '_' | '=' | '•' | '·' | '◆' | '◇' | '❖' | '§'));
+    only_ornament && (marks >= 3 || t.contains('⁂') || t.contains('❖'))
+}
+
+/// Kotlin marks the last sentence of an utterance with U+2063 (invisible separator):
+/// the reader will only hand over its next text after this audio has nearly played,
+/// and synthesizing that next text's first phrase is silence anyway. So the pause
+/// owed here is shortened by that expected latency instead of adding up with it.
+pub const UTTERANCE_END_MARK: char = '\u{2063}';
+
+/// Moving average of how long the first chunk of a call takes to synthesize.
+static FIRST_CHUNK_LATENCY_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn note_first_chunk_latency(seconds: f32) {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return;
+    }
+    let old = first_chunk_latency();
+    let new = if old == 0.0 { seconds } else { 0.7 * old + 0.3 * seconds };
+    FIRST_CHUNK_LATENCY_BITS.store(new.min(5.0).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn first_chunk_latency() -> f32 {
+    f32::from_bits(FIRST_CHUNK_LATENCY_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Pause to emit at the end of an utterance: the intended pause minus the part
+/// that the next utterance's synthesis will produce on its own. Android keeps
+/// ~0.5 s of audio queued, so only latency beyond that turns into silence.
+pub fn utterance_end_pause(intended: f32) -> f32 {
+    let hidden = (first_chunk_latency() - 0.5).max(0.0);
+    (intended - hidden).max(0.0)
+}
+
+/// User multiplier for all added pauses (settings slider), 1.0 = defaults above.
+static PAUSE_SCALE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F80_0000);
+
+pub fn set_pause_scale(v: f32) {
+    let v = if v.is_finite() { v.clamp(0.0, 3.0) } else { 1.0 };
+    PAUSE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn pause_scale() -> f32 {
+    f32::from_bits(PAUSE_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 /// Shorter parentheses ("(1)", "(с)", "(ок)") stay inline, without the brackets.
 const ASIDE_MIN_LETTERS: usize = 4;
 
@@ -460,6 +540,107 @@ pub fn latin_caps_to_russian(s: &str) -> String {
     }).into_owned()
 }
 
+// ---- pauses at punctuation ----------------------------------------------------
+
+/// Abbreviations after which "." does not end a sentence ("г. Москва", "т. е.").
+const ABBREV: &[&str] = &["г", "гг", "т", "д", "др", "пр", "им", "ул", "стр", "рис", "см", "ср", "тыс", "млн",
+    "млрд", "руб", "коп", "св", "ст", "проф", "акад", "доц", "ок", "mr", "mrs", "ms", "dr", "vs", "etc", "e", "i"];
+
+/// Pause owed after a phrase that ends like `s`.
+pub fn trailing_pause(s: &str) -> f32 {
+    let t = s.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '»' | '"' | '“' | '”' | '\'' | ')'));
+    if t.ends_with("...") || t.ends_with('…') {
+        return PAUSE_ELLIPSIS;
+    }
+    match t.chars().last() {
+        Some('.' | '!' | '?') => PAUSE_SENTENCE,
+        Some(':') => PAUSE_COLON,
+        Some(';') => PAUSE_SEMICOLON,
+        Some('—' | '–') => PAUSE_DASH,
+        Some(',') => PAUSE_COMMA,
+        _ => 0.0,
+    }
+}
+
+/// The word right before position `dot` is an initial ("А.") or an abbreviation.
+fn abbrev_before(ch: &[char], dot: usize) -> bool {
+    let mut b = dot;
+    while b > 0 && ch[b - 1].is_alphabetic() {
+        b -= 1;
+    }
+    let word: String = ch[b..dot].iter().collect();
+    if word.is_empty() {
+        return false;
+    }
+    if word.chars().count() == 1 && word.chars().all(char::is_uppercase) {
+        return true; // initial
+    }
+    let lw: String = word.chars().flat_map(char::to_lowercase).collect();
+    ABBREV.contains(&lw.as_str())
+}
+
+/// Split at sentence ends, colons, semicolons and spaced dashes. Each piece keeps
+/// its punctuation (except a spaced dash, which becomes the pause itself) and
+/// carries the pause owed after it. Commas are left to the model.
+pub fn pause_split(text: &str) -> Vec<(String, f32)> {
+    let ch: Vec<char> = text.chars().collect();
+    let mut out: Vec<(String, f32)> = Vec::new();
+    let push = |piece: String, pause: f32, out: &mut Vec<(String, f32)>| {
+        let t = piece.trim().to_string();
+        if t.chars().any(|c| c.is_alphanumeric()) {
+            out.push((t, pause));
+        } else if let Some(last) = out.last_mut() {
+            last.1 = last.1.max(pause); // stray punctuation: only its pause counts
+        }
+    };
+    let mut start = 0;
+    let mut i = 0;
+    while i < ch.len() {
+        let c = ch[i];
+        let ws_after = ch.get(i + 1).map_or(false, |n| n.is_whitespace());
+        match c {
+            ':' | ';' if ws_after => {
+                let piece: String = ch[start..=i].iter().collect();
+                let p = trailing_pause(&piece);
+                push(piece, p, &mut out);
+                start = i + 1;
+            }
+            '—' | '–' | '-' if i > 0 && ch[i - 1].is_whitespace() && ws_after => {
+                let piece: String = ch[start..i].iter().collect();
+                let p = trailing_pause(&piece).max(PAUSE_DASH);
+                push(piece, p, &mut out);
+                start = i + 1;
+            }
+            '.' | '!' | '?' | '…' => {
+                let mut j = i;
+                while j + 1 < ch.len() && matches!(ch[j + 1], '.' | '!' | '?' | '…' | '»' | '"' | '”') {
+                    j += 1;
+                }
+                let mut k = j + 1;
+                while k < ch.len() && ch[k].is_whitespace() {
+                    k += 1;
+                }
+                let boundary = k > j + 1 && k < ch.len()
+                    && (ch[k].is_uppercase() || ch[k].is_numeric() || matches!(ch[k], '—' | '–' | '-' | '«' | '"' | '“'));
+                let is_abbrev = c == '.' && j == i && abbrev_before(&ch, i);
+                if boundary && !is_abbrev {
+                    let piece: String = ch[start..=j].iter().collect();
+                    let p = trailing_pause(&piece);
+                    push(piece, p, &mut out);
+                    start = j + 1;
+                }
+                i = j;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let tail: String = ch[start..].iter().collect();
+    let p = trailing_pause(&tail);
+    push(tail, p, &mut out);
+    out
+}
+
 // ---- parenthetical asides -------------------------------------------------------
 
 /// Split text into (segment, is_aside). Round brackets mark asides; nested
@@ -522,11 +703,23 @@ pub fn split_asides(text: &str) -> Vec<(String, bool)> {
     out
 }
 
+/// Signs whose Unicode compatibility form is Latin letters ("№" → "No") would be
+/// read as English after NFKD; spell them out first.
+pub fn spell_signs(s: &str, base: &str) -> String {
+    if base != "ru" {
+        return s.replace("№№", " numbers ").replace('№', " number ");
+    }
+    s.replace("№№", " номера ").replace('№', " номер ")
+        .replace('℃', " градусов Цельсия ").replace('§', " параграф ")
+}
+
 /// Full front-end: returns the exact string for the text encoder (with '+'),
 /// or None if nothing speakable is left.
 pub fn prepare(text: &str, lang: &str, table: &[i64]) -> Option<String> {
     let t: String = text.nfc().collect();
     let t = t.replace(['<', '>'], " ");
+    let base0 = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
+    let t = spell_signs(&t, base0);
     let t = acute_to_plus(&t);
     let t = clean_plus(&t);
     let t = dashes_to_pauses(&t);
@@ -703,6 +896,65 @@ mod tests {
         assert_eq!(d.len(), 2);
         assert!(d[1].1);
         assert_eq!(split_asides("(целиком в скобках)"), vec![("целиком в скобках".to_string(), true)]);
+    }
+
+    #[test]
+    fn pauses() {
+        let p = pause_split("Он сказал: завтра будет дождь. А. С. Пушкин жил в г. Москва; это все знают — правда? Да...");
+        let texts: Vec<&str> = p.iter().map(|x| x.0.as_str()).collect();
+        assert_eq!(texts, vec!["Он сказал:", "завтра будет дождь.", "А. С. Пушкин жил в г. Москва;",
+                               "это все знают", "правда?", "Да..."]);
+        let pauses: Vec<f32> = p.iter().map(|x| x.1).collect();
+        assert_eq!(pauses, vec![PAUSE_COLON, PAUSE_SENTENCE, PAUSE_SEMICOLON, PAUSE_DASH, PAUSE_SENTENCE, PAUSE_ELLIPSIS]);
+        // dialogue dash at the start is not a split point; "т. е." is not a sentence end
+        let d = pause_split("— Привет, — сказал он, т. е. наш гость.");
+        assert_eq!(d.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), vec!["— Привет,", "сказал он, т. е. наш гость."]);
+        assert_eq!(d[0].1, PAUSE_DASH);
+        assert_eq!(pause_split("Время 3.14 и 12:05 тут")[0].0, "Время 3.14 и 12:05 тут");
+    }
+
+    #[test]
+    fn pause_scale_roundtrip() {
+        set_pause_scale(1.5);
+        assert_eq!(pause_scale(), 1.5);
+        set_pause_scale(f32::NAN);
+        assert_eq!(pause_scale(), 1.0);
+        set_pause_scale(9.0);
+        assert_eq!(pause_scale(), 3.0);
+        set_pause_scale(1.0);
+    }
+
+    #[test]
+    fn scene_and_paragraph() {
+        for t in ["* * *", "***", "⁂", "— — —", "  *  *  *  ", "###", "~~~"] {
+            assert!(is_scene_break(t), "{t}");
+        }
+        for t in ["*", "—", "Глава", "* текст *", "-", ""] {
+            assert!(!is_scene_break(t), "{t}");
+        }
+        assert!((paragraph_pause() - 0.9).abs() < 1e-6);
+        set_paragraph_pause(0.5);
+        assert_eq!(paragraph_pause(), 0.5);
+        set_paragraph_pause(0.9);
+    }
+
+    #[test]
+    fn signs() {
+        let ws = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(ws(spell_signs("Дом №5, квартиры №№ 3-4", "ru")), "Дом номер 5, квартиры номера 3-4");
+        let mut table = vec![-1i64; 65536];
+        for (i, c) in "домерномер<>/ru+ Дн".chars().enumerate() { table[c as usize] = i as i64 + 1; }
+        let out = prepare("Дом №", "ru", &table).unwrap();
+        assert!(out.contains("номер") && !out.contains("No"), "{out}");
+    }
+
+    #[test]
+    fn utterance_latency() {
+        assert_eq!(utterance_end_pause(0.3), 0.3); // nothing measured yet
+        note_first_chunk_latency(0.7);
+        assert!((utterance_end_pause(0.3) - 0.1).abs() < 1e-5);
+        note_first_chunk_latency(2.0); // ema 0.7*0.7+0.3*2 = 1.09
+        assert_eq!(utterance_end_pause(0.3), 0.0);
     }
 
     #[test]

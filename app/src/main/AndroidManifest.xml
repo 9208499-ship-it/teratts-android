@@ -104,6 +104,7 @@
             android:exported="false" />
 
         <service android:name=".service.SupertonicTextToSpeechService"
+            android:foregroundServiceType="mediaPlayback"
             android:exported="true"
             android:label="TeraTTS"
             android:permission="android.permission.BIND_TEXT_TO_SPEECH_SERVICE">

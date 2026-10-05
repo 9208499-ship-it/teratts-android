@@ -33,6 +33,16 @@ object PunctuationPrefs {
     private const val KEY_TIGHT_ELLIPSIS = "tight_ellipsis"
     private const val KEY_TIGHT_COMMAS_PERIODS = "tight_commas_periods"
     private const val KEY_FORCE_SPACE_BEFORE_PUNCT = "force_space_before_punct"
+    private const val KEY_PAUSE_SCALE = "pause_scale"
+    private const val KEY_PARAGRAPH_PAUSE = "paragraph_pause"
+
+    /** Pause after a paragraph, seconds (0 … 2, default 0.9). */
+    @Volatile var paragraphPause: Float = 0.9f
+        private set
+
+    /** Multiplier for pauses at . : ; — … and around brackets (0 … 2, default 1). */
+    @Volatile var pauseScale: Float = 1.0f
+        private set
 
     @Volatile var tightQuestionExclamation: Boolean = false
         private set
@@ -57,6 +67,8 @@ object PunctuationPrefs {
         val p = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         tightQuestionExclamation = p.getBoolean(KEY_TIGHT_QUESTION, false)
         tightCommasAndPeriods = p.getBoolean(KEY_TIGHT_COMMAS_PERIODS, false)
+        pauseScale = p.getFloat(KEY_PAUSE_SCALE, 1.0f)
+        paragraphPause = p.getFloat(KEY_PARAGRAPH_PAUSE, 0.9f)
         // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
         // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
         strengthenIntonation = false
@@ -87,6 +99,20 @@ object PunctuationPrefs {
     fun setForceSpaceBeforePunctuation(context: Context, value: Boolean) {
         forceSpaceBeforePunctuation = value
         save(context, KEY_FORCE_SPACE_BEFORE_PUNCT, value)
+    }
+
+    fun setPauseScale(context: Context, value: Float) {
+        pauseScale = value.coerceIn(0f, 2f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putFloat(KEY_PAUSE_SCALE, pauseScale)
+            .apply()
+    }
+
+    fun setParagraphPause(context: Context, value: Float) {
+        paragraphPause = value.coerceIn(0f, 2f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putFloat(KEY_PARAGRAPH_PAUSE, paragraphPause)
+            .apply()
     }
 
     private fun save(context: Context, key: String, value: Boolean) {

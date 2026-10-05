@@ -796,69 +796,115 @@ impl TextToSpeech {
     ) -> Result<(Vec<f32>, f32)> 
     where F: FnMut(usize, usize, Option<&[f32]>) -> bool {
         let max_len = tera::MAX_CHUNK_CHARS;
-        // (chunk, is_aside): text in round brackets is voiced as its own phrase
-        let mut chunks: Vec<(String, bool)> = Vec::new();
+        let sr = self.sample_rate as f32;
+        // Pauses follow the reading speed: at 2× a colon pause is half as long.
+        let scale = tera::pause_scale() / speed.max(0.1);
+
+        // Scene break ornament ("* * *"): just a long stop.
+        if tera::is_scene_break(text) {
+            let pause = vec![0.0f32; (tera::PAUSE_SCENE * scale * sr) as usize];
+            if !callback(0, 1, None) || !callback(0, 1, Some(&pause)) {
+                return Err(anyhow::anyhow!("Synthesis cancelled by user"));
+            }
+            callback(1, 1, None);
+            let dur = pause.len() as f32 / sr;
+            return Ok((pause, dur));
+        }
+        // Kotlin marks the end of a paragraph with U+2029 and the end of the
+        // reader's utterance with U+2063.
+        let paragraph_end = text.contains(tera::PARAGRAPH_MARK);
+        let utterance_end = text.contains(tera::UTTERANCE_END_MARK);
+        let text_owned = text.replace(tera::PARAGRAPH_MARK, " ").replace(tera::UTTERANCE_END_MARK, " ");
+        let text = text_owned.as_str();
+
+        // (chunk, is_aside, pause_after): phrases split at punctuation that needs a
+        // real pause (. ! ? … : ; —); text in round brackets is its own phrase.
+        let mut chunks: Vec<(String, bool, f32)> = Vec::new();
         for (segment, aside) in tera::split_asides(text) {
-            for c in chunk_text(&segment, Some(max_len)) {
-                chunks.push((c, aside));
+            for (phrase, pause) in tera::pause_split(&segment) {
+                let parts = chunk_text(&phrase, Some(max_len));
+                let n = parts.len();
+                for (k, c) in parts.into_iter().enumerate() {
+                    chunks.push((c, aside, if k + 1 == n { pause } else { 0.0 }));
+                }
             }
         }
         let num_chunks = chunks.len();
-        let sr = self.sample_rate as f32;
-        let pause = vec![0.0f32; (tera::ASIDE_PAUSE_S * sr) as usize];
 
         let mut wav_cat: Vec<f32> = Vec::new();
         let mut dur_cat: f32 = 0.0;
 
+        // Silence goes out through the same callback as speech.
+        let emit_silence = |seconds: f32, i: usize, wav_cat: &mut Vec<f32>, dur_cat: &mut f32,
+                                callback: &mut F| -> bool {
+            if seconds <= 0.0 {
+                return true;
+            }
+            let pause = vec![0.0f32; (seconds * sr) as usize];
+            wav_cat.extend_from_slice(&pause);
+            *dur_cat += seconds;
+            callback(i, num_chunks, Some(&pause))
+        };
+
         for i in 0..num_chunks {
-            let (chunk, aside) = (&chunks[i].0, chunks[i].1);
-            // Notify start of chunk (audio is None)
+            let (chunk, aside, _) = (&chunks[i].0, chunks[i].1, chunks[i].2);
             if !callback(i, num_chunks, None) {
                 return Err(anyhow::anyhow!("Synthesis cancelled by user"));
             }
 
-            let enters_aside = aside && i > 0 && !chunks[i - 1].1;
-            let leaves_aside = aside && i + 1 < num_chunks && !chunks[i + 1].1;
-            if enters_aside {
-                if !callback(i, num_chunks, Some(&pause)) {
+            // Gap before this chunk: what the previous phrase owes, at least the
+            // aside pause when entering or leaving brackets, at least the tiny
+            // inter-chunk silence.
+            if i > 0 {
+                let (prev_aside, prev_pause) = (chunks[i - 1].1, chunks[i - 1].2);
+                let mut gap = prev_pause * scale;
+                if aside != prev_aside {
+                    gap = gap.max(tera::ASIDE_PAUSE_S * scale);
+                }
+                gap = gap.max(silence_duration);
+                if !emit_silence(gap, i, &mut wav_cat, &mut dur_cat, &mut callback) {
                     return Err(anyhow::anyhow!("Synthesis cancelled by user"));
                 }
-                wav_cat.extend_from_slice(&pause);
-                dur_cat += tera::ASIDE_PAUSE_S;
             }
 
             let chunk_speed = if aside { speed * tera::ASIDE_SPEED } else { speed };
-            let (mut wav, duration) = self._infer(&[chunk.clone()], &[lang.to_string()], style, total_step, chunk_speed)?;
+            // The model speaks cleanly only within ~0.75–1.5×; beyond that it
+            // swallows syllables, so the rest of the speed-up is a pitch-preserving
+            // time stretch of the finished audio.
+            let (model_speed, stretch_rate) = crate::stretch::split_speed(chunk_speed);
+            let started = std::time::Instant::now();
+            let (mut wav, duration) = self._infer(&[chunk.clone()], &[lang.to_string()], style, total_step, model_speed)?;
+            if i == 0 {
+                tera::note_first_chunk_latency(started.elapsed().as_secs_f32());
+            }
 
             // Truncate audio based on predicted duration to remove trailing silence
-            let dur = duration[0];
-            let sample_count = ((dur * sr) as usize).min(wav.len());
+            let sample_count = ((duration[0] * sr) as usize).min(wav.len());
             wav.truncate(sample_count);
+            if (stretch_rate - 1.0).abs() > 0.01 {
+                wav = crate::stretch::time_stretch(&wav, stretch_rate, self.sample_rate as u32);
+            }
+            let dur = wav.len() as f32 / sr;
             if aside {
                 for x in wav.iter_mut() {
                     *x *= tera::ASIDE_GAIN;
                 }
             }
 
-            // Send audio chunk
             if !callback(i, num_chunks, Some(&wav)) {
                 return Err(anyhow::anyhow!("Synthesis cancelled by user"));
             }
-
-            if i > 0 && silence_duration > 0.0 {
-                let silence = vec![0.0f32; (silence_duration * sr) as usize];
-                wav_cat.extend_from_slice(&silence);
-                dur_cat += silence_duration;
-            }
             wav_cat.extend_from_slice(&wav);
             dur_cat += dur;
+        }
 
-            if leaves_aside {
-                if !callback(i, num_chunks, Some(&pause)) {
-                    return Err(anyhow::anyhow!("Synthesis cancelled by user"));
-                }
-                wav_cat.extend_from_slice(&pause);
-                dur_cat += tera::ASIDE_PAUSE_S;
+        // The pause owed after the last phrase: separates this call from the next
+        // sentence / utterance (readers send text sentence by sentence).
+        if let Some(last) = chunks.last() {
+            let tail = if paragraph_end { last.2.max(tera::paragraph_pause()) } else { last.2 };
+            let tail = if utterance_end { tera::utterance_end_pause(tail * scale) } else { tail * scale };
+            if !emit_silence(tail, num_chunks.saturating_sub(1), &mut wav_cat, &mut dur_cat, &mut callback) {
+                return Err(anyhow::anyhow!("Synthesis cancelled by user"));
             }
         }
         callback(num_chunks, num_chunks, None);

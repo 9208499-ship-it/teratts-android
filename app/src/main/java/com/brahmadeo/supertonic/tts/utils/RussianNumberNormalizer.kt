@@ -43,6 +43,10 @@ class RussianNumberNormalizer {
     // Clock time "11:05" / "9:30" -> "одиннадцать ноль пять" / "девять тридцать"
     private val timeRegex = Regex("(?<![\\p{L}\\d:])([01]?\\d|2[0-3]):([0-5]\\d)(?![\\p{L}\\d:])")
     private val whitespaceRegex = Regex("\\s+")
+    // Typeset books join a number and its ending with a non-breaking hyphen or a
+    // dash ("896‑й", "90–х"); treat every such dash as a plain hyphen.
+    // (only when glued on both sides: "Глава 5 — начало" is punctuation, not an ending)
+    private val numberDashRegex = Regex("(?<=\\d)[‐‑‒–—―](?=[а-яёА-ЯЁ])")
     // Ordinal with a case ending: "896-й", "в 1990-м", "90-е", "в 90-х", "1-го", "5-я".
     // Longer endings first so the alternation never stops at a shorter prefix.
     private val ordinalRegex = Regex(
@@ -449,7 +453,7 @@ class RussianNumberNormalizer {
     }
 
     fun normalize(text: String): String {
-        var t = text
+        var t = numberDashRegex.replace(text, "-")
 
         // "XIX веке" → "19 веке" (spelled as an ordinal just below)
         t = romanNounRegex.replace(t) { m ->

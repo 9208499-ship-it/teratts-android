@@ -160,6 +160,12 @@
     <string name="punct_tight_ellipsis_desc">Normalize `…` and `. . .` to `...` and strip whitespace before it. One expressive pause instead of three independent dots.</string>
     <string name="punct_tight_cp_title">Tight commas and periods</string>
     <string name="punct_tight_cp_desc">Skip the legacy `,/;` spacing stabilisation at end of chunk and the closing-quote+period split. Cleaner phrasing but slightly higher glitch risk on rare punctuation.</string>
+    <string name="fg_reading_aloud">Running — smooth reading with the screen off</string>
+    <string name="fg_turn_off">Turn off</string>
+    <string name="punct_pause_scale_title">Pause length</string>
+    <string name="punct_pause_scale_desc">Pauses after . ! ? : ; — … and around (brackets). ×1 is the default; ×0 leaves only the voice model’s own pauses.</string>
+    <string name="punct_paragraph_pause_title">Pause between paragraphs</string>
+    <string name="punct_paragraph_pause_desc">Silence after the last sentence of a paragraph, in seconds. Used when the reader sends whole paragraphs (FBReader does).</string>
     <string name="punct_force_space_title">Force space before punctuation</string>
     <string name="punct_force_space_desc">Insert a space between any word and a trailing `.,;:!?`. Belt-and-braces hint for the model\'s text tokenizer (`удивлён,` → `удивлён ,`). Leaves consecutive marks (`...`, `?!`) and numbers (`3,14`, `1.5`) alone. Off by default.</string>
     <string name="chunk_size_title">Chunk size</string>

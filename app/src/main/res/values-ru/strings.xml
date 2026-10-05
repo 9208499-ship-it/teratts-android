@@ -172,6 +172,12 @@
     <string name="punct_tight_ellipsis_desc">Приводить «…» и «. . .» к «...» и убирать пробел перед ним. Одна выразительная пауза вместо трёх отдельных точек.</string>
     <string name="punct_tight_cp_title">Без пробела перед запятой и точкой</string>
     <string name="punct_tight_cp_desc">Пропускать стандартную стабилизацию пробелов перед «,/;» в конце куска и разделение последовательностей «.»/«!»/«?» в кавычках. Чище фраза, но чуть выше риск артефактов на редкой пунктуации.</string>
+    <string name="fg_reading_aloud">Работает — чтение без пауз при выключенном экране</string>
+    <string name="fg_turn_off">Выключить</string>
+    <string name="punct_pause_scale_title">Длина пауз</string>
+    <string name="punct_pause_scale_desc">Паузы после . ! ? : ; — … и вокруг (скобок). ×1 — по умолчанию; ×0 — только паузы самой модели.</string>
+    <string name="punct_paragraph_pause_title">Пауза между абзацами</string>
+    <string name="punct_paragraph_pause_desc">Тишина после последнего предложения абзаца, в секундах. Работает, когда читалка передаёт текст абзацами (как FBReader).</string>
     <string name="punct_force_space_title">Принудительный пробел перед знаком препинания</string>
     <string name="punct_force_space_desc">Вставлять пробел между словом и идущим за ним «.,;:!?». Подсказка для токенизатора модели (удивлён, → удивлён ,). Не трогает повторяющиеся знаки (..., ?!) и числа (3,14, 1.5). По умолчанию выключено.</string>
     <string name="chunk_size_title">Размер блока</string>

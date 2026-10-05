@@ -37,7 +37,14 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         // TeraTTS outputs full-scale speech; the 2.5× boost tuned for Supertonic clipped it
         const val VOLUME_BOOST_FACTOR = 1.0f
         /** First chunk of every utterance is cut near this length (see fastStart). */
-        const val FAST_START_CHARS = 70
+        const val FAST_START_CHARS = 40
+        private const val FG_CHANNEL = "teratts_reading"
+        const val ACTION_KEEP_ALIVE = "ru.tolyos.teratts.KEEP_ALIVE"
+        const val ACTION_STOP_KEEP_ALIVE = "ru.tolyos.teratts.STOP_KEEP_ALIVE"
+        const val PREF_KEEP_ALIVE = "keep_alive_foreground"
+        private const val FG_ID = 4711
+        /** Passed to the engine as-is; it answers with a long pause. */
+        const val SCENE_BREAK = "⁂"
 
         // ISO-639-2/3 language codes Android may pass us → our internal 2-letter Supertonic codes.
         private val LANG_PREFIX_MAP: Map<String, String> = mapOf(
@@ -77,6 +84,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(leaveForegroundRunnable)
+        leaveForeground()
         super.onDestroy()
         serviceScope.cancel()
     }
@@ -190,13 +199,47 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
      * first sentence is cut at a comma (or a space) near FAST_START_CHARS: its audio
      * starts quickly and the rest is synthesized while it plays.
      */
+    /**
+     * Split an utterance into (sentence, endsParagraph). Readers may send several
+     * paragraphs separated by line breaks; scene-break ornaments ("* * *") become
+     * SCENE_BREAK. A one-sentence utterance is most likely a reader speaking
+     * sentence by sentence, so it gets no paragraph pause (it would slow every
+     * sentence down); multi-sentence utterances are paragraphs.
+     */
+    private fun paragraphUnits(rawText: String, lang: String): List<Pair<String, Boolean>> {
+        val units = mutableListOf<Pair<String, Boolean>>()
+        for (p in rawText.split('\n').map { it.trim() }.filter { it.isNotEmpty() }) {
+            if (isSceneBreak(p)) { units.add(SCENE_BREAK to false); continue }
+            val ss = textNormalizer.splitIntoSentences(p, lang).filter { it.isNotBlank() }
+            ss.forEachIndexed { i, s -> units.add(s to (i == ss.lastIndex)) }
+        }
+        if (units.count { it.first != SCENE_BREAK } < 2 && units.isNotEmpty()) {
+            units[units.lastIndex] = units.last().first to false
+        }
+        // fast start: cut the first sentence so audio begins quickly
+        val first = units.firstOrNull() ?: return units
+        if (first.first == SCENE_BREAK) return units
+        val parts = fastStart(listOf(first.first))
+        if (parts.size == 2) {
+            units[0] = parts[1] to first.second
+            units.add(0, parts[0] to false)
+        }
+        return units
+    }
+
+    private fun isSceneBreak(p: String): Boolean {
+        val marks = p.count { !it.isWhitespace() }
+        val ornament = p.all { it.isWhitespace() || it in "*⁂#~—–-_=•·◆◇❖§" }
+        return ornament && (marks >= 3 || '⁂' in p || '❖' in p)
+    }
+
     private fun fastStart(sentences: List<String>): List<String> {
         val first = sentences.firstOrNull() ?: return sentences
-        if (first.length <= FAST_START_CHARS + 20) return sentences
+        if (first.length <= FAST_START_CHARS + 15) return sentences
         val window = first.substring(0, FAST_START_CHARS)
         var cut = window.indexOfLast { it == ',' || it == ';' || it == ':' || it == '—' }
-        cut = if (cut >= 25) cut + 1 else window.lastIndexOf(' ')
-        if (cut < 25) return sentences
+        cut = if (cut >= 15) cut + 1 else window.lastIndexOf(' ')
+        if (cut < 15) return sentences
         val head = first.substring(0, cut).trim()
         val tail = first.substring(cut).trim()
         if (head.isEmpty() || tail.isEmpty()) return sentences
@@ -214,17 +257,104 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             .apply { setReferenceCounted(false) }
     }
 
+    // ---- foreground mode while reading ------------------------------------
+    // With the screen locked the phone puts background processes into a CPU
+    // group with a small quota (EMUI is especially strict). A wake lock keeps the
+    // CPU awake, but not fast. As a foreground service (ongoing notification, as
+    // SmartVoice/RHVoice do) the engine gets full CPU while a reader is speaking.
+    // Starting it from the background is allowed when battery optimisation is
+    // off for the app; otherwise this quietly stays a background service.
+    private var foregroundActive = false
+    /** Kept in the foreground permanently (started from the open app), not just while reading. */
+    private var persistentForeground = false
+
+    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_KEEP_ALIVE -> {
+                persistentForeground = true
+                enterForeground()
+            }
+            ACTION_STOP_KEEP_ALIVE -> {
+                // off until the app is opened again
+                persistentForeground = false
+                leaveForeground()
+                stopSelf()
+            }
+        }
+        return START_STICKY
+    }
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val leaveForegroundRunnable = Runnable { if (!persistentForeground) leaveForeground() }
+
+    private fun enterForeground() {
+        mainHandler.removeCallbacks(leaveForegroundRunnable)
+        if (foregroundActive) return
+        try {
+            val nm = getSystemService(android.app.NotificationManager::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && nm.getNotificationChannel(FG_CHANNEL) == null) {
+                nm.createNotificationChannel(
+                    android.app.NotificationChannel(FG_CHANNEL, "TeraTTS", android.app.NotificationManager.IMPORTANCE_LOW)
+                        .apply { setShowBadge(false) }
+                )
+            }
+            val stopIntent = android.app.PendingIntent.getService(
+                this, 1,
+                android.content.Intent(this, SupertonicTextToSpeechService::class.java).setAction(ACTION_STOP_KEEP_ALIVE),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val notification = androidx.core.app.NotificationCompat.Builder(this, FG_CHANNEL)
+                .setSmallIcon(com.brahmadeo.supertonic.tts.R.mipmap.ic_launcher)
+                .setContentTitle("TeraTTS")
+                .setContentText(getString(com.brahmadeo.supertonic.tts.R.string.fg_reading_aloud))
+                .setOngoing(true)
+                .setSilent(true)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+                .addAction(0, getString(com.brahmadeo.supertonic.tts.R.string.fg_turn_off), stopIntent)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(FG_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(FG_ID, notification)
+            }
+            foregroundActive = true
+        } catch (e: Exception) {
+            Log.w("TeraTTS", "Foreground mode not allowed right now: ${e.message}")
+        }
+    }
+
+    private fun leaveForeground() {
+        if (!foregroundActive) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {
+            Log.w("TeraTTS", "stopForeground failed: ${e.message}")
+        }
+        foregroundActive = false
+    }
+
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
         if (request == null || callback == null) return
         synthWakeLock.acquire(2 * 60 * 1000L)
+        enterForeground()
         try {
             synthesizeLocked(request, callback)
         } finally {
             if (synthWakeLock.isHeld) synthWakeLock.release()
+            // stay foreground between sentences; drop the notification after a minute of silence
+            mainHandler.postDelayed(leaveForegroundRunnable, 60_000L)
         }
     }
 
     private fun synthesizeLocked(request: SynthesisRequest, callback: SynthesisCallback) {
+        // The synthesis itself runs on this thread (plus ONNX Runtime's pool).
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+        } catch (e: Exception) { }
         SupertonicTTS.setCancelled(false)
         runBlocking {
             withTimeoutOrNull(5000) {
@@ -324,15 +454,22 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
         var success = true
         try {
-            val sentences = fastStart(textNormalizer.splitIntoSentences(rawText, requestedLang))
-            for (sentence in sentences) {
+            val units = paragraphUnits(rawText, requestedLang)
+            for ((index, unit) in units.withIndex()) {
+                val (sentence, paragraphEnd) = unit
                 if (SupertonicTTS.isCancelled()) { success = false; break }
 
                 val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
-                val normalizedText = textNormalizer.normalize(sentence, requestedLang, isAdvancedEnabled)
+                val normalizedText = if (sentence == SCENE_BREAK) sentence
+                    else textNormalizer.normalize(sentence, requestedLang, isAdvancedEnabled)
+                // U+2029 tells the engine to add the paragraph pause after this sentence
+                var toSynthesize = if (paragraphEnd) normalizedText + "\u2029" else normalizedText
+                // U+2063: last sentence of this utterance (engine trims the pause by the
+                // latency the next utterance will add anyway)
+                if (index == units.lastIndex) toSynthesize += "\u2063"
 
                 SupertonicTTS.generateAudio(
-                    normalizedText, requestedLang, stylePath, effectiveSpeed, 0.0f,
+                    toSynthesize, requestedLang, stylePath, effectiveSpeed, 0.0f,
                     steps, VOLUME_BOOST_FACTOR, streamingListener
                 )
 

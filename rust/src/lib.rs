@@ -1,6 +1,26 @@
 use jni::JNIEnv;
 use jni::objects::{JClass, JString, JObject, JValue};
 use jni::sys::{jlong, jint, jfloat, jbyteArray};
+
+/// Multiplier for the pauses the engine adds at punctuation (settings slider).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPauseScale(
+    _env: JNIEnv,
+    _class: JClass,
+    scale: jfloat,
+) {
+    crate::tera::set_pause_scale(scale);
+}
+
+/// Pause after a paragraph, seconds (settings slider).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(
+    _env: JNIEnv,
+    _class: JClass,
+    seconds: jfloat,
+) {
+    crate::tera::set_paragraph_pause(seconds);
+}
 use android_logger::Config;
 use log::LevelFilter;
 use std::time::Instant;
@@ -8,6 +28,7 @@ use std::time::Instant;
 mod helper;
 mod tera;
 mod homo;
+mod stretch;
 mod thermal;
 
 use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech};
@@ -63,7 +84,10 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_init(
         log::warn!("ORT environment already initialized");
     }
 
-    let tts = match load_text_to_speech(&model_path, false, true, ort_threads as usize, xnn_threads as usize) {
+    // XNNPACK only when compiled in (cargo feature) and requested (xnn_threads > 0)
+    let use_xnnpack = cfg!(feature = "xnnpack") && xnn_threads > 0;
+    log::info!("XNNPACK: {}", if use_xnnpack { "on" } else { "off" });
+    let tts = match load_text_to_speech(&model_path, false, use_xnnpack, ort_threads as usize, xnn_threads as usize) {
         Ok(t) => t,
         Err(e) => {
             log::error!("Failed to load TTS: {:?}", e);
