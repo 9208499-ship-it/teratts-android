@@ -42,6 +42,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         const val ACTION_KEEP_ALIVE = "ru.tolyos.teratts.KEEP_ALIVE"
         const val ACTION_STOP_KEEP_ALIVE = "ru.tolyos.teratts.STOP_KEEP_ALIVE"
         const val PREF_KEEP_ALIVE = "keep_alive_foreground"
+        /** Huawei PowerGenie leaves apps holding a wake lock with this tag alone. */
+        const val WAKELOCK_TAG = "AudioMix"
         private const val FG_ID = 4711
         /** Passed to the engine as-is; it answers with a long pause. */
         const val SCENE_BREAK = "⁂"
@@ -253,7 +255,10 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
      */
     private val synthWakeLock: android.os.PowerManager.WakeLock by lazy {
         (getSystemService(POWER_SERVICE) as android.os.PowerManager)
-            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "TeraTTS:synthesis")
+            // "AudioMix" is on Huawei PowerGenie's hard-coded whitelist of wake-lock
+            // tags (dontkillmyapp.com/huawei); any other tag gets the app throttled or
+            // killed once the screen is off. We are an audio app, so it's also apt.
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG)
             .apply { setReferenceCounted(false) }
     }
 
@@ -297,20 +302,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                         .apply { setShowBadge(false) }
                 )
             }
-            val stopIntent = android.app.PendingIntent.getService(
-                this, 1,
-                android.content.Intent(this, SupertonicTextToSpeechService::class.java).setAction(ACTION_STOP_KEEP_ALIVE),
-                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-            )
-            val notification = androidx.core.app.NotificationCompat.Builder(this, FG_CHANNEL)
-                .setSmallIcon(com.brahmadeo.supertonic.tts.R.mipmap.ic_launcher)
-                .setContentTitle("TeraTTS")
-                .setContentText(getString(com.brahmadeo.supertonic.tts.R.string.fg_reading_aloud))
-                .setOngoing(true)
-                .setSilent(true)
-                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                .addAction(0, getString(com.brahmadeo.supertonic.tts.R.string.fg_turn_off), stopIntent)
-                .build()
+            val notification = buildNotification(statusText ?: getString(com.brahmadeo.supertonic.tts.R.string.fg_reading_aloud))
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(FG_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
             } else {
@@ -320,6 +312,50 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         } catch (e: Exception) {
             Log.w("TeraTTS", "Foreground mode not allowed right now: ${e.message}")
         }
+    }
+
+    private fun buildNotification(text: String): android.app.Notification {
+        val stopIntent = android.app.PendingIntent.getService(
+            this, 1,
+            android.content.Intent(this, SupertonicTextToSpeechService::class.java).setAction(ACTION_STOP_KEEP_ALIVE),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return androidx.core.app.NotificationCompat.Builder(this, FG_CHANNEL)
+            .setSmallIcon(com.brahmadeo.supertonic.tts.R.mipmap.ic_launcher)
+            .setContentTitle("TeraTTS")
+            .setContentText(text)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))
+            .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .addAction(0, getString(com.brahmadeo.supertonic.tts.R.string.fg_turn_off), stopIntent)
+            .build()
+    }
+
+    // ---- synthesis speed shown in the notification (diagnostics) ----------
+    private var statusText: String? = null
+    private var rtfOnSum = 0.0
+    private var rtfOnCount = 0
+    private var rtfOffSum = 0.0
+    private var rtfOffCount = 0
+
+    /** RTF = seconds of audio per second of synthesis; >1 keeps up, <1 falls behind. */
+    private fun recordRtf(rtf: Double, screenOn: Boolean, speed: Float) {
+        if (screenOn) { rtfOnSum += rtf; rtfOnCount++ } else { rtfOffSum += rtf; rtfOffCount++ }
+        fun avg(sum: Double, n: Int) = if (n == 0) "—" else String.format(java.util.Locale.US, "%.2f", sum / n)
+        val text = getString(com.brahmadeo.supertonic.tts.R.string.fg_speed_status,
+            avg(rtfOnSum, rtfOnCount), avg(rtfOffSum, rtfOffCount))
+        statusText = text
+        if (foregroundActive) {
+            try {
+                getSystemService(android.app.NotificationManager::class.java).notify(FG_ID, buildNotification(text))
+            } catch (e: Exception) { }
+        }
+        try {
+            java.io.File(filesDir, "rtf.log").appendText(String.format(java.util.Locale.US,
+                "%tT  RTF %.2f  speed %.2f  screen %s%n", java.util.Date(), rtf, speed, if (screenOn) "on" else "off"))
+        } catch (e: Exception) { }
     }
 
     private fun leaveForeground() {
@@ -414,9 +450,13 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         // chunk-by-chunk as soon as the vocoder produces them, and the
         // 50-chunk buffer lets the producer race ahead while Android plays.
         val ttsChannel = kotlinx.coroutines.channels.Channel<ByteArray>(capacity = 50)
+        // speed measurement for the log: audio produced vs time spent
+        var audioBytes = 0L
+        val synthStarted = System.nanoTime()
         val streamingListener = object : SupertonicTTS.ProgressListener {
             override fun onProgress(sessionId: Long, current: Int, total: Int) {}
             override fun onAudioChunk(sessionId: Long, data: ByteArray) {
+                audioBytes += data.size
                 if (SupertonicTTS.isCancelled()) return
                 // Block on send instead of busy-waiting. See PlaybackService
                 // for the same pattern + rationale (no CPU burn vs the old
@@ -476,6 +516,18 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 if (SupertonicTTS.isCancelled()) { success = false; break }
             }
         } finally {
+            // RTF = seconds of audio per second of synthesis (>1 keeps up, <1 falls behind).
+            // Measured before waiting for playback, so it reflects synthesis speed only.
+            val synthSeconds = (System.nanoTime() - synthStarted) / 1e9
+            val audioSeconds = audioBytes / 2.0 / SupertonicTTS.getAudioSampleRate()
+            if (synthSeconds > 0.05 && audioSeconds > 0.2) {
+                val screenOn = (getSystemService(POWER_SERVICE) as android.os.PowerManager).isInteractive
+                recordRtf(audioSeconds / synthSeconds, screenOn, effectiveSpeed)
+                android.util.Log.i("TeraTTS", String.format(java.util.Locale.US,
+                    "RTF %.2f (%.1f s audio in %.1f s), speed %.2f, screen %s",
+                    audioSeconds / synthSeconds, audioSeconds, synthSeconds, effectiveSpeed,
+                    if (screenOn) "on" else "off"))
+            }
             ttsChannel.close()
             runBlocking { consumerJob.join() }
         }

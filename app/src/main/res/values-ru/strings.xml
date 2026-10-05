@@ -174,6 +174,7 @@
     <string name="punct_tight_cp_desc">Пропускать стандартную стабилизацию пробелов перед «,/;» в конце куска и разделение последовательностей «.»/«!»/«?» в кавычках. Чище фраза, но чуть выше риск артефактов на редкой пунктуации.</string>
     <string name="fg_reading_aloud">Работает — чтение без пауз при выключенном экране</string>
     <string name="fg_turn_off">Выключить</string>
+    <string name="fg_speed_status">Скорость синтеза: экран вкл ×%1$s, выкл ×%2$s (больше 1 — успевает)</string>
     <string name="punct_pause_scale_title">Длина пауз</string>
     <string name="punct_pause_scale_desc">Паузы после . ! ? : ; — … и вокруг (скобок). ×1 — по умолчанию; ×0 — только паузы самой модели.</string>
     <string name="punct_paragraph_pause_title">Пауза между абзацами</string>

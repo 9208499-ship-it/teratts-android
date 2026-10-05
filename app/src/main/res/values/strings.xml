@@ -162,6 +162,7 @@
     <string name="punct_tight_cp_desc">Skip the legacy `,/;` spacing stabilisation at end of chunk and the closing-quote+period split. Cleaner phrasing but slightly higher glitch risk on rare punctuation.</string>
     <string name="fg_reading_aloud">Running — smooth reading with the screen off</string>
     <string name="fg_turn_off">Turn off</string>
+    <string name="fg_speed_status">Synthesis speed: screen on ×%1$s, off ×%2$s (over 1 = keeps up)</string>
     <string name="punct_pause_scale_title">Pause length</string>
     <string name="punct_pause_scale_desc">Pauses after . ! ? : ; — … and around (brackets). ×1 is the default; ×0 leaves only the voice model’s own pauses.</string>
     <string name="punct_paragraph_pause_title">Pause between paragraphs</string>

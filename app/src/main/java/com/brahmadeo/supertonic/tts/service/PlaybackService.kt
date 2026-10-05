@@ -200,7 +200,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
         audioManager = attributionContext.getSystemService(AUDIO_SERVICE) as AudioManager
         val powerManager = attributionContext.getSystemService(POWER_SERVICE) as android.os.PowerManager
-        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Supertonic:PlaybackWakeLock").apply {
+        wakeLock = powerManager.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, SupertonicTextToSpeechService.WAKELOCK_TAG).apply {
             // Idempotent acquire/release. Without this, a rapid sequence of
             // synthesizeAndPlay() calls (e.g. queue with auto-advance, or
             // MacroDroid hammering the TTS service) acquires the lock once

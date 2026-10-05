@@ -44,7 +44,9 @@ object SupertonicTTS {
     fun initialize(
         modelPath: String,
         libPath: String,
-        ortThreads: Int = if (USE_XNNPACK) 1 else 4,
+        // all cores: with the screen fully off the phone caps the big cores hardest,
+        // and the little ones add real throughput (measured: RTF 2.07 on / 0.6 off on 4 threads)
+        ortThreads: Int = if (USE_XNNPACK) 1 else Runtime.getRuntime().availableProcessors().coerceIn(4, 8),
         xnnThreads: Int = if (USE_XNNPACK) 4 else 0
     ): Boolean {
         if (nativePtr != 0L) {
