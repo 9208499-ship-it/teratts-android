@@ -318,7 +318,8 @@ pub fn is_pinned(word_lower: &str) -> bool {
     FIXED_STRESS.iter().any(|(w, _)| *w == word_lower)
 }
 
-/// Apply FIXED_STRESS to every matching word (any existing mark is replaced).
+/// Apply FIXED_STRESS to every matching word that has no stress mark yet
+/// (a mark already in the text — a stress-marked book, the lexicon — is kept).
 pub fn pin_fixed_stress(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 8);
     let mut word = String::new();
@@ -328,7 +329,8 @@ pub fn pin_fixed_stress(text: &str) -> String {
         }
         let plain: String = word.chars().filter(|&c| c != '+').collect();
         let lower: String = plain.chars().flat_map(char::to_lowercase).collect();
-        match FIXED_STRESS.iter().find(|(w, _)| *w == lower) {
+        let already_marked = word.contains('+');
+        match FIXED_STRESS.iter().find(|(w, _)| *w == lower && !already_marked) {
             Some((_, stressed)) => {
                 // keep the original casing, letter by letter
                 let src: Vec<char> = plain.chars().collect();
@@ -846,8 +848,11 @@ mod tests {
 
     #[test]
     fn fixed_stress() {
-        assert_eq!(pin_fixed_stress("Глава +один. Один из нас, ОДИН!"), "Глава од+ин. Од+ин из нас, ОД+ИН!");
+        // unmarked words are pinned; a mark already in the text is kept
+        assert_eq!(pin_fixed_stress("Глава один. Один из нас, ОДИН!"), "Глава од+ин. Од+ин из нас, ОД+ИН!");
+        assert_eq!(pin_fixed_stress("Глава +один"), "Глава +один");
         assert_eq!(pin_fixed_stress("он нем и п+осле"), "он н+ём и п+осле");
+        assert_eq!(pin_fixed_stress("д+олги ночи"), "д+олги ночи"); // marked: kept
         assert_eq!(pin_fixed_stress("одинокий"), "одинокий");
         assert_eq!(pin_fixed_stress("вернуть все свои долги."), "вернуть все свои долг+и.");
         assert!(is_pinned("долги") && !is_pinned("замок"));

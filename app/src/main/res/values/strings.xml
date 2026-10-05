@@ -160,6 +160,10 @@
     <string name="punct_tight_ellipsis_desc">Normalize `…` and `. . .` to `...` and strip whitespace before it. One expressive pause instead of three independent dots.</string>
     <string name="punct_tight_cp_title">Tight commas and periods</string>
     <string name="punct_tight_cp_desc">Skip the legacy `,/;` spacing stabilisation at end of chunk and the closing-quote+period split. Cleaner phrasing but slightly higher glitch risk on rare punctuation.</string>
+    <string name="dict_offer_title">Download the accent dictionary?</string>
+    <string name="dict_offer_msg">Correct stress needs a dictionary: 3.3 million word forms built by the silero-stress network (%1$d MB, once). Homographs (замок/замок) are resolved by context anyway. You can also do this later: Lexicon → menu → Download dictionary.</string>
+    <string name="dict_offer_download">Download</string>
+    <string name="dict_offer_later">Later</string>
     <string name="fg_reading_aloud">Running — smooth reading with the screen off</string>
     <string name="fg_turn_off">Turn off</string>
     <string name="fg_speed_status">Synthesis speed: screen on ×%1$s, off ×%2$s (over 1 = keeps up)</string>

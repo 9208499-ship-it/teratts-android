@@ -48,6 +48,11 @@ import java.io.File
 import java.io.InputStreamReader
 
 class LexiconActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_AUTO_DOWNLOAD_URL = "auto_download_url"
+        const val EXTRA_AUTO_DOWNLOAD_NAME = "auto_download_name"
+    }
+
 
     private val rulesState = mutableStateOf<List<LexiconItem>>(emptyList())
     private val accentDictBannerState = mutableStateOf<com.brahmadeo.supertonic.tts.ui.AccentDictBanner?>(null)
@@ -164,6 +169,15 @@ class LexiconActivity : ComponentActivity() {
                                     .show()
                             }
                         }
+                    }
+                }
+
+                // Opened from the main screen's "download the accent dictionary" offer
+                val autoUrl = intent.getStringExtra(EXTRA_AUTO_DOWNLOAD_URL)
+                LaunchedEffect(autoUrl) {
+                    if (autoUrl != null) {
+                        intent.removeExtra(EXTRA_AUTO_DOWNLOAD_URL)
+                        startDownload(autoUrl, intent.getStringExtra(EXTRA_AUTO_DOWNLOAD_NAME) ?: "dictionary")
                     }
                 }
 

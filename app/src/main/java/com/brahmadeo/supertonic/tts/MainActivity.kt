@@ -398,6 +398,32 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkResumeState()
         startKeepAlive()
+        offerAccentDictionary()
+    }
+
+    /**
+     * Once, when the models are in place but no accent dictionary is installed:
+     * offer the recommended (silero) dictionary instead of hiding it two menus deep.
+     */
+    private fun offerAccentDictionary() {
+        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        if (prefs.getBoolean("dict_offer_shown", false)) return
+        if (!com.brahmadeo.supertonic.tts.utils.AssetManager.isReady(this)) return
+        if (com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.isInstalled(this)) return
+        prefs.edit().putBoolean("dict_offer_shown", true).apply()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.dict_offer_title)
+            .setMessage(getString(R.string.dict_offer_msg,
+                com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.SILERO_DICT_SIZE_MB))
+            .setPositiveButton(R.string.dict_offer_download) { _, _ ->
+                startActivity(Intent(this, LexiconActivity::class.java)
+                    .putExtra(LexiconActivity.EXTRA_AUTO_DOWNLOAD_URL,
+                        com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.SILERO_DICT_URL)
+                    .putExtra(LexiconActivity.EXTRA_AUTO_DOWNLOAD_NAME,
+                        com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.SILERO_DICT_NAME))
+            }
+            .setNegativeButton(R.string.dict_offer_later, null)
+            .show()
     }
 
     /**

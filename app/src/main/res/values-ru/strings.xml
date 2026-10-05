@@ -172,6 +172,10 @@
     <string name="punct_tight_ellipsis_desc">Приводить «…» и «. . .» к «...» и убирать пробел перед ним. Одна выразительная пауза вместо трёх отдельных точек.</string>
     <string name="punct_tight_cp_title">Без пробела перед запятой и точкой</string>
     <string name="punct_tight_cp_desc">Пропускать стандартную стабилизацию пробелов перед «,/;» в конце куска и разделение последовательностей «.»/«!»/«?» в кавычках. Чище фраза, но чуть выше риск артефактов на редкой пунктуации.</string>
+    <string name="dict_offer_title">Скачать словарь ударений?</string>
+    <string name="dict_offer_msg">Для правильных ударений нужен словарь: 3,3 млн словоформ, размеченных нейросетью silero-stress (%1$d МБ, один раз). Омографы (за́мок/замо́к) движок всё равно решает по контексту. Можно и позже: Лексикон → меню → Скачать словарь.</string>
+    <string name="dict_offer_download">Скачать</string>
+    <string name="dict_offer_later">Позже</string>
     <string name="fg_reading_aloud">Работает — чтение без пауз при выключенном экране</string>
     <string name="fg_turn_off">Выключить</string>
     <string name="fg_speed_status">Скорость синтеза: экран вкл ×%1$s, выкл ×%2$s (больше 1 — успевает)</string>

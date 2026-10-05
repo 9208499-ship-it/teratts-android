@@ -605,8 +605,9 @@ impl HomoRuntime {
         }
         let mut decided = Vec::with_capacity(candidates.len());
         for c in candidates {
-            // pinned stress (tera::FIXED_STRESS) wins over the model
-            if crate::tera::is_pinned(&c.word_lower) {
+            // stress already written in the text (a stress-marked book, the user's
+            // lexicon) is final; pinned words (tera::FIXED_STRESS) also win
+            if text[c.start..c.end].contains('+') || crate::tera::is_pinned(&c.word_lower) {
                 continue;
             }
             let variant = match c.phrase_choice.clone() {

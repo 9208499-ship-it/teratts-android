@@ -72,8 +72,30 @@ object AccentDictionaryManager {
     private const val DICT_BASE_URL =
         "https://github.com/davnozdu/supertonic-dictionaries/releases/download/russian-v1.1"
 
+    /** Built by silero-stress (export_silero_dict.py); homographs are left to the context resolver. */
+    const val SILERO_DICT_URL =
+        "https://github.com/9208499-ship-it/teratts-android/releases/download/models-v1/silero_stress_ru.sacc"
+    const val SILERO_DICT_NAME = "Silero (рекомендуется)"
+    const val SILERO_DICT_SIZE_MB = 172
+
+    /** True if some accent dictionary is installed. */
+    fun isInstalled(context: Context): Boolean =
+        File(context.filesDir, "accent_dictionary.sacc").exists() ||
+            File(context.filesDir, "accent_dictionary.json").exists() ||
+            getMetadata(context) != null
+
     private val PREBUILT_DICTS: Map<String, List<PrebuiltDict>> = mapOf(
         "ru" to listOf(
+            // ------------- TeraTTS: silero-stress dictionary (recommended) -------------
+            PrebuiltDict(
+                id = "ru-silero-bin",
+                displayName = SILERO_DICT_NAME,
+                format = DictFormat.BINARY,
+                subtitle = "172 MB · 3.27M entries · ~10-20 MB RAM · stress by the silero-stress network; no homographs — the context resolver handles them",
+                sizeBytes = 172L * 1024 * 1024,
+                entries = 3_274_981,
+                url = SILERO_DICT_URL
+            ),
             // ------------- Binary (.sacc, mmap, recommended) -------------
             PrebuiltDict(
                 id = "ru-full-bin",
