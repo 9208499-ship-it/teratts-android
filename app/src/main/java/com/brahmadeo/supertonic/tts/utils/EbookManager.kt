@@ -97,15 +97,29 @@ object EbookManager {
                 else -> "epub"
             }
 
-            val stamp = System.currentTimeMillis()
-            val destFile = File(context.filesDir, "ebooks/book_$stamp.$extension")
-            destFile.parentFile?.mkdirs()
-
+            // Name the copy after its content: the same book opened again is the same file,
+            // so its reading place, characters and voices are kept (as reading apps do).
+            val tmp = File(context.filesDir, "ebooks/import_${System.currentTimeMillis()}.$extension")
+            tmp.parentFile?.mkdirs()
+            val digest = java.security.MessageDigest.getInstance("SHA-1")
             contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(destFile).use { output ->
-                    input.copyTo(output)
+                FileOutputStream(tmp).use { output ->
+                    val buf = ByteArray(1 shl 16)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        digest.update(buf, 0, n)
+                        output.write(buf, 0, n)
+                    }
                 }
             } ?: return null
+            val stamp = digest.digest().take(8).joinToString("") { "%02x".format(it) }
+            File(context.filesDir, "ebooks/book_$stamp.$extension").takeIf { it.exists() }
+                ?.let { tmp.delete(); return it.absolutePath }
+            File(context.filesDir, "ebooks/book_$stamp.epub").takeIf { it.exists() }
+                ?.let { tmp.delete(); return it.absolutePath }
+            val destFile = File(context.filesDir, "ebooks/book_$stamp.$extension")
+            if (!tmp.renameTo(destFile)) { tmp.copyTo(destFile, overwrite = true); tmp.delete() }
 
             // FB2 / FB3 / TXT: convert to EPUB so the Readium reader can open it.
             val header = destFile.inputStream().use { val b = ByteArray(512); val n = it.read(b); b.copyOf(maxOf(n, 0)) }

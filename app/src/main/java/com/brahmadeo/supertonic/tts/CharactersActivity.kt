@@ -24,6 +24,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -83,7 +84,9 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
         aliases = CharacterVoices.aliases(context, scope)
         characters = withContext(Dispatchers.Default) {
             if (text.isBlank()) emptyList()
-            else DialogueAnalyzer2.applyAliases(DialogueAnalyzer2.analyze(text), aliases).characters
+            else DialogueAnalyzer2.applyAliases(DialogueAnalyzer2.analyze(text, DialogueAnalyzer2.Prior(
+                com.brahmadeo.supertonic.tts.utils.BookRoster.cached(context, scope)?.genders ?: emptyMap(),
+                com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(context, scope))), aliases).characters
         }
     }
 
@@ -128,6 +131,18 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
                 }
                 items(list, key = { it.name }) { c ->
                     CharacterCard(c, list, voices, scope, onMerged = { version++ })
+                }
+                item {
+                    OutlinedButton(
+                        onClick = {
+                            CharacterVoices.resetAuto(context, scope)
+                            com.brahmadeo.supertonic.tts.utils.BookRoster.clear(context, scope)
+                            android.widget.Toast.makeText(context, context.getString(AppR.string.characters_reset_done),
+                                android.widget.Toast.LENGTH_LONG).show()
+                            version++
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text(stringResource(AppR.string.characters_reset)) }
                 }
                 if (aliases.isNotEmpty()) {
                     item {

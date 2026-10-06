@@ -147,6 +147,8 @@ class RussianNumberNormalizer {
         "млрд" to MeasureUnit("миллиард", "миллиарда", "миллиардов"),
         "трлн" to MeasureUnit("триллион", "триллиона", "триллионов"),
         "шт" to MeasureUnit("штука", "штуки", "штук", feminine = true),
+        "ед" to MeasureUnit("единица", "единицы", "единиц", feminine = true),
+        "экз" to MeasureUnit("экземпляр", "экземпляра", "экземпляров"),
         "га" to MeasureUnit("гектар", "гектара", "гектаров"),
         "чел" to MeasureUnit("человек", "человека", "человек"),
         "стр" to MeasureUnit("страница", "страницы", "страниц", feminine = true),
@@ -452,8 +454,115 @@ class RussianNumberNormalizer {
         return if (head.isEmpty()) word else "$head $word"
     }
 
+    // ---- abbreviations ------------------------------------------------------
+    // A trailing dot that also ends the sentence ("…и т. д. Потом…") is kept, so the pause stays.
+    private val L = "(?<![\\p{L}])"   // not glued to a letter on the left
+    /** pattern, words, and whether its dot may also end the sentence (not before a name). */
+    private class Abbr(val re: Regex, val words: String, val mayEndSentence: Boolean)
+
+    private val abbreviations: List<Abbr> = listOf(
+        Triple("до\\s?н\\.\\s?э\\.", "до нашей эры", true),
+        Triple("н\\.\\s?э\\.", "нашей эры", true),
+        Triple("и\\s+т\\.\\s?д\\.", "и так далее", true),
+        Triple("и\\s+т\\.\\s?п\\.", "и тому подобное", true),
+        Triple("в\\s+т\\.\\s?ч\\.", "в том числе", false),
+        Triple("т\\.\\s?е\\.", "то есть", false),
+        Triple("т\\.\\s?к\\.", "так как", false),
+        Triple("т\\.\\s?н\\.", "так называемый", false),
+        Triple("т\\.\\s?о\\.", "таким образом", false),
+        Triple("и\\s+др\\.", "и другие", true),
+        Triple("и\\s+пр\\.", "и прочее", true),
+        Triple("напр\\.", "например", false),
+        Triple("см\\.(?=\\s*[«\"„(\\p{L}\\d])", "смотри", false),
+        Triple("ср\\.(?=\\s*[«\"„(\\p{L}\\d])", "сравни", false),
+        Triple("ок\\.(?=\\s*\\d)", "около", false),
+        Triple("гл\\.(?=\\s*[\\dIVXLC])", "глава", false),
+        Triple("стр\\.(?=\\s*\\d)", "страница", false),
+        Triple("с\\.(?=\\s*\\d)", "страница", false),
+        Triple("рис\\.", "рисунок", false),
+        Triple("табл\\.", "таблица", false),
+        Triple("изд\\.", "издание", true),
+        Triple("ред\\.", "редакция", true),
+        Triple("прим\\.", "примечание", true),
+        Triple("ул\\.", "улица", false),
+        Triple("пл\\.(?=\\s*\\p{Lu})", "площадь", false),
+        Triple("просп\\.", "проспект", false),
+        Triple("пр-т", "проспект", false),
+        Triple("обл\\.", "область", true),
+        Triple("р-н", "район", false),
+        Triple("пос\\.(?=\\s*\\p{Lu})", "посёлок", false),
+        Triple("д\\.(?=\\s*\\d)", "дом", false),
+        Triple("кв\\.(?=\\s*\\d)", "квартира", false),
+        Triple("им\\.(?=\\s*\\p{Lu})", "имени", false),
+        Triple("проф\\.", "профессор", false),
+        Triple("акад\\.", "академик", false),
+        Triple("доц\\.", "доцент", false),
+        Triple("тов\\.(?=\\s*\\p{Lu})", "товарищ", false),
+        Triple("г-ну", "господину", false),
+        Triple("г-на", "господина", false),
+        Triple("г-н", "господин", false),
+        Triple("г-жа", "госпожа", false),
+        Triple("г-жи", "госпожи", false),
+        Triple("св\\.(?=\\s*\\p{Lu})", "святой", false),
+        // after a number these are units ("21 ед." → "двадцать одна единица"); alone — plural
+        Triple("(?<!\\d)(?<!\\d\\s)ед\\.", "единиц", true),
+        Triple("(?<!\\d)(?<!\\d\\s)экз\\.", "экземпляров", true)
+    ).map { (pattern, words, ends) ->
+        Abbr(Regex("(?<![\\p{L}])$pattern", RegexOption.IGNORE_CASE), words, ends)
+    }
+
+    // "XIX в." / "в XIX в." / "XVII–XVIII вв." → words the century rule below understands
+    private val centuryRangeRegex = Regex(
+        "(?<![\\p{L}\\d])((?:в|В)\\s+)?(\\d{1,2}|[IVXLC]{1,6})\\s?[–—-]\\s?(\\d{1,2}|[IVXLC]{1,6})\\s?вв\\.")
+    private val centuryAbbrRegex = Regex("(?<![\\p{L}\\d])((?:в|В)\\s+)?(\\d{1,2}|[IVXLC]{1,6})\\s?(вв|в)\\.")
+    // "+10 к силе" → "плюс 10 к силе"
+    private val plusNumberRegex = Regex("(?<![\\p{L}\\d+])\\+(?=\\d)")
+
+    private fun centuryOrdinal(token: String, prepositional: Boolean): String? {
+        val n = token.toLongOrNull() ?: romanToInt(token) ?: return null
+        val phrase = spellOrdinal(n) ?: return null
+        return declineOrdinal(phrase, if (prepositional) "м" else "й", n)
+    }
+
+    private fun expandAbbreviations(text: String): String {
+        var t = centuryRangeRegex.replace(text) { m ->
+            val prep = m.groupValues[1]
+            val a = centuryOrdinal(m.groupValues[2], prep.isNotEmpty()) ?: return@replace m.value
+            val b = centuryOrdinal(m.groupValues[3], prep.isNotEmpty()) ?: return@replace m.value
+            "$prep$a — $b " + (if (prep.isNotEmpty()) "веках" else "века") + keepSentenceDot(text, m.range.last + 1)
+        }
+        t = centuryAbbrRegex.replace(t) { m ->
+            val prep = m.groupValues[1]
+            val plural = m.groupValues[3] == "вв"
+            val noun = when {
+                plural -> if (prep.isNotEmpty()) "веках" else "века"
+                prep.isNotEmpty() -> "веке"
+                else -> "век"
+            }
+            "$prep${m.groupValues[2]} $noun" + keepSentenceDot(t, m.range.last + 1)
+        }
+        t = plusNumberRegex.replace(t, "плюс ")
+        for (a in abbreviations) {
+            val src = t
+            t = a.re.replace(src) { m ->
+                val w = if (m.value.first().isUpperCase()) a.words.replaceFirstChar { it.uppercase() } else a.words
+                w + if (a.mayEndSentence) keepSentenceDot(src, m.range.last + 1) else ""
+            }
+        }
+        return t
+    }
+
+    /** "." if the abbreviation's dot also ended the sentence (end of text, a new line or a capital follows). */
+    private fun keepSentenceDot(text: String, after: Int): String {
+        var i = after
+        while (i < text.length && (text[i] == ' ' || text[i] == '\u00A0')) i++
+        if (i >= text.length || text[i] == '\n') return "."
+        val c = text[i]
+        return if (c.isUpperCase() || c == '«' || c == '"' || c == '„') "." else ""
+    }
+
     fun normalize(text: String): String {
-        var t = numberDashRegex.replace(text, "-")
+        var t = expandAbbreviations(numberDashRegex.replace(text, "-"))
 
         // "XIX веке" → "19 веке" (spelled as an ordinal just below)
         t = romanNounRegex.replace(t) { m ->

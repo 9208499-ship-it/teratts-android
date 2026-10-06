@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
@@ -103,6 +104,12 @@ fun MainScreen(
                     ) 
                 },
                 actions = {
+                    // the player with the last book, at its place
+                    if (canResume) {
+                        IconButton(onClick = onResumeClick) {
+                            Icon(Icons.Default.Headphones, contentDescription = stringResource(AppR.string.open_player))
+                        }
+                    }
                     IconButton(onClick = onHistoryClick) {
                         Icon(Icons.Default.History, contentDescription = "History")
                     }
@@ -196,7 +203,7 @@ fun MainScreen(
                             contentDescription = resumeContentDesc
                         }
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Icon(Icons.Default.Headphones, contentDescription = null)
                     }
                 }
 
@@ -310,19 +317,9 @@ fun MainScreen(
                             onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") }
                         )
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                stringResource(AppR.string.mix_voices_label), 
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Switch(checked = isMixingEnabled, onCheckedChange = onMixingEnabledChange)
-                        }
-
-                        AnimatedVisibility(visible = isMixingEnabled) {
+                        // voice mixing is not offered: with reading by roles every character has
+                        // a voice of its own, and a mixed narrator only confused things
+                        AnimatedVisibility(visible = false) {
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 DropdownSelector(
                                     label = stringResource(AppR.string.voice_style_2_label),
@@ -359,7 +356,9 @@ fun MainScreen(
                             leadingIcon = Icons.Default.Speed
                         )
 
-                        if (currentLangCode != "en" && currentLangCode != "ko") {
+                        // "advanced normalization" only changes French / Spanish / Portuguese;
+                        // Russian has its own normalisation that always runs
+                        if (currentLangCode == "fr" || currentLangCode == "es" || currentLangCode == "pt") {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()

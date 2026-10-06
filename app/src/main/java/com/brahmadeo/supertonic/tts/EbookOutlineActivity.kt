@@ -12,6 +12,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,6 +89,8 @@ import androidx.core.graphics.createBitmap
 
 class EbookOutlineActivity : ComponentActivity() {
     private var bookPath: String? = null
+    /** "Continue": the main screen starts reading right away, from the saved place. */
+    private var autoPlay = false
 
 
     private lateinit var ebookParser: EbookParser
@@ -118,6 +121,7 @@ class EbookOutlineActivity : ComponentActivity() {
                         }
                         val resultIntent = Intent()
                         resultIntent.putExtra(EXTRA_TEXT, text)
+                        resultIntent.putExtra("auto_play", autoPlay)
                         setResult(RESULT_OK, resultIntent)
                         finish()
                     },
@@ -232,7 +236,34 @@ class EbookOutlineActivity : ComponentActivity() {
         val toc = publication.tableOfContents
         val links = toc.ifEmpty { publication.readingOrder }
         
+        // "Continue where I stopped": the book's saved place (chapter + quote), as reading apps offer
+        val book = bookPath
+        val saved = book?.let { com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookOutlineActivity, java.io.File(it).name) }
         LazyColumn(modifier = Modifier.fillMaxSize()) {
+            if (book != null && saved != null && saved.chapter in publication.readingOrder.indices) {
+                item {
+                    val link = publication.readingOrder[saved.chapter]
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.outline_continue), style = MaterialTheme.typography.titleMedium) },
+                        supportingContent = {
+                            Text((link.title ?: stringResource(R.string.outline_chapter_n, saved.chapter + 1)) +
+                                ": «" + saved.quote.take(50) + "…»", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        },
+                        modifier = Modifier.clickable {
+                            setExtracting(true)
+                            CoroutineScope(Dispatchers.Main).launch {
+                                val result = ebookParser.extractText(publication, link)
+                                setExtracting(false)
+                                result.onSuccess { text ->
+                                    com.brahmadeo.supertonic.tts.utils.BookSession.start(this@EbookOutlineActivity, book, saved.chapter, text)
+                                    autoPlay = true
+                                    onTextExtracted(text)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
             items(links) { link ->
                 ChapterItem(link, publication, onTextExtracted, setExtracting)
                 link.children.forEach { child ->

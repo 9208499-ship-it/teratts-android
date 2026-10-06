@@ -83,7 +83,14 @@ class MainActivity : ComponentActivity() {
             }
         }
         override fun onExportComplete(success: Boolean, path: String) { }
-        override fun onTextChanged() { }
+        override fun onTextChanged() {
+            // the next chapter started: the input follows, so "Synthesize" does not go back to the old one
+            runOnUiThread {
+                val t = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "") ?: ""
+                if (t.isNotEmpty()) viewModel.inputText.value = t
+            }
+        }
+        override fun onSpokenPosition(index: Int, fraction: Float) { }
     }
 
     private val connection = object : ServiceConnection {
@@ -137,6 +144,8 @@ class MainActivity : ComponentActivity() {
                 
                 viewModel.inputText.value = prepareTextForTts(text, viewModel.currentLang.value)
                 Toast.makeText(this, "Chapter loaded", Toast.LENGTH_SHORT).show()
+                // "Continue where I stopped" in the outline: start reading at once (it resumes at the place)
+                if (result.data?.getBooleanExtra("auto_play", false) == true) generateAndPlay(viewModel.inputText.value)
             } else {
                 Log.e("MainActivity", "Received empty or null text from ebook activity")
             }
@@ -194,6 +203,15 @@ class MainActivity : ComponentActivity() {
         }
 
         handleIntent(intent)
+
+        // Launching the app opens the player with the last book at its place (paused);
+        // the settings screen is one "Back" away.
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && AssetManager.isReady(this) &&
+            !getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "").isNullOrEmpty()) {
+            startActivity(Intent(this, PlaybackActivity::class.java)
+                .putExtra("is_resume", true)
+                .putExtra("no_autoplay", true))
+        }
 
         setContent {
             SupertonicTheme(voiceFile = viewModel.selectedVoiceFile.value) {
@@ -451,7 +469,9 @@ class MainActivity : ComponentActivity() {
         viewModel.currentLang.value = prefs.getString("selected_lang", MainViewModel.DEFAULT_LANG) ?: MainViewModel.DEFAULT_LANG
         viewModel.selectedVoiceFile.value = prefs.getString("selected_voice", MainViewModel.DEFAULT_VOICE) ?: MainViewModel.DEFAULT_VOICE
         viewModel.selectedVoiceFile2.value = prefs.getString("selected_voice_2", MainViewModel.DEFAULT_VOICE_2) ?: MainViewModel.DEFAULT_VOICE_2
-        viewModel.isMixingEnabled.value = prefs.getBoolean("is_mixing_enabled", false)
+        // voice mixing is no longer offered: make sure it is off
+        viewModel.isMixingEnabled.value = false
+        if (prefs.getBoolean("is_mixing_enabled", false)) prefs.edit().putBoolean("is_mixing_enabled", false).apply()
         viewModel.mixAlpha.floatValue = prefs.getFloat("mix_alpha", 0.5f)
         viewModel.currentSpeed.floatValue = prefs.getFloat("speed", MainViewModel.DEFAULT_SPEED)
         viewModel.currentSteps.intValue = prefs.getInt("diffusion_steps", MainViewModel.DEFAULT_STEPS)

@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -75,16 +76,25 @@ fun PlaybackScreen(
     onSpeedChange: (Float) -> Unit = {},
     onPrevClick: () -> Unit = {},
     onNextClick: () -> Unit = {},
-    onCharactersClick: () -> Unit = {}
+    onCharactersClick: () -> Unit = {},
+    onSentenceLongClick: (Int) -> Unit = {},
+    currentFraction: Float = -1f      // share of the current phrase heard; < 0 = no word highlight
 ) {
-    var showList by remember { mutableStateOf(false) }
+    // the book text, scrollable by finger, is the main view (karaoke is the second one)
+    var showList by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
     val n = sentences.size
     val index = currentIndex.coerceIn(0, (n - 1).coerceAtLeast(0))
 
-    LaunchedEffect(currentIndex, showList) {
-        if (showList && currentIndex in sentences.indices) listState.animateScrollToItem(currentIndex)
+    // followVoice: the text scrolls after the voice until the user scrolls it by hand;
+    // then "Play" starts from the top visible phrase (as in Moon+ Reader)
+    var followVoice by remember { mutableStateOf(true) }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(dragged) { if (dragged) followVoice = false }
+    LaunchedEffect(currentIndex, showList, followVoice) {
+        if (showList && followVoice && currentIndex in sentences.indices) listState.animateScrollToItem(currentIndex)
     }
+    val playFrom: (Int) -> Unit = { i -> followVoice = true; onItemClick(i) }
 
     // time left: remaining characters at the current pace
     var sliderSpeed by remember(speed) { mutableStateOf(speed) }
@@ -144,14 +154,21 @@ fun PlaybackScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             itemsIndexed(sentences) { i, sentence ->
-                                SentenceItem(text = sentence, isActive = i == currentIndex, onClick = {
-                                    onItemClick(i)
-                                    showList = false
-                                })
+                                SentenceItem(text = sentence, isActive = i == currentIndex,
+                                    spokenFraction = if (i == currentIndex) currentFraction else -1f, onClick = {
+                                    playFrom(i)
+                                }, onLongClick = { onSentenceLongClick(i) })
                             }
                         }
+                        if (!followVoice) {
+                            ExtendedFloatingActionButton(
+                                onClick = { followVoice = true },
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                            ) { Text(stringResource(AppR.string.player_to_current)) }
+                        }
                     } else {
-                        KaraokeText(sentences, index, onClick = { showList = true })
+                        KaraokeText(sentences, index, onClick = { showList = true }, onLongClick = { onSentenceLongClick(index) },
+                            fraction = currentFraction)
                     }
                 }
 
@@ -168,7 +185,7 @@ fun PlaybackScreen(
                     value = seeking ?: fraction,
                     onValueChange = { seeking = it },
                     onValueChangeFinished = {
-                        seeking?.let { if (n > 1) onItemClick(Math.round(it * (n - 1))) }
+                        seeking?.let { if (n > 1) playFrom(Math.round(it * (n - 1))) }
                         seeking = null
                     },
                     enabled = n > 1,
@@ -192,11 +209,16 @@ fun PlaybackScreen(
                         icon = Icons.Default.SkipPrevious,
                         description = stringResource(AppR.string.player_prev),
                         enabled = index > 0,
-                        onClick = { onItemClick((index - 1).coerceAtLeast(0)) },
-                        onLongClick = { onItemClick((index - 5).coerceAtLeast(0)) }
+                        onClick = { playFrom((index - 1).coerceAtLeast(0)) },
+                        onLongClick = { playFrom((index - 5).coerceAtLeast(0)) }
                     )
                     FilledIconButton(
-                        onClick = onPlayPauseClick,
+                        onClick = {
+                            if (!isPlaying && showList && !followVoice && n > 0) {
+                                // scrolled by hand: start from the top phrase on screen
+                                playFrom(listState.firstVisibleItemIndex.coerceIn(0, n - 1))
+                            } else onPlayPauseClick()
+                        },
                         shape = CircleShape,
                         modifier = Modifier.size(88.dp)
                     ) {
@@ -210,8 +232,8 @@ fun PlaybackScreen(
                         icon = Icons.Default.SkipNext,
                         description = stringResource(AppR.string.player_next),
                         enabled = index < n - 1,
-                        onClick = { onItemClick((index + 1).coerceAtMost(n - 1)) },
-                        onLongClick = { onItemClick((index + 5).coerceAtMost(n - 1)) }
+                        onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
+                        onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
                     )
                 }
 
@@ -305,13 +327,29 @@ fun PlaybackScreen(
     }
 }
 
+/** [text] with the word being spoken at [fraction] lit (karaoke); fraction < 0 → plain. */
+@Composable
+private fun withSpokenWord(text: String, fraction: Float): androidx.compose.ui.text.AnnotatedString {
+    if (fraction < 0f) return androidx.compose.ui.text.AnnotatedString(text)
+    // the sentence being heard, shaded — calmer than a jumping word
+    val r = com.brahmadeo.supertonic.tts.utils.SpokenProgress.sentenceAt(text, fraction) ?: return androidx.compose.ui.text.AnnotatedString(text)
+    val lit = androidx.compose.ui.text.SpanStyle(
+        background = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+    )
+    return androidx.compose.ui.text.buildAnnotatedString {
+        append(text)
+        addStyle(lit, r.first, r.last + 1)
+    }
+}
+
 /** The sentence being read, large; the previous and next ones faded. Tap: the full list. */
 @Composable
-private fun KaraokeText(sentences: List<String>, index: Int, onClick: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun KaraokeText(sentences: List<String>, index: Int, onClick: () -> Unit, onLongClick: () -> Unit = {}, fraction: Float = -1f) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(vertical = 12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -324,7 +362,7 @@ private fun KaraokeText(sentences: List<String>, index: Int, onClick: () -> Unit
             Spacer(modifier = Modifier.height(20.dp))
         }
         Text(
-            sentences[index],
+            withSpokenWord(sentences[index], fraction),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
@@ -365,10 +403,13 @@ private fun BigSkipButton(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun SentenceItem(
     text: String,
     isActive: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    spokenFraction: Float = -1f
 ) {
     val containerColor by animateColorAsState(
         if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surface
@@ -386,7 +427,7 @@ fun SentenceItem(
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -402,7 +443,7 @@ fun SentenceItem(
                 Spacer(modifier = Modifier.width(12.dp))
             }
             Text(
-                text = text,
+                text = if (isActive) withSpokenWord(text, spokenFraction) else androidx.compose.ui.text.AnnotatedString(text),
                 style = if (isActive) MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f)
             )

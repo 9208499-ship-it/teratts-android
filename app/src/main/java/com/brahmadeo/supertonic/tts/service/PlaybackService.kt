@@ -187,6 +187,48 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     companion object {
         /** startIndex meaning "continue where this text was left off". */
         const val RESUME_INDEX = -1
+        /** Going back this much when reading is resumed later (a minute, as audiobook players do). */
+        const val RESUME_REWIND_SECONDS = 60f
+
+        /** The phrase about [seconds] of reading before [index] (≈14 characters a second at 1×). */
+        fun rewindIndex(sentences: List<String>, index: Int, seconds: Float, speed: Float): Int {
+            if (sentences.isEmpty()) return 0
+            var i = index.coerceIn(0, sentences.size - 1)
+            val need = seconds * 14f * speed.coerceAtLeast(0.3f)
+            var chars = 0f
+            while (i > 0 && chars < need) { i--; chars += sentences[i].length }
+            return i
+        }
+
+        /**
+         * Where to resume [text], a minute back: the book's Locator-like place (chapter +
+         * quote + progression) if [text] is a chapter of the book being read, else the place
+         * saved for this text. null = start from the beginning.
+         */
+        fun resumeIndex(context: android.content.Context, text: String, sentences: List<String>, speed: Float): Int? {
+            var idx: Int? = null
+            val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(context, text)
+            if (scope.isNotEmpty()) {
+                com.brahmadeo.supertonic.tts.utils.BookPositions.get(context, scope)
+                    ?.takeIf { it.chapter == com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(context) }
+                    ?.let { p ->
+                        val off = com.brahmadeo.supertonic.tts.utils.BookPositions.offsetIn(text, p)
+                        val ranges = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)
+                        idx = ranges.indexOfFirst { it != null && it.last >= off }.takeIf { it >= 0 }
+                    }
+            }
+            if (idx == null) idx = savedPosition(context, text)
+            com.brahmadeo.supertonic.tts.utils.BookSession.log(context, "resume: book=${scope.isNotEmpty()} place=${idx ?: "none"} of ${sentences.size}")
+            return idx?.let { rewindIndex(sentences, it, RESUME_REWIND_SECONDS, speed) }
+        }
+
+        /** The saved place in [text]: by its exact key, or by its beginning if the text changed slightly. */
+        fun savedPosition(context: android.content.Context, text: String): Int? {
+            val p = context.getSharedPreferences("TeraReadingPositions", android.content.Context.MODE_PRIVATE)
+            p.getInt(positionKey(text), -1).takeIf { it >= 0 }?.let { return it }
+            val prefix = p.getString("last_pos_prefix", null)
+            return if (!prefix.isNullOrEmpty() && text.trim().startsWith(prefix)) p.getInt("last_pos_index", 0) else null
+        }
         private const val POSITIONS_PREFS = "TeraReadingPositions"
         fun positionKey(text: String) = "pos_" + Integer.toHexString(text.hashCode()) + "_" + text.length
 
@@ -291,6 +333,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     private var synthesisJob: Job? = null
 
+    // ---- what is being heard: phrase start frames in the written audio vs the playback head ----
+    private val timeline = java.util.concurrent.CopyOnWriteArrayList<LongArray>()   // [phrase index, start frame]
+    @Volatile private var framesWritten = 0L
+    @Volatile private var headBase = 0L
+
+    private fun notifyListenerSpoken(index: Int, fraction: Float) {
+        val n = listeners.beginBroadcast()
+        for (i in 0 until n) {
+            try { listeners.getBroadcastItem(i).onSpokenPosition(index, fraction) } catch (_: RemoteException) {}
+        }
+        listeners.finishBroadcast()
+    }
+
     /** Reading speed; the slider on the playback screen changes it while reading (next sentence on). */
     @Volatile var liveSpeed: Float = 1.0f
 
@@ -306,7 +361,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
             val rate = SupertonicTTS.getAudioSampleRate()
             ensureAudioTrack(rate)
-            try { audioTrack?.flush() } catch (_: Exception) {}
+            // pause first: flush() is ignored on a playing track, and the frame count must start afresh
+            try { audioTrack?.pause(); audioTrack?.flush() } catch (_: Exception) {}
+            timeline.clear()
+            framesWritten = 0L
+            headBase = try { (audioTrack?.playbackHeadPosition ?: 0).toLong() and 0xffffffffL } catch (_: Exception) { 0L }
 
             isSynthesizing = true
             isPlaying = true
@@ -363,7 +422,25 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // from the same sentence instead of the beginning.
                 val positions = getSharedPreferences(POSITIONS_PREFS, MODE_PRIVATE)
                 val posKey = positionKey(text)
-                val requestedIndex = if (startIndex == RESUME_INDEX) positions.getInt(posKey, 0) else startIndex
+                // resumed: the saved place, a minute back
+                // a chapter of the book being read (any, not only the last one): make it current
+                com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this@PlaybackService, text)
+                val requestedIndex = if (startIndex == RESUME_INDEX) {
+                    resumeIndex(this@PlaybackService, text, sentences, speed) ?: 0
+                } else startIndex
+                // the book's place (Locator-like: chapter, progression, quote) when reading a book
+                val bookScope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text)
+                val bookChapter = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this@PlaybackService)
+                val chunkRanges = if (bookScope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
+                fun savePosition(idx: Int) {
+                    positions.edit().putInt(posKey, idx)
+                        .putString("last_pos_prefix", text.trim().take(160)).putInt("last_pos_index", idx).apply()
+                    chunkRanges.getOrNull(idx)?.let { r ->
+                        com.brahmadeo.supertonic.tts.utils.BookPositions.save(this@PlaybackService, bookScope, bookChapter,
+                            r.first.toFloat() / text.length.coerceAtLeast(1),
+                            text.substring(r.first, minOf(text.length, r.first + 80)))
+                    }
+                }
                 val validStartIndex = if (requestedIndex in 0 until totalSentences) requestedIndex else 0
 
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
@@ -373,16 +450,25 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val rolesOn = com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this@PlaybackService)
                 // character settings are kept per book (the book of this text, "" if none)
                 val charScope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text)
+                // the whole book's characters (built once in the background) and the user's corrections
+                val roster = if (rolesOn) com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this@PlaybackService, charScope) else null
+                if (rolesOn && charScope.isNotEmpty() && roster == null) {
+                    serviceScope.launch(Dispatchers.IO) { com.brahmadeo.supertonic.tts.utils.BookRoster.build(this@PlaybackService, charScope) }
+                }
+                val rolePrior = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(
+                    roster?.genders ?: emptyMap(),
+                    if (rolesOn) com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(this@PlaybackService, charScope) else emptyMap())
                 val roleResult = if (rolesOn) {
                     try {
-                        com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text),
+                        com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text, rolePrior),
                             com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope))
                     } catch (e: Throwable) {
                         Log.e(TAG, "Role analysis failed, reading without roles", e); null
                     }
                 } else null
                 val roleSpans = roleResult?.spans ?: emptyList()
-                val roleOffsets = if (roleResult != null) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locate(text, sentences) else IntArray(0)
+                // where each spoken chunk lies in the text (robust to the splitter's spacing and gluing)
+                val roleRanges = if (roleResult != null) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
                 val maleStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
                     com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)) ?: stylePath
                 val femaleStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
@@ -405,6 +491,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     val perCharacter = com.brahmadeo.supertonic.tts.utils.RolePrefs.charactersEnabled(this@PlaybackService)
                     val available = com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(this@PlaybackService)
                     val narratorFile = com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService)
+                    // own voices only for the main characters of the book; the rest — by gender
+                    val ranking = roster?.ranking ?: roleResult.characters.map { it.name }
+                    val mainSet = ranking.filter { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO }
+                        .take(com.brahmadeo.supertonic.tts.utils.RolePrefs.mainCount(this@PlaybackService)).toSet() + com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM
                     for (c in roleResult.characters) {
                         charSpeed[c.name] = com.brahmadeo.supertonic.tts.utils.CharacterVoices.speedOverride(this@PlaybackService, c.name, charScope) ?: c.speed
                         if (!perCharacter) continue
@@ -415,12 +505,23 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 ?.let { charVoice[c.name] = it }
                             continue
                         }
+                        if (c.name !in mainSet && !com.brahmadeo.supertonic.tts.utils.CharacterVoices.isManual(this@PlaybackService, c.name, charScope)) continue
                         val default = if (c.role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE)
                             com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService) else com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)
                         com.brahmadeo.supertonic.tts.utils.CharacterVoices.voiceFor(this@PlaybackService, c.name, c.role, available, default, narratorFile, charScope)
                             ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
                             ?.let { charVoice[c.name] = it }
                     }
+                }
+
+                // a line nobody could be matched to: the voice chosen for unknown lines, or else
+                // the book's main character (most lines) — in "Alice" that is Alice, not a man
+                val speechStyle = if (com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService).isNotEmpty()) unknownStyle else {
+                    val main = roleResult?.let { r ->
+                        (com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this@PlaybackService, charScope)?.ranking ?: r.characters.map { it.name })
+                            .firstOrNull { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO && it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM }
+                    }
+                    main?.let { charVoice[it] } ?: unknownStyle
                 }
 
                 // Channel sizing:
@@ -461,6 +562,35 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // audio queued, then calls audioTrack.play() and begins
                 // streaming. This is the gate that lets the buffer fill up
                 // without playback racing ahead and underrunning.
+                // The phrase and the word being HEARD: the track's playback head against the frame
+                // at which each phrase was written — not the moment the phrase was handed to the
+                // track, which runs ahead by the whole audio buffer.
+                val spokenTicker = launch(Dispatchers.Main) {
+                    val rate = SupertonicTTS.getAudioSampleRate().coerceAtLeast(1)
+                    var lastIndex = -1
+                    while (isActive) {
+                        kotlinx.coroutines.delay(120)
+                        val t = audioTrack ?: continue
+                        val head = try { (t.playbackHeadPosition.toLong() and 0xffffffffL) - headBase } catch (_: Exception) { continue }
+                        val entries = timeline.toList()
+                        val k = entries.indexOfLast { it[1] <= head }
+                        if (k < 0) continue
+                        val idx = entries[k][0].toInt()
+                        val start = entries[k][1]
+                        val estimate = start + ((sentences.getOrNull(idx)?.length ?: 0) / (14f * liveSpeed) * rate).toLong()
+                        val end = entries.getOrNull(k + 1)?.get(1)
+                            ?: if (isSynthesizing) maxOf(framesWritten, estimate) else framesWritten
+                        val fraction = if (end > start) ((head - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 0f
+                        if (idx != lastIndex) {
+                            lastIndex = idx
+                            currentSentenceIndex = idx
+                            notifyListenerProgress(idx, totalSentences)
+                            savePosition(idx)
+                        }
+                        notifyListenerSpoken(idx, fraction)
+                    }
+                }
+
                 val playerJob = launch(Dispatchers.IO) {
                     // Bump this thread's scheduling priority to AUDIO (-16
                     // nice). Android's audio framework gives such threads
@@ -493,11 +623,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         if (!isActive || SupertonicTTS.isCancelled()) break
                         if (data.isEmpty()) {
                             val playingIndex = sentenceMarkers.remove(data) ?: continue
-                            positions.edit().putInt(posKey, playingIndex).apply()
-                            launch(Dispatchers.Main) {
-                                currentSentenceIndex = playingIndex
-                                notifyListenerProgress(playingIndex, totalSentences)
-                            }
+                            // where this phrase starts in the written audio; spokenTicker turns it into "heard now"
+                            timeline.add(longArrayOf(playingIndex.toLong(), framesWritten))
+                            savePosition(playingIndex)   // a fallback if the playback-head ticker cannot run
                             continue
                         }
                         // Self-heal: we are supposed to be playing but the track was left
@@ -538,8 +666,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         // A sentence may hold a line and the author words ("— Привет, — сказала она"):
                         // with roles on it is voiced piece by piece, each with its own voice.
                         val pieces = if (roleResult != null) {
-                            com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.piecesOf(
-                                sentences[index], roleOffsets.getOrElse(index) { -1 }, roleSpans)
+                            com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.piecesIn(text, roleRanges.getOrNull(index), roleSpans, sentences[index])
                         } else {
                             listOf(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece(sentences[index],
                                 com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.NARRATOR, null, com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Manner.NORMAL))
@@ -554,7 +681,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             else pc.speaker?.let { charVoice[it] } ?: when (pc.role) {
                                 com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE -> maleStyle
                                 com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE -> femaleStyle
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> unknownStyle
+                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> speechStyle
                                 else -> narratorStyle
                             }
                             // character's own pace × how this line is said (выпалил / протянул)
@@ -621,6 +748,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // Consumer drains anything left in the buffer; then AudioTrack itself drains.
                 playerJob.join()
                 if (sawAnyAudio) drainAudioTrack()
+                spokenTicker.cancel()
 
                 withContext(Dispatchers.Main) {
                     if (isSynthesizing && isActive) {
@@ -742,6 +870,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 return false
             }
             offset += written
+            framesWritten += written / 2   // 16-bit mono: 2 bytes per frame
         }
         return true
     }
@@ -929,7 +1058,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             if (next == null) { stopPlayback(); return@launch }
             // same preparation as for a chapter opened by hand (MainActivity.prepareTextForTts)
             val prepared = if (lang.lowercase().startsWith("ko") || next.endsWith(" .")) next else "$next ."
-            getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit().putString("last_text", prepared).apply()
+            // the service owns "the current text": stamp it, so a player screen that was in the
+            // background notices the change when it comes back (and does not write the old one back)
+            getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit().putString("last_text", prepared)
+                .putLong("last_text_time", System.currentTimeMillis()).apply()
             notifyListenerTextChanged()
             synthesizeAndPlay(prepared, lang, stylePath, liveSpeed, steps, RESUME_INDEX)
         }

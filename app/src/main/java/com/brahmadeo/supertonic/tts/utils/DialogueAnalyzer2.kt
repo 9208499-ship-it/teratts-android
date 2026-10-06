@@ -30,6 +30,55 @@ object DialogueAnalyzer2 {
 
     class Result(val spans: List<Span>, val characters: List<Character>)
 
+    /**
+     * What is known beyond this text: genders of characters learned from the whole
+     * book, and the user's corrections — speechKey(line) → speaker name, or
+     * [FORCE_NARRATOR] / [FORCE_UNKNOWN]. A correction also steers turn-taking: the
+     * lines after it alternate from the right person.
+     */
+    class Prior(
+        val genders: Map<String, Role> = emptyMap(),
+        val overrides: Map<String, String> = emptyMap()
+    )
+
+    const val FORCE_NARRATOR = "#narrator"
+    const val FORCE_UNKNOWN = "#unknown"
+
+    /** Normalised key of a line for corrections: letters and digits only. */
+    fun speechKey(line: String): String =
+        line.lowercase().replace('ё', 'е').replace(Regex("[^а-яa-z0-9]+"), " ").trim().take(80)
+
+    /** Case forms of a Russian name: "Пётр" → петра, петру, петром, петре; "Маша" → маши, машу… */
+    fun nameForms(name: String, female: Boolean?): Set<String> {
+        val n = name.lowercase().replace('ё', 'е')
+        val forms = linkedSetOf(n)
+        val vowels = "аеиоуыэюя"
+        when {
+            n.first().isDigit() -> if (n.endsWith("й")) {
+                val st = n.dropLast(1); forms += listOf(st + "го", st + "му", st + "м")
+            }
+            n.endsWith("ия") -> { val st = n.dropLast(1); forms += listOf(st + "и", st + "ю", st + "ей") }
+            n.endsWith("а") && n.length > 2 -> {
+                val st = n.dropLast(1); val c = st.last()
+                forms += listOf(st + (if (c in "гкхжшщч") "и" else "ы"), st + "е", st + "у", st + "ою",
+                    st + (if (c in "жшщчц") "ей" else "ой"))
+            }
+            n.endsWith("я") && n.length > 2 -> { val st = n.dropLast(1); forms += listOf(st + "и", st + "е", st + "ю", st + "ей") }
+            n.endsWith("й") -> { val st = n.dropLast(1); forms += listOf(st + "я", st + "ю", st + "ем", st + "е") }
+            n.endsWith("ь") -> {
+                val st = n.dropLast(1)
+                forms += if (female == true) listOf(st + "и", st + "ью") else listOf(st + "я", st + "ю", st + "ем", st + "е")
+            }
+            n.last() !in vowels -> {
+                // fleeting vowel: Павел → Павла
+                val stems = linkedSetOf(n)
+                if (n.length > 4 && Regex(".*[^аеиоуыэюя](ел|ек|ок)$").matches(n)) stems += n.dropLast(2) + n.last()
+                for (st in stems) forms += listOf(st + "а", st + "у", st + "ом", st + "е")
+            }
+        }
+        return forms
+    }
+
     data class Piece(val text: String, val role: Role, val speaker: String?, val manner: Manner)
 
     private enum class G { M, F }
@@ -38,6 +87,8 @@ object DialogueAnalyzer2 {
 
     private val dashes = setOf('—', '–', '-', '―')
     private val SPACED_DASH = Regex("""\s[—–―-]\s""")
+    /** A dash opening a line inside a paragraph: after ":" or the end of a sentence, before a capital or a quote. */
+    private val INNER_DASH_LINE = Regex("""(?<=[:.!?…])\s+[—–―]\s+(?=[«"„“\p{Lu}])""")
     private val WORD = Regex("""\d+[‑-][а-яё]+|[А-Яа-яЁё]+""")
 
     /** First-person narration: "— … — уточнил я". The hero speaks in the narrator's voice. */
@@ -66,6 +117,45 @@ object DialogueAnalyzer2 {
         "Зачем", "Если", "Хорошо", "Ладно", "Конечно", "Спасибо", "Привет", "Слушай", "Смотри", "Мне", "Меня",
         "Наконец", "Вдруг", "Сначала", "Вероятно", "Видимо", "Похоже", "Кстати", "Впрочем", "Однако",
         "Опять", "Снова", "Внезапно", "Неожиданно", "Вскоре", "Сразу", "Тотчас", "Тут", "Следом", "Затем"
+    )
+
+    /** Common diminutives → full names (both directions are tried when matching people). */
+    private val diminutives: Map<String, List<String>> = mapOf(
+        "петя" to listOf("пётр"), "маша" to listOf("мария"), "маруся" to listOf("мария"), "саша" to listOf("александр", "александра"),
+        "шура" to listOf("александр", "александра"), "ваня" to listOf("иван"), "коля" to listOf("николай"), "дима" to listOf("дмитрий"),
+        "митя" to listOf("дмитрий"), "миша" to listOf("михаил"), "лёша" to listOf("алексей"), "алёша" to listOf("алексей"),
+        "серёжа" to listOf("сергей"), "андрюша" to listOf("андрей"), "наташа" to listOf("наталья", "наталия"),
+        "катя" to listOf("екатерина"), "лена" to listOf("елена"), "оля" to listOf("ольга"), "таня" to listOf("татьяна"),
+        "женя" to listOf("евгений", "евгения"), "вова" to listOf("владимир"), "володя" to listOf("владимир"),
+        "юра" to listOf("юрий"), "костя" to listOf("константин"), "паша" to listOf("павел"), "гриша" to listOf("григорий"),
+        "федя" to listOf("фёдор"), "витя" to listOf("виктор"), "толя" to listOf("анатолий"), "боря" to listOf("борис"),
+        "слава" to listOf("вячеслав", "ярослав", "святослав"), "света" to listOf("светлана"), "аня" to listOf("анна"),
+        "надя" to listOf("надежда"), "люба" to listOf("любовь"), "галя" to listOf("галина"), "валя" to listOf("валентина", "валентин"),
+        "зина" to listOf("зинаида"), "даша" to listOf("дарья"), "настя" to listOf("анастасия"), "ира" to listOf("ирина"),
+        "юля" to listOf("юлия"), "ксюша" to listOf("ксения"), "соня" to listOf("софья", "софия"), "поля" to listOf("полина"),
+        "лиза" to listOf("елизавета"), "вика" to listOf("виктория"), "кира" to listOf("кирилл"), "стёпа" to listOf("степан"),
+        "тёма" to listOf("артём"), "рома" to listOf("роман"), "гена" to listOf("геннадий"), "жора" to listOf("георгий"),
+        "гоша" to listOf("георгий", "игорь"), "вася" to listOf("василий"), "лёва" to listOf("лев"), "сеня" to listOf("семён", "арсений"),
+        "макс" to listOf("максим"), "тоня" to listOf("антонина", "антон"), "люда" to listOf("людмила"), "мила" to listOf("людмила"),
+        "вера" to listOf("вероника"), "лара" to listOf("лариса"), "рита" to listOf("маргарита"), "нюра" to listOf("анна"),
+        "дуня" to listOf("евдокия"), "фрося" to listOf("ефросинья"), "тима" to listOf("тимофей", "тимур"), "яша" to listOf("яков"),
+        "миля" to listOf("эмилия"), "эля" to listOf("элеонора", "эльвира"), "лёня" to listOf("леонид"), "веня" to listOf("вениамин")
+    )
+
+    /** Ranks and titles: "— Лейтенант, вы готовы?" addresses someone by rank, not by name. */
+    private val titles = setOf(
+        "лейтенант", "капитан", "майор", "полковник", "генерал", "сержант", "рядовой", "командир", "адмирал",
+        "товарищ", "господин", "госпожа", "сэр", "мадам", "доктор", "профессор", "начальник", "шеф", "босс",
+        "ваше", "милорд", "миледи", "сударь", "сударыня", "барин", "барыня", "отец", "батюшка", "матушка", "старик"
+    )
+
+    /** Capitalised words that open a line with a comma but are not someone's name. */
+    private val notVocatives = setOf(
+        "Господи", "Боже", "Чёрт", "Черт", "Блин", "Эй", "Ой", "Ах", "Эх", "Ох", "Слушайте", "Послушай",
+        "Послушайте", "Знаешь", "Знаете", "Понимаешь", "Понимаете", "Извини", "Извините", "Простите",
+        "Прости", "Пожалуйста", "Спасибо", "Ладно", "Значит", "Короче", "Кстати", "Впрочем", "Наверное",
+        "Конечно", "Нет", "Да", "Ага", "Угу", "Ну", "Итак", "Так", "Вот", "Здравствуй", "Здравствуйте",
+        "Привет", "Пока", "Товарищи", "Друзья", "Ребята", "Господа", "Дамы", "Мама", "Папа", "Сынок", "Дочка"
     )
 
     /** Role nouns that speak, with grammatical gender (the voice follows it). */
@@ -113,7 +203,7 @@ object DialogueAnalyzer2 {
 
     // ------------------------------------------------------------------ API
 
-    fun analyze(text: String): Result {
+    fun analyze(text: String, prior: Prior? = null): Result {
         val paragraphs = paragraphRanges(text)
         val parsed = paragraphs.map { (s, e) -> parseParagraph(text, s, e) }
 
@@ -129,6 +219,43 @@ object DialogueAnalyzer2 {
         val nameGender = HashMap<String, G>()
         for ((n, c) in nameVotes) {
             if (c[0] > c[1] * 2) nameGender[n] = G.M else if (c[1] > c[0] * 2) nameGender[n] = G.F
+        }
+        prior?.genders?.forEach { (n, r) ->
+            if (n !in nameGender) when (r) { Role.MALE -> nameGender[n] = G.M; Role.FEMALE -> nameGender[n] = G.F; else -> {} }
+        }
+        // every case form of every known name → the name ("Петра", "Петру" → "Пётр")
+        val nameOf = HashMap<String, String>()
+        for ((n, g) in nameGender) if (n.first().isUpperCase() || n.first().isDigit()) {
+            for (f in nameForms(n, g == G.F)) nameOf.putIfAbsent(f, n)
+        }
+        fun canon(w: String): String? = nameOf[w.lowercase().replace('ё', 'е')]
+        // who is spoken TO: "— Маша, иди сюда", "…, Маша!", "сказал Петру", "посмотрела на Машу"
+        // a vocative is in the nominative, so even a name not seen before counts
+        fun known(w: String): String? = canon(w) ?: run {
+            // Петя ↔ Пётр, Маша ↔ Мария: a known person under another form of the name
+            val lw = w.lowercase()
+            val linked = (diminutives[lw] ?: emptyList()) + diminutives.filterValues { lw in it }.keys
+            linked.firstNotNullOfOrNull { canon(it) }
+        }
+        fun vocative(w: String): String? {
+            if (w.lowercase() in titles) return null
+            return known(w) ?: w.takeIf { it.length >= 3 && it[0].isUpperCase() && it !in notNames && it !in notVocatives }
+        }
+        fun addresseeIn(speech: String, authorWords: List<String>): String? {
+            val sw = WORD.findAll(speech).map { it.value }.toList()
+            sw.firstOrNull()?.let { first ->
+                val after = speech.substringAfter(first, "").trimStart()
+                if (after.startsWith(",") || after.startsWith("!")) vocative(first)?.let { return it }
+            }
+            // ", Маша," / ", Маша!" anywhere in the line
+            Regex(""",\s*([А-ЯЁ][а-яё]+)\s*(?=[,!?.…»”"])""").findAll(speech).forEach { m ->
+                vocative(m.groupValues[1])?.let { return it }
+            }
+            for (w in authorWords) {
+                val c = canon(w) ?: continue
+                if (w.lowercase().replace('ё', 'е') != c.lowercase().replace('ё', 'е')) return c   // an oblique form
+            }
+            return null
         }
         var heroGender: G? = null
         fun genderOf(speaker: String?): G? = when {
@@ -150,18 +277,21 @@ object DialogueAnalyzer2 {
         val mannerCount = HashMap<String, IntArray>()  // per speaker, by Manner.ordinal
         var pendingQuoteSpeaker: String? = null        // set by "В голове прозвучало:" for the next «…»
         var pendingFromIntro = false                   // true only for an introduction ending with ":"
+        var lastAddressee: String? = null              // who the previous line spoke to — likely answers next
+        var heroAttributed = 0                         // "сказал я": the book is told in the first person
 
         for (p in parsed) {
             if (p.speech.isEmpty()) {
                 // narration: remember who was mentioned; a long passage ends the exchange
                 for (w in words(text, p.start, p.end)) {
-                    val g = nameGender[w] ?: continue
-                    lastMentioned[g] = w
+                    val n = canon(w) ?: continue
+                    val g = nameGender[n] ?: continue
+                    lastMentioned[g] = n
                 }
                 // "В голове прозвучало:" / "Раздался голос 896‑го:" → who speaks in the next «…»
                 pendingQuoteSpeaker = introSpeaker(text.substring(p.start, p.end))
                 pendingFromIntro = pendingQuoteSpeaker != null
-                if (p.end - p.start > 300) run.clear()
+                if (p.end - p.start > 300) { run.clear(); lastAddressee = null }
                 out.addAll(p.spans(null, null, Manner.NORMAL))
                 continue
             }
@@ -173,7 +303,22 @@ object DialogueAnalyzer2 {
 
             var speaker: String? = null
             var gender: G? = null
-            if (p.quoted) {
+            val forced = prior?.overrides?.takeIf { it.isNotEmpty() }?.let { ov ->
+                p.speech.asSequence().mapNotNull { (a, b, _) -> ov[speechKey(text.substring(a, b))] }.firstOrNull()
+            }
+            if (forced == FORCE_NARRATOR) {
+                // the user says this is not a line at all: read it as narration
+                out.addAll(p.pieces.map { (a, b, _) -> Span(a, b, Role.NARRATOR) })
+                continue
+            }
+            val speechText = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
+            val addressee = if (forced == null) {
+                addresseeIn(speechText, authors.flatMap { (a, b) -> words(text, a, b) })
+            } else null
+            if (forced != null) {
+                speaker = if (forced == FORCE_UNKNOWN) null else forced
+                gender = genderOf(speaker)
+            } else if (p.quoted) {
                 // a «…» message: introduced in this paragraph ("прозвучал голос: «…»"), by the
                 // previous one ("В голове прозвучало:"), or recognisable by its content
                 val intro = authors.firstOrNull()?.let { (a, b) -> introSpeaker(text.substring(a, b)) }
@@ -199,8 +344,11 @@ object DialogueAnalyzer2 {
                 pendingFromIntro = false
             } else if (h != null) {
                 when {
-                    h.hero -> { speaker = HERO; gender = h.verbGender }
-                    h.name != null -> { speaker = h.name; gender = h.verbGender ?: nameGender[h.name] }
+                    h.hero -> { speaker = HERO; gender = h.verbGender; heroAttributed++ }
+                    h.name != null -> {
+                        speaker = canon(h.name) ?: h.name
+                        gender = h.verbGender ?: nameGender[speaker]
+                    }
                     h.noun != null -> { speaker = h.noun; gender = speakerNouns[h.noun] }
                     else -> {
                         gender = h.pronoun ?: h.verbGender
@@ -220,10 +368,25 @@ object DialogueAnalyzer2 {
                     }
                 }
             } else if (authors.isEmpty() && !p.quoted) {
-                // bare line: the two people talking take turns
-                val distinct = run.distinct()
-                if (distinct.size >= 2 && run.size >= 2) speaker = run[run.size - 2]
+                // bare line: the one just spoken to answers; otherwise the two people take turns
+                val asked = lastAddressee
+                if (asked != null && run.lastOrNull() != asked) {
+                    speaker = asked
+                } else {
+                    val distinct = run.distinct()
+                    if (distinct.size >= 2 && run.size >= 2) speaker = run[run.size - 2]
+                }
             }
+            if (forced == null && addressee != null) {
+                if (speaker == addressee) {
+                    // "— Маша, иди сюда" cannot be Маша's own line
+                    speaker = run.lastOrNull { it != addressee }
+                    gender = null
+                } else if (speaker == null && authors.isEmpty() && !p.quoted) {
+                    speaker = run.lastOrNull { it != addressee }
+                }
+            }
+            if (!p.quoted) lastAddressee = addressee
             if (speaker == HERO && gender != null) heroGender = gender
             if (speaker != null && gender == null) gender = genderOf(speaker)
             if (speaker != null) {
@@ -233,6 +396,14 @@ object DialogueAnalyzer2 {
                 mannerCount.getOrPut(speaker) { IntArray(Manner.values().size) }[manner.ordinal]++
             }
             out.addAll(p.spans(gender, speaker, manner))
+        }
+
+        // Not a first-person book: unattributed «…» thoughts are not "the hero-narrator's" —
+        // leave them unknown (the reader gives them the main character's voice).
+        if (heroAttributed == 0 && HERO in lineCount) {
+            for (i in out.indices) if (out[i].speaker == HERO) out[i] = out[i].copy(speaker = null, role = Role.SPEECH)
+            lineCount.remove(HERO)
+            mannerCount.remove(HERO)
         }
 
         // One machine, two names: "искин" / "компьютер" and a single numbered name ("896‑й")
@@ -325,6 +496,62 @@ object DialogueAnalyzer2 {
             }
         }
         return if (out.isEmpty()) listOf(Piece(sentence, Role.NARRATOR, null, Manner.NORMAL)) else out
+    }
+
+    /**
+     * Where each chunk the reader speaks lies in the original text. The reader's
+     * splitter glues sentences (and paragraphs) with spaces, adds a space before
+     * "!"/"?" and drops commas at its cuts, so chunks are matched on letters and
+     * digits only — robust to all of that. null = not found.
+     */
+    fun locateRanges(text: String, sentences: List<String>): List<IntRange?> {
+        val map = IntArray(text.length)
+        val sb = StringBuilder(text.length)
+        for ((i, c) in text.withIndex()) if (c.isLetterOrDigit()) { map[sb.length] = i; sb.append(c.lowercaseChar()) }
+        val norm = sb.toString()
+        var cursor = 0
+        return sentences.map { sentence ->
+            val ns = buildString { for (c in sentence) if (c.isLetterOrDigit()) append(c.lowercaseChar()) }
+            if (ns.isEmpty()) return@map null
+            val at = norm.indexOf(ns, cursor)
+            if (at < 0) return@map null
+            cursor = at + ns.length
+            val start = map[at]
+            var end = map[at + ns.length - 1] + 1
+            // keep the closing punctuation and quotes: "руках!»"
+            while (end < text.length && !text[end].isLetterOrDigit() && !text[end].isWhitespace()) end++
+            start until end
+        }
+    }
+
+    /** Pieces (from the ORIGINAL text) of the chunk at [range]; [fallback] is read by the narrator if not found. */
+    fun piecesIn(text: String, range: IntRange?, spans: List<Span>, fallback: String): List<Piece> {
+        if (range == null) return listOf(Piece(fallback, Role.NARRATOR, null, Manner.NORMAL))
+        val offset = range.first
+        val end = range.last + 1
+        val out = ArrayList<Piece>()
+        var lo = 0
+        var hi = spans.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (spans[mid].end <= offset) lo = mid + 1 else hi = mid
+        }
+        for (k in lo until spans.size) {
+            val s = spans[k]
+            if (s.start >= end) break
+            val a = maxOf(s.start, offset)
+            val b = minOf(s.end, end)
+            if (a >= b) continue
+            val piece = text.substring(a, b).trim()
+            if (!piece.any { it.isLetterOrDigit() }) continue
+            val last = out.lastOrNull()
+            if (last != null && last.role == s.role && last.speaker == s.speaker && last.manner == s.manner) {
+                out[out.size - 1] = last.copy(text = last.text + " " + piece)
+            } else {
+                out.add(Piece(piece, s.role, s.speaker, s.manner))
+            }
+        }
+        return if (out.isEmpty()) listOf(Piece(fallback, Role.NARRATOR, null, Manner.NORMAL)) else out
     }
 
     fun locate(text: String, sentences: List<String>): IntArray {
@@ -497,7 +724,20 @@ object DialogueAnalyzer2 {
         var s = start
         while (s < end && text[s].isWhitespace()) s++
         if (s >= end) return Parsed(start, end, listOf(Triple(start, end, false)))
-        return if (text[s] in dashes) parseDash(text, start, s, end) else parseQuotes(text, start, end)
+        if (text[s] in dashes) return parseDash(text, start, s, end)
+        // a line can also start inside a paragraph: "…и сказала: — Держи себя в руках!"
+        // or "Гусеница помолчала. — Держи себя в руках, — сказала она."
+        val inner = INNER_DASH_LINE.find(text.substring(start, end))
+        if (inner != null) {
+            val dashAt = start + inner.range.first + inner.value.indexOfFirst { it in dashes }
+            val before = text.substring(start, dashAt)
+            // quotes in the narration part keep working ("Он сказал: «…»")
+            val head = if (before.any { it in quotePairs.keys }) parseQuotes(text, start, dashAt).pieces
+                       else listOf(Triple(start, dashAt, false))
+            val rest = parseDash(text, dashAt, dashAt, end).pieces
+            return Parsed(start, end, head + rest)
+        }
+        return parseQuotes(text, start, end)
     }
 
     private fun parseDash(text: String, pStart: Int, dashAt: Int, end: Int): Parsed {

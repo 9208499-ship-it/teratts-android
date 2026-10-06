@@ -562,6 +562,7 @@ private fun RolesSection() {
     var female by remember { mutableStateOf(prefs.femaleVoice(context)) }
     var narrator by remember { mutableStateOf(prefs.narratorVoice(context)) }
     var unknown by remember { mutableStateOf(prefs.unknownVoice(context)) }
+    var mainCount by remember { mutableStateOf(prefs.mainCount(context).toFloat()) }
     var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
     val voices = remember { prefs.availableVoices(context) }
     Column {
@@ -578,6 +579,18 @@ private fun RolesSection() {
                 checked = perCharacter,
                 onToggle = { perCharacter = it; prefs.setCharactersEnabled(context, it) }
             )
+            if (perCharacter) {
+                Column(modifier = Modifier.padding(horizontal = 28.dp)) {
+                    Text(stringResource(AppR.string.roles_main_count, mainCount.toInt()), style = MaterialTheme.typography.bodyMedium)
+                    Slider(
+                        value = mainCount,
+                        onValueChange = { mainCount = Math.round(it).toFloat() },
+                        onValueChangeFinished = { prefs.setMainCount(context, mainCount.toInt()) },
+                        valueRange = 2f..12f,
+                        steps = 9
+                    )
+                }
+            }
             RoleVoicePicker(stringResource(AppR.string.roles_narrator), narrator, voices,
                 mainLabel = stringResource(AppR.string.roles_narrator_main)) { narrator = it; prefs.setNarratorVoice(context, it) }
             RoleVoicePicker(stringResource(AppR.string.roles_male), male, voices) { male = it; prefs.setMaleVoice(context, it) }

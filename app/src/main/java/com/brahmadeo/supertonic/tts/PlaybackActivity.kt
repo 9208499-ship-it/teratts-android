@@ -24,6 +24,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import androidx.core.content.edit
+import kotlinx.coroutines.launch
 
 class PlaybackActivity : ComponentActivity() {
 
@@ -35,6 +36,8 @@ class PlaybackActivity : ComponentActivity() {
     private var currentIndexState = mutableIntStateOf(-1)
     private var isPlayingState = mutableStateOf(false)
     private var isServiceActiveState = mutableStateOf(false)
+    /** When this screen got its text; a newer "last_text" from the service wins on resume. */
+    private var textLoadedAt = 0L
     private var isExportingState = mutableStateOf(false)
     private var exportCurrentState = mutableIntStateOf(0)
     private var exportTotalState = mutableIntStateOf(0)
@@ -53,6 +56,9 @@ class PlaybackActivity : ComponentActivity() {
         const val EXTRA_STEPS = "extra_steps"
         const val EXTRA_LANG = "extra_lang"
     }
+
+    /** Share of the current phrase already heard: lights the word being spoken. */
+    private val spokenFractionState = mutableFloatStateOf(0f)
 
     private val playbackListenerStub = object : IPlaybackListener.Stub() {
         override fun onStateChanged(isPlaying: Boolean, hasContent: Boolean, isSynthesizing: Boolean) {
@@ -84,12 +90,20 @@ class PlaybackActivity : ComponentActivity() {
             }
         }
 
+        override fun onSpokenPosition(index: Int, fraction: Float) {
+            runOnUiThread {
+                if (index != currentIndexState.intValue) currentIndexState.intValue = index
+                spokenFractionState.floatValue = fraction
+            }
+        }
+
         override fun onTextChanged() {
             // the next chapter started by itself: show its text
             runOnUiThread {
                 val newText = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "") ?: ""
                 if (newText.isNotEmpty() && newText != currentText) {
                     currentText = newText
+                    textLoadedAt = System.currentTimeMillis()
                     setupList(currentText)
                     currentIndexState.intValue = 0
                 }
@@ -123,11 +137,12 @@ class PlaybackActivity : ComponentActivity() {
                         if (serviceIndex != -1) {
                             currentIndexState.intValue = serviceIndex
                         }
-                    } else {
-                        // Not playing in service, but user wants to resume: 
+                    } else if (!intent.getBooleanExtra("no_autoplay", false)) {
+                        // Not playing in service, but user wants to resume:
                         // Start playback from the saved index
                         playFromIndex(currentIndexState.intValue)
                     }
+                    // opened at app launch: show the book at its place and wait for "Play"
                     restoreState()
                 } else {
                     startPlaybackFromIntent()
@@ -152,6 +167,7 @@ class PlaybackActivity : ComponentActivity() {
         currentSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f)
         currentSteps = intent.getIntExtra(EXTRA_STEPS, 5)
         currentLang = intent.getStringExtra(EXTRA_LANG) ?: "en"
+        textLoadedAt = System.currentTimeMillis()
 
         if (intent.getBooleanExtra("is_resume", false) && currentText.isEmpty()) {
              val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
@@ -161,9 +177,17 @@ class PlaybackActivity : ComponentActivity() {
              currentSteps = prefs.getInt("last_steps", 5)
              currentLang = prefs.getString("last_lang", "en") ?: "en"
              currentIndexState.intValue = prefs.getInt("last_index", 0)
+             textLoadedAt = prefs.getLong("last_text_time", 0L)
         }
 
         setupList(currentText)
+        if (intent.getBooleanExtra("is_resume", false)) {
+            // the place reached by the voice in this text, a minute back — shown and lit before "Play"
+            com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
+            PlaybackService.resumeIndex(this, currentText, sentencesState.value, currentSpeed)?.let {
+                currentIndexState.intValue = it
+            }
+        }
 
         setContent {
             SupertonicTheme(voiceFile = currentVoicePath) {
@@ -187,6 +211,8 @@ class PlaybackActivity : ComponentActivity() {
                         getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
                             .putFloat("last_speed", v).putFloat("speed", v).apply()
                     },
+                    onSentenceLongClick = { i -> showSpeakerDialog(i) },
+                    currentFraction = if (isPlayingState.value) spokenFractionState.floatValue else -1f,
                     onCharactersClick = {
                         saveState()
                         startActivity(android.content.Intent(this@PlaybackActivity, CharactersActivity::class.java))
@@ -212,8 +238,11 @@ class PlaybackActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (intent.getBooleanExtra("is_resume", false)) {
-            val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        val prefs0 = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        // the service moved on (the next chapter) while this screen was in the background
+        val newer = prefs0.getLong("last_text_time", 0L) > textLoadedAt
+        if (intent.getBooleanExtra("is_resume", false) || newer) {
+            val prefs = prefs0
             val newText = prefs.getString("last_text", "") ?: ""
             if (newText != currentText) {
                 currentText = newText
@@ -222,7 +251,13 @@ class PlaybackActivity : ComponentActivity() {
                 currentSteps = prefs.getInt("last_steps", 5)
                 currentLang = prefs.getString("last_lang", "en") ?: "en"
                 currentIndexState.intValue = prefs.getInt("last_index", 0)
+                textLoadedAt = prefs.getLong("last_text_time", 0L)
                 setupList(currentText)
+                if (playbackService?.isServiceActive != true) {
+                    com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
+                    PlaybackService.resumeIndex(this, currentText, sentencesState.value, currentSpeed)
+                        ?.let { currentIndexState.intValue = it }
+                }
             }
         }
 
@@ -293,6 +328,51 @@ class PlaybackActivity : ComponentActivity() {
         }
     }
 
+    /** Long press on a phrase: "who says this?" — saved for the book and applied right away. */
+    private fun showSpeakerDialog(index: Int) {
+        val text = currentText
+        val sentences = sentencesState.value
+        if (index !in sentences.indices) return
+        val ctx = this
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
+            val roster = com.brahmadeo.supertonic.tts.utils.BookRoster.cached(ctx, scope)
+            val (result, line) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text,
+                        com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(roster?.genders ?: emptyMap(),
+                            com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(ctx, scope))),
+                    com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(ctx, scope))
+                val rg = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)[index]
+                // the whole line (a span) this phrase belongs to
+                val span = if (rg == null) null else r.spans.firstOrNull { it.start <= rg.last && it.end > rg.first &&
+                    it.role != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.NARRATOR }
+                r to span?.let { text.substring(it.start, it.end) }
+            }
+            if (line == null) {
+                android.widget.Toast.makeText(ctx, getString(R.string.speaker_no_line), android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val hero = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO
+            val names = (result.characters.map { it.name } + (roster?.ranking ?: emptyList())).distinct()
+            val labels = names.map { if (it == hero) getString(R.string.characters_hero) else it } +
+                listOf(getString(R.string.speaker_unknown), getString(R.string.speaker_narrator))
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                .setTitle(getString(R.string.speaker_who) + "\n«" + line.trim().take(80) + "»")
+                .setItems(labels.toTypedArray()) { _, which ->
+                    val choice = when {
+                        which < names.size -> names[which]
+                        which == names.size -> com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.FORCE_UNKNOWN
+                        else -> com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.FORCE_NARRATOR
+                    }
+                    com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.set(ctx, scope, line, choice)
+                    playFromIndex(index)   // apply right away
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
     private fun saveState() {
         getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit {
             putString("last_text", currentText)
@@ -301,6 +381,7 @@ class PlaybackActivity : ComponentActivity() {
                 .putInt("last_steps", currentSteps)
                 .putString("last_lang", currentLang)
                 .putBoolean("is_playing", true)
+                .putLong("last_text_time", System.currentTimeMillis().also { textLoadedAt = it })
         }
     }
 

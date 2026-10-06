@@ -33,8 +33,56 @@ object BookSession {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_PATH, path).putInt(KEY_INDEX, index).putString(KEY_PREFIX, prefixOf(chapterText))
             .apply()
+        // a different book: forget the old one's chapters
+        if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("chapters_of", null) != path) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_CHAPTERS, "{}").putString("chapters_of", path).apply()
+        }
+        rememberChapter(context, prefixOf(chapterText), index)
         log(context, "start: chapter $index of $path, ${chapterText.length} chars, begins «${chapterText.trim().take(40)}»")
     }
+
+    /** Beginnings of all chapters of the current book seen so far: prefix → reading-order index. */
+    private const val KEY_CHAPTERS = "chapters"
+
+    private fun rememberChapter(context: Context, prefix: String, index: Int) {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val map = try { org.json.JSONObject(p.getString(KEY_CHAPTERS, "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
+        if (map.length() > 2000) return
+        map.put(prefix, index)
+        p.edit().putString(KEY_CHAPTERS, map.toString()).apply()
+    }
+
+    /**
+     * If [text] is a chapter of the current book seen before (opened from the contents,
+     * or reached by reading on), make it the current chapter — so its place is kept and
+     * the chapter after IT follows — and return its index; null if it is not.
+     */
+    fun adopt(context: Context, text: String): Int? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (p.getString(KEY_PATH, null) == null) return null
+        val t = text.trim()
+        val cur = p.getString(KEY_PREFIX, null)
+        if (!cur.isNullOrEmpty() && t.startsWith(cur)) return p.getInt(KEY_INDEX, -1)
+        val map = try { org.json.JSONObject(p.getString(KEY_CHAPTERS, "{}") ?: "{}") } catch (e: Exception) { return null }
+        for (prefix in map.keys()) {
+            if (prefix.isNotEmpty() && t.startsWith(prefix)) {
+                val idx = map.getInt(prefix)
+                p.edit().putInt(KEY_INDEX, idx).putString(KEY_PREFIX, prefix).apply()
+                log(context, "adopt: this text is chapter $idx of the book")
+                return idx
+            }
+        }
+        return null
+    }
+
+    /** Reading-order index of the chapter being read, or -1. */
+    fun currentIndex(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_INDEX, -1)
+
+    /** Path of the book being read, or null. */
+    fun currentPath(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PATH, null)
 
     /** The book [text] belongs to (its file name) — character settings are kept per book; "" = not a book. */
     fun scopeFor(context: Context, text: String): String {
@@ -75,6 +123,7 @@ object BookSession {
             log(context, "  file $i: ${text?.length ?: -1} chars ${res.exceptionOrNull()?.message ?: ""}")
             if (text == null || text.length < MIN_CHAPTER_CHARS) continue
             p.edit().putInt(KEY_INDEX, i).putString(KEY_PREFIX, prefixOf(text)).apply()
+            rememberChapter(context, prefixOf(text), i)
             return text
         }
         clear(context)   // end of the book
