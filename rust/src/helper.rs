@@ -360,119 +360,94 @@ const ABBREVIATIONS: &[&str] = &[
     "Co.", "Corp.", "etc.", "vs.", "i.e.", "e.g.", "Ph.D.",
 ];
 
+/// Split text into chunks of at most `max_len` CHARACTERS, keeping the original order.
+///
+/// Two bugs of the original are fixed here: lengths were counted in bytes (a
+/// Cyrillic letter is 2 bytes, so Russian chunks were half as long as meant),
+/// and an over-long comma part was pushed out before the shorter parts already
+/// collected — so a sentence was spoken start → end → middle.
 pub fn chunk_text(text: &str, max_len: Option<usize>) -> Vec<String> {
     let max_len = max_len.unwrap_or(MAX_CHUNK_LENGTH);
     let text = text.trim();
-    
     if text.is_empty() {
         return vec![String::new()];
     }
+    let clen = |s: &str| s.chars().count();
 
-    // Split by paragraphs
     let para_re = Regex::new(r"\n\s*\n").unwrap();
-    let paragraphs: Vec<&str> = para_re.split(text).collect();
-    let mut chunks = Vec::new();
+    let mut chunks: Vec<String> = Vec::new();
 
-    for para in paragraphs {
+    for para in para_re.split(text) {
         let para = para.trim();
         if para.is_empty() {
             continue;
         }
-
-        if para.len() <= max_len {
+        if clen(para) <= max_len {
             chunks.push(para.to_string());
             continue;
         }
 
-        // Split by sentences
-        let sentences = split_sentences(para);
         let mut current = String::new();
-        let mut current_len = 0;
+        // flush what has been collected, so everything leaves in reading order
+        let flush = |current: &mut String, chunks: &mut Vec<String>| {
+            if !current.trim().is_empty() {
+                chunks.push(current.trim().to_string());
+            }
+            current.clear();
+        };
 
-        for sentence in sentences {
+        for sentence in split_sentences(para) {
             let sentence = sentence.trim();
             if sentence.is_empty() {
                 continue;
             }
-
-            let sentence_len = sentence.len();
-            if sentence_len > max_len {
-                // If sentence is longer than max_len, split by comma or space
-                if !current.is_empty() {
-                    chunks.push(current.trim().to_string());
-                    current.clear();
-                    current_len = 0;
-                }
-
-                // Try splitting by comma
-                let parts: Vec<&str> = sentence.split(',').collect();
-                for part in parts {
-                    let part = part.trim();
-                    if part.is_empty() {
+            if clen(sentence) > max_len {
+                flush(&mut current, &mut chunks);
+                // long sentence: comma parts, packed in order
+                let parts: Vec<&str> = sentence.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+                let last_part = parts.len().saturating_sub(1);
+                for (k, part) in parts.iter().enumerate() {
+                    // keep the comma: it is read as a short pause
+                    let piece = if k < last_part { format!("{},", part) } else { part.to_string() };
+                    if clen(&piece) > max_len {
+                        // the collected shorter parts go FIRST — this was the reordering bug
+                        flush(&mut current, &mut chunks);
+                        let mut words_chunk = String::new();
+                        for word in piece.split_whitespace() {
+                            if !words_chunk.is_empty() && clen(&words_chunk) + 1 + clen(word) > max_len {
+                                chunks.push(words_chunk.clone());
+                                words_chunk.clear();
+                            }
+                            if !words_chunk.is_empty() {
+                                words_chunk.push(' ');
+                            }
+                            words_chunk.push_str(word);
+                        }
+                        if !words_chunk.is_empty() {
+                            chunks.push(words_chunk);
+                        }
                         continue;
                     }
-
-                    let part_len = part.len();
-                    if part_len > max_len {
-                        // Split by space as last resort
-                        let words: Vec<&str> = part.split_whitespace().collect();
-                        let mut word_chunk = String::new();
-                        let mut word_chunk_len = 0;
-
-                        for word in words {
-                            let word_len = word.len();
-                            if word_chunk_len + word_len + 1 > max_len && !word_chunk.is_empty() {
-                                chunks.push(word_chunk.trim().to_string());
-                                word_chunk.clear();
-                                word_chunk_len = 0;
-                            }
-
-                            if !word_chunk.is_empty() {
-                                word_chunk.push(' ');
-                                word_chunk_len += 1;
-                            }
-                            word_chunk.push_str(word);
-                            word_chunk_len += word_len;
-                        }
-
-                        if !word_chunk.is_empty() {
-                            chunks.push(word_chunk.trim().to_string());
-                        }
-                    } else {
-                        if current_len + part_len + 1 > max_len && !current.is_empty() {
-                            chunks.push(current.trim().to_string());
-                            current.clear();
-                            current_len = 0;
-                        }
-
-                        if !current.is_empty() {
-                            current.push_str(", ");
-                            current_len += 2;
-                        }
-                        current.push_str(part);
-                        current_len += part_len;
+                    if !current.is_empty() && clen(&current) + 1 + clen(&piece) > max_len {
+                        flush(&mut current, &mut chunks);
                     }
+                    if !current.is_empty() {
+                        current.push(' ');
+                    }
+                    current.push_str(&piece);
                 }
+                flush(&mut current, &mut chunks);
                 continue;
             }
-
-            if current_len + sentence_len + 1 > max_len && !current.is_empty() {
-                chunks.push(current.trim().to_string());
-                current.clear();
-                current_len = 0;
+            if !current.is_empty() && clen(&current) + 1 + clen(sentence) > max_len {
+                flush(&mut current, &mut chunks);
             }
-
             if !current.is_empty() {
                 current.push(' ');
-                current_len += 1;
             }
             current.push_str(sentence);
-            current_len += sentence_len;
         }
-
-        if !current.is_empty() {
-            chunks.push(current.trim().to_string());
-        }
+        flush(&mut current, &mut chunks);
     }
 
     if chunks.is_empty() {

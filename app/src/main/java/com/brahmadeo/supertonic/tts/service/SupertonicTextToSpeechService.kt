@@ -85,6 +85,14 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         }
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // the system is short of memory and nothing is being read: give the models back
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND && !foregroundActive) {
+            com.brahmadeo.supertonic.tts.utils.EngineIdle.releaseNow(this)
+        }
+    }
+
     override fun onDestroy() {
         mainHandler.removeCallbacks(leaveForegroundRunnable)
         leaveForeground()
@@ -383,6 +391,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             if (synthWakeLock.isHeld) synthWakeLock.release()
             // stay foreground between sentences; drop the notification after a minute of silence
             mainHandler.postDelayed(leaveForegroundRunnable, 60_000L)
+            // and let go of the models a few minutes after the last phrase
+            com.brahmadeo.supertonic.tts.utils.EngineIdle.schedule(this)
         }
     }
 

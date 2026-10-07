@@ -200,6 +200,8 @@
     <string name="open_player">Player</string>
     <string name="outline_continue">▶ Continue where you stopped</string>
     <string name="outline_chapter_n">Chapter %1$d</string>
+    <string name="keep_ready_title">Keep the engine ready</string>
+    <string name="keep_ready_desc">The engine stays in memory with a “Running…” notification: instant start and reliable screen-off reading on Huawei. Off: memory is freed 3 minutes after reading and the system may close the process.</string>
     <string name="roles_title">Reading by roles</string>
     <string name="roles_desc">Built-in reader: author text by the narrator, male and female lines in their own voices. Gender comes from the author words (said, he or she) and from names the book itself reveals.</string>
     <string name="roles_characters_title">A voice for every character</string>

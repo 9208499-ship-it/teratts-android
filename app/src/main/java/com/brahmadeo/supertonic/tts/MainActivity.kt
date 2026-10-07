@@ -453,7 +453,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun startKeepAlive() {
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-        if (!prefs.getBoolean(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.PREF_KEEP_ALIVE, true)) return
+        // "keep the engine ready" (permanent foreground) — on by default only on Huawei
+        if (!com.brahmadeo.supertonic.tts.utils.EngineIdle.keepAlive(this)) return
         try {
             val intent = android.content.Intent(this, com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService::class.java)
                 .setAction(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.ACTION_KEEP_ALIVE)

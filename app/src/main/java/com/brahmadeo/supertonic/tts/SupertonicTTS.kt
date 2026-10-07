@@ -50,6 +50,8 @@ object SupertonicTTS {
         ortThreads: Int = if (USE_XNNPACK) 1 else Runtime.getRuntime().availableProcessors().coerceIn(4, 8),
         xnnThreads: Int = if (USE_XNNPACK) 4 else 0
     ): Boolean {
+        initModelPath = modelPath
+        initLibPath = libPath
         if (nativePtr != 0L) {
             // Health check: Can we still talk to the engine?
             if (getSocClass(nativePtr) != -1) {
@@ -156,6 +158,16 @@ object SupertonicTTS {
 
     @Synchronized
     fun generateAudio(text: String, lang: String, stylePath: String, speed: Float = 1.0f, bufferDuration: Float = 0.0f, steps: Int = 5, gain: Float = 1.0f, listener: ProgressListener? = null): ByteArray? {
+        lastUse = System.currentTimeMillis()
+        if (nativePtr == 0L) {
+            // unloaded while idle: load again (the first phrase waits a couple of seconds)
+            val m = initModelPath
+            val l = initLibPath
+            if (m != null && l != null) {
+                Log.i("SupertonicTTS", "Engine was unloaded while idle: loading it again")
+                initialize(m, l)
+            }
+        }
         if (nativePtr == 0L) {
             Log.e("SupertonicTTS", "Engine not initialized")
             return null
@@ -236,6 +248,19 @@ object SupertonicTTS {
         } catch (e: Throwable) {
             Log.w("SupertonicTTS", "Prewarm failed (ignored)", e)
         }
+    }
+
+    // ---- unloading when idle (EngineIdle) and loading again on demand ----
+    @Volatile private var lastUse = 0L
+    @Volatile private var initModelPath: String? = null
+    @Volatile private var initLibPath: String? = null
+
+    /** Unload the models if nothing has been synthesized for [minIdleMs]. */
+    @Synchronized
+    fun releaseIfIdle(minIdleMs: Long): Boolean {
+        if (nativePtr == 0L || System.currentTimeMillis() - lastUse < minIdleMs) return false
+        release()
+        return true
     }
 
     @Synchronized

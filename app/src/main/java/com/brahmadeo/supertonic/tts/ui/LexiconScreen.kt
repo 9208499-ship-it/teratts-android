@@ -295,6 +295,7 @@ fun LexiconScreen(
                 )
             }
 
+            item { KeepReadyRow() }
             item { RolesSection() }
             item { PauseScaleRow() }
             item { ParagraphPauseRow() }
@@ -550,6 +551,31 @@ private fun ParagraphPauseRow() {
             )
         }
     }
+}
+
+/** "Keep the engine ready": permanent foreground with the models in memory (Huawei), or unload when idle. */
+@Composable
+private fun KeepReadyRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var on by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.EngineIdle.keepAlive(context)) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.keep_ready_title),
+        description = stringResource(AppR.string.keep_ready_desc),
+        checked = on,
+        onToggle = { v ->
+            on = v
+            context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE).edit()
+                .putBoolean(com.brahmadeo.supertonic.tts.utils.EngineIdle.PREF_KEEP_ALIVE, v).apply()
+            val svc = com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService::class.java
+            try {
+                if (v) androidx.core.content.ContextCompat.startForegroundService(context,
+                    android.content.Intent(context, svc).setAction(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.ACTION_KEEP_ALIVE))
+                else context.startService(android.content.Intent(context, svc)
+                    .setAction(com.brahmadeo.supertonic.tts.service.SupertonicTextToSpeechService.ACTION_STOP_KEEP_ALIVE))
+            } catch (e: Exception) { }
+            if (!v) com.brahmadeo.supertonic.tts.utils.EngineIdle.schedule(context)
+        }
+    )
 }
 
 /** Reading by roles (built-in reader): switch + voices for male and female lines. */

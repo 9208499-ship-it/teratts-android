@@ -1078,6 +1078,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     }
 
     private fun notifyListenerPlaybackStopped() {
+        com.brahmadeo.supertonic.tts.utils.EngineIdle.schedule(this)
         val n = listeners.beginBroadcast()
         for (i in 0 until n) {
             try {
