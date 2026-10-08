@@ -26,6 +26,10 @@ object SupertonicTTS {
     private external fun reset(ptr: Long)
     private external fun setPauseScale(scale: Float)
     private external fun setParagraphPause(seconds: Float)
+    private external fun setFastCores(cores: IntArray)
+
+    /** "Fast cores only" (CpuCores): threads = the fast cores, pinned to them. */
+    @Volatile var fastCoresOnly = false
 
     /**
      * No lock: called from the main thread, and the engine lock can be held for
@@ -75,7 +79,11 @@ object SupertonicTTS {
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         } catch (e: Exception) { }
-        nativePtr = init(modelPath, libPath, ortThreads, xnnThreads)
+        val fast = if (fastCoresOnly && !USE_XNNPACK) com.brahmadeo.supertonic.tts.utils.CpuCores.fast() else emptyList()
+        try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
+        val threads = if (fast.isNotEmpty()) fast.size else ortThreads
+        Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")
+        nativePtr = init(modelPath, libPath, threads, xnnThreads)
         try {
             android.os.Process.setThreadPriority(previousPriority)
         } catch (e: Exception) { }

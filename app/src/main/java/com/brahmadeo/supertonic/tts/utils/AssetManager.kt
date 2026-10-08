@@ -198,6 +198,8 @@ object AssetManager {
      */
     @Synchronized
     fun ensureHomosolver(context: Context) {
+        // called right before every engine start: the cores setting goes with it
+        CpuCores.applyPref(context)
         val dir = File(context.filesDir, "$MODEL_VERSION/onnx/homo")
         val stamp = File(dir, ".version")
         if (stamp.exists() && stamp.readText() == HOMO_VERSION && HOMO_FILES.all { File(dir, it).exists() }) return

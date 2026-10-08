@@ -296,6 +296,7 @@ fun LexiconScreen(
             }
 
             item { KeepReadyRow() }
+            item { FastCoresRow() }
             item { RolesSection() }
             item { PauseScaleRow() }
             item { ParagraphPauseRow() }
@@ -554,6 +555,22 @@ private fun ParagraphPauseRow() {
 }
 
 /** "Keep the engine ready": permanent foreground with the models in memory (Huawei), or unload when idle. */
+/** "Fast cores only": synthesis threads on the fast cluster (compare the speed in the notification). */
+@Composable
+private fun FastCoresRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cores = com.brahmadeo.supertonic.tts.utils.CpuCores
+    val fast = remember { cores.fast() }
+    var on by remember { mutableStateOf(cores.enabled(context)) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.fast_cores_title),
+        description = if (fast.isEmpty()) stringResource(AppR.string.fast_cores_same)
+                      else stringResource(AppR.string.fast_cores_desc, fast.size, cores.total()),
+        checked = on,
+        onToggle = { v -> on = v; cores.set(context, v) }
+    )
+}
+
 @Composable
 private fun KeepReadyRow() {
     val context = androidx.compose.ui.platform.LocalContext.current

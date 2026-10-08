@@ -200,8 +200,11 @@
     <string name="open_player">Player</string>
     <string name="outline_continue">▶ Continue where you stopped</string>
     <string name="outline_chapter_n">Chapter %1$d</string>
+    <string name="fast_cores_title">Fast cores only</string>
+    <string name="fast_cores_desc">Synthesis on %1$d fast cores of %2$d instead of all. Faster on some phones, slower on others — compare the speed in the notification. Applies from the next phrase.</string>
+    <string name="fast_cores_same">Fast cores could not be told apart on this device: the switch changes nothing.</string>
     <string name="keep_ready_title">Keep the engine ready</string>
-    <string name="keep_ready_desc">The engine stays in memory with a “Running…” notification: instant start and reliable screen-off reading on Huawei. Off: memory is freed 3 minutes after reading and the system may close the process.</string>
+    <string name="keep_ready_desc">The engine stays in memory with a “Running…” notification: instant start. Off: memory is freed 3 minutes after reading. Turn on only if there are pauses with the screen off.</string>
     <string name="roles_title">Reading by roles</string>
     <string name="roles_desc">Built-in reader: author text by the narrator, male and female lines in their own voices. Gender comes from the author words (said, he or she) and from names the book itself reveals.</string>
     <string name="roles_characters_title">A voice for every character</string>

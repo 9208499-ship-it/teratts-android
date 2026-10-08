@@ -26,6 +26,7 @@ use log::LevelFilter;
 use std::time::Instant;
 
 mod helper;
+mod cores;
 mod tera;
 mod homo;
 mod stretch;
@@ -80,6 +81,20 @@ struct SupertonicEngine {
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setFastCores(
+    env: JNIEnv,
+    _class: JClass,
+    cores_arr: jni::objects::JIntArray,
+) {
+    let n = env.get_array_length(&cores_arr).unwrap_or(0) as usize;
+    let mut buf = vec![0i32; n];
+    if n > 0 && env.get_int_array_region(&cores_arr, 0, &mut buf).is_err() {
+        buf.clear();
+    }
+    cores::set(buf.into_iter().filter(|c| *c >= 0).map(|c| c as usize).collect());
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_init(
     mut env: JNIEnv,
     _class: JClass,
@@ -111,7 +126,12 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_init(
     // XNNPACK only when compiled in (cargo feature) and requested (xnn_threads > 0)
     let use_xnnpack = cfg!(feature = "xnnpack") && xnn_threads > 0;
     log::info!("XNNPACK: {}", if use_xnnpack { "on" } else { "off" });
-    let tts = match load_text_to_speech(&model_path, false, use_xnnpack, ort_threads as usize, xnn_threads as usize) {
+    // ONNX Runtime's worker threads are created here and inherit this thread's CPU mask
+    let pin = cores::pin_current();
+    let loaded = load_text_to_speech(&model_path, false, use_xnnpack, ort_threads as usize, xnn_threads as usize);
+    drop(pin);
+    log::info!("fast cores: {:?}", cores::get());
+    let tts = match loaded {
         Ok(t) => t,
         Err(e) => {
             log::error!("Failed to load TTS: {:?}", e);
@@ -144,7 +164,9 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
     gain: jfloat,
 ) -> jbyteArray {
     let engine = unsafe { &mut *(ptr as *mut SupertonicEngine) };
-    
+    // "fast cores only": the calling thread also works, keep it on the fast cluster
+    let _pin = cores::pin_current();
+
     let text: String = env.get_string(&text).expect("Couldn't get java string!").into();
     let lang: String = env.get_string(&lang).expect("Couldn't get java string!").into();
     let style_path: String = env.get_string(&style_path).expect("Couldn't get java string!").into();

@@ -22,7 +22,7 @@ object EngineIdle {
     @Volatile private var appContext: Context? = null
 
     /** "Keep the engine ready" is on by default only on Huawei. */
-    fun defaultKeepAlive(): Boolean = Build.MANUFACTURER.equals("HUAWEI", ignoreCase = true)
+    fun defaultKeepAlive(): Boolean = false   // with fast cores even Huawei keeps up without it
 
     fun keepAlive(context: Context): Boolean =
         context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)

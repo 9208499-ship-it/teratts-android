@@ -362,7 +362,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         }
         try {
             java.io.File(filesDir, "rtf.log").appendText(String.format(java.util.Locale.US,
-                "%tT  RTF %.2f  speed %.2f  screen %s%n", java.util.Date(), rtf, speed, if (screenOn) "on" else "off"))
+                "%tT  RTF %.2f  speed %.2f  screen %s  cores %s%n", java.util.Date(), rtf, speed, if (screenOn) "on" else "off",
+                if (com.brahmadeo.supertonic.tts.SupertonicTTS.fastCoresOnly) "fast" else "all"))
         } catch (e: Exception) { }
     }
 
