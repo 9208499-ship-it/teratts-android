@@ -90,7 +90,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
 
         override fun getCurrentIndex(): Int {
-            return currentSentenceIndex
+            // -1 when nothing is being read: a fresh service (the app was closed) knows no place,
+            // and its 0 used to throw the player back to the start of the chapter
+            return if (isPlaying || isSynthesizing) currentSentenceIndex else -1
         }
     }
 
@@ -101,7 +103,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             listeners.register(listener)
             try {
                 listener.onStateChanged(isPlaying, audioTrack != null || isSynthesizing, isSynthesizing)
-                listener.onProgress(currentSentenceIndex, -1)
+                // only while reading: an idle service's index is not the place of the text on screen
+                if ((isPlaying || isSynthesizing) && currentSentenceIndex >= 0) listener.onProgress(currentSentenceIndex, -1)
             } catch (_: RemoteException) {}
         }
     }
@@ -138,7 +141,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
-    private var currentSentenceIndex: Int = 0
+    private var currentSentenceIndex: Int = -1
 
     /**
      * Buffer between the Rust inference thread (producer) and the AudioTrack
@@ -190,6 +193,23 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         /** Going back this much when reading is resumed later (a minute, as audiobook players do). */
         const val RESUME_REWIND_SECONDS = 60f
 
+        /**
+         * How far to step back when coming back to a place, by how long ago it was left
+         * (as audiobook apps do): a short pause — not at all, the phrase being heard is
+         * replayed from its start anyway; an evening — a little; days — up to a minute.
+         * A fixed minute made the place creep backwards on every short stop.
+         */
+        fun rewindSecondsFor(savedAt: Long): Float {
+            if (savedAt <= 0L) return 15f
+            val minutes = (System.currentTimeMillis() - savedAt) / 60000f
+            return when {
+                minutes < 5f -> 0f
+                minutes < 60f -> 10f
+                minutes < 24f * 60f -> 20f
+                else -> RESUME_REWIND_SECONDS
+            }
+        }
+
         /** The phrase about [seconds] of reading before [index] (≈14 characters a second at 1×). */
         fun rewindIndex(sentences: List<String>, index: Int, seconds: Float, speed: Float): Int {
             if (sentences.isEmpty()) return 0
@@ -207,6 +227,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
          */
         fun resumeIndex(context: android.content.Context, text: String, sentences: List<String>, speed: Float): Int? {
             var idx: Int? = null
+            var savedAt = 0L
             val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(context, text)
             if (scope.isNotEmpty()) {
                 com.brahmadeo.supertonic.tts.utils.BookPositions.get(context, scope)
@@ -215,11 +236,23 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         val off = com.brahmadeo.supertonic.tts.utils.BookPositions.offsetIn(text, p)
                         val ranges = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)
                         idx = ranges.indexOfFirst { it != null && it.last >= off }.takeIf { it >= 0 }
+                        savedAt = p.time
                     }
             }
-            if (idx == null) idx = savedPosition(context, text)
+            if (idx == null) {
+                idx = savedPosition(context, text)
+                savedAt = savedTime(context, text)
+            }
             com.brahmadeo.supertonic.tts.utils.BookSession.log(context, "resume: book=${scope.isNotEmpty()} place=${idx ?: "none"} of ${sentences.size}")
-            return idx?.let { rewindIndex(sentences, it, RESUME_REWIND_SECONDS, speed) }
+            return idx?.let { rewindIndex(sentences, it, rewindSecondsFor(savedAt), speed) }
+        }
+
+        /** When the place in [text] was saved (ms), 0 if unknown. */
+        fun savedTime(context: android.content.Context, text: String): Long {
+            val p = context.getSharedPreferences("TeraReadingPositions", android.content.Context.MODE_PRIVATE)
+            p.getLong(positionKey(text) + "_t", 0L).takeIf { it > 0L }?.let { return it }
+            val prefix = p.getString("last_pos_prefix", null)
+            return if (!prefix.isNullOrEmpty() && text.trim().startsWith(prefix)) p.getLong("last_pos_time", 0L) else 0L
         }
 
         /** The saved place in [text]: by its exact key, or by its beginning if the text changed slightly. */
@@ -433,8 +466,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val bookChapter = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this@PlaybackService)
                 val chunkRanges = if (bookScope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
                 fun savePosition(idx: Int) {
-                    positions.edit().putInt(posKey, idx)
-                        .putString("last_pos_prefix", text.trim().take(160)).putInt("last_pos_index", idx).apply()
+                    val now = System.currentTimeMillis()
+                    positions.edit().putInt(posKey, idx).putLong(posKey + "_t", now)
+                        .putString("last_pos_prefix", text.trim().take(160)).putInt("last_pos_index", idx)
+                        .putLong("last_pos_time", now).apply()
                     chunkRanges.getOrNull(idx)?.let { r ->
                         com.brahmadeo.supertonic.tts.utils.BookPositions.save(this@PlaybackService, bookScope, bookChapter,
                             r.first.toFloat() / text.length.coerceAtLeast(1),
@@ -442,6 +477,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     }
                 }
                 val validStartIndex = if (requestedIndex in 0 until totalSentences) requestedIndex else 0
+                currentSentenceIndex = validStartIndex
 
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
                 val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
@@ -543,6 +579,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // queue before each sentence; the player reports the sentence when it
                 // reaches the marker, i.e. when that sentence actually starts playing.
                 val sentenceMarkers = java.util.concurrent.ConcurrentHashMap<ByteArray, Int>()
+                // the same for each sentence inside a phrase: [phrase index, where the sentence starts in it]
+                val subMarkers = java.util.concurrent.ConcurrentHashMap<ByteArray, LongArray>()
 
                 // When pre-roll is enabled, the consumer waits on this signal
                 // before starting AudioTrack. The producer below completes it
@@ -577,10 +615,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         if (k < 0) continue
                         val idx = entries[k][0].toInt()
                         val start = entries[k][1]
+                        val subPos = entries[k].getOrNull(2)
                         val estimate = start + ((sentences.getOrNull(idx)?.length ?: 0) / (14f * liveSpeed) * rate).toLong()
                         val end = entries.getOrNull(k + 1)?.get(1)
                             ?: if (isSynthesizing) maxOf(framesWritten, estimate) else framesWritten
-                        val fraction = if (end > start) ((head - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 0f
+                        // the sentence being heard is known exactly (its marker); otherwise an estimate
+                        val fraction = if (subPos != null) com.brahmadeo.supertonic.tts.utils.SpokenProgress.fractionAt(sentences.getOrNull(idx) ?: "", subPos.toInt())
+                            else if (end > start) ((head - start).toFloat() / (end - start)).coerceIn(0f, 1f) else 0f
                         if (idx != lastIndex) {
                             lastIndex = idx
                             currentSentenceIndex = idx
@@ -622,10 +663,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     for (data in channel) {
                         if (!isActive || SupertonicTTS.isCancelled()) break
                         if (data.isEmpty()) {
+                            val sub = subMarkers.remove(data)
+                            if (sub != null) { timeline.add(longArrayOf(sub[0], framesWritten, sub[1])); continue }
                             val playingIndex = sentenceMarkers.remove(data) ?: continue
                             // where this phrase starts in the written audio; spokenTicker turns it into "heard now"
                             timeline.add(longArrayOf(playingIndex.toLong(), framesWritten))
-                            savePosition(playingIndex)   // a fallback if the playback-head ticker cannot run
+                            // the place is saved by the playback-head ticker only: this marker is written
+                            // ahead of what is heard (by the whole audio buffer), and saving it here made
+                            // the book resume after the place where listening actually stopped
                             continue
                         }
                         // Self-heal: we are supposed to be playing but the track was left
@@ -673,6 +718,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         }
                         var result: ByteArray? = null
                         val sentenceStarted = System.nanoTime()
+                        // sentences of this phrase: where each starts, counted in letters (pieces are
+                        // cut from the book text, the phrase from the splitter — letters match in both)
+                        val chunkText = sentences[index]
+                        val sentStarts = com.brahmadeo.supertonic.tts.utils.SpokenProgress.sentenceStarts(chunkText)
+                        val startLetters = sentStarts.map { p -> chunkText.substring(0, p).count { it.isLetterOrDigit() } }
+                        var lettersDone = 0
                         var sentenceBytes = 0L
                         for (pc in pieces) {
                             if (SupertonicTTS.isCancelled() || !isActive) break
@@ -688,16 +739,28 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             val pieceSpeed = (liveSpeed * (pc.speaker?.let { charSpeed[it] } ?: 1f) *
                                 com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner)).coerceIn(0.5f, 2.5f)
                             val pieceGain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner)
-                            val piece = pc.text
-                            val normalizedText = textNormalizer.normalize(piece, effectiveLang, isAdvancedEnabled)
-                            // Streaming: each finished chunk inside generateAudio is
-                            // pushed via streamingListener.onAudioChunk into the
-                            // channel, where the consumer above picks it up.
-                            val r = SupertonicTTS.generateAudio(
-                                normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
-                                pieceGain, streamingListener
-                            )
-                            if (r != null && r.isNotEmpty()) { result = r; sentenceBytes += r.size }
+                            // sentence by sentence, each with its marker: the highlight follows the
+                            // voice exactly, as readers do with system TTS (the engine cuts at
+                            // sentence ends anyway, so this costs nothing)
+                            for (sub in com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)) {
+                                if (SupertonicTTS.isCancelled() || !isActive) break
+                                if (sentStarts.size > 1) {
+                                    val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
+                                    val m = ByteArray(0)
+                                    subMarkers[m] = longArrayOf(index.toLong(), sentStarts[k].toLong())
+                                    try { channel.send(m) } catch (_: Exception) { break }
+                                }
+                                lettersDone += sub.count { it.isLetterOrDigit() }
+                                val normalizedText = textNormalizer.normalize(sub, effectiveLang, isAdvancedEnabled)
+                                // Streaming: each finished chunk inside generateAudio is
+                                // pushed via streamingListener.onAudioChunk into the
+                                // channel, where the consumer above picks it up.
+                                val r = SupertonicTTS.generateAudio(
+                                    normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
+                                    pieceGain, streamingListener
+                                )
+                                if (r != null && r.isNotEmpty()) { result = r; sentenceBytes += r.size }
+                            }
                         }
                         recordReaderRtf(sentenceBytes, System.nanoTime() - sentenceStarted)
 

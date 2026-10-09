@@ -12,12 +12,14 @@ import org.json.JSONObject
 object BookPositions {
     private const val PREFS = "TeraBookPositions"
 
-    data class Pos(val chapter: Int, val progression: Float, val quote: String)
+    /** [time]: when the place was saved (ms) — how far to step back on return depends on it */
+    data class Pos(val chapter: Int, val progression: Float, val quote: String, val time: Long = 0L)
 
     fun save(context: Context, book: String, chapter: Int, progression: Float, quote: String) {
         if (book.isEmpty() || chapter < 0) return
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(book,
-            JSONObject().put("chapter", chapter).put("progression", progression.toDouble()).put("quote", quote).toString()
+            JSONObject().put("chapter", chapter).put("progression", progression.toDouble()).put("quote", quote)
+                .put("time", System.currentTimeMillis()).toString()
         ).apply()
     }
 
@@ -26,7 +28,7 @@ object BookPositions {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(book, null) ?: return null
         return try {
             val o = JSONObject(s)
-            Pos(o.getInt("chapter"), o.getDouble("progression").toFloat(), o.optString("quote", ""))
+            Pos(o.getInt("chapter"), o.getDouble("progression").toFloat(), o.optString("quote", ""), o.optLong("time", 0L))
         } catch (e: Exception) { null }
     }
 

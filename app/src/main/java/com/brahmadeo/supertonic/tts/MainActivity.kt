@@ -145,7 +145,9 @@ class MainActivity : ComponentActivity() {
                 viewModel.inputText.value = prepareTextForTts(text, viewModel.currentLang.value)
                 Toast.makeText(this, "Chapter loaded", Toast.LENGTH_SHORT).show()
                 // "Continue where I stopped" in the outline: start reading at once (it resumes at the place)
-                if (result.data?.getBooleanExtra("auto_play", false) == true) generateAndPlay(viewModel.inputText.value)
+                val autoPlay = result.data?.getBooleanExtra("auto_play", false) == true
+                if (result.data?.getBooleanExtra("open_player", false) == true) openPlayerAtPlace(viewModel.inputText.value, autoPlay)
+                else if (autoPlay) generateAndPlay(viewModel.inputText.value)
             } else {
                 Log.e("MainActivity", "Received empty or null text from ebook activity")
             }
@@ -677,6 +679,26 @@ class MainActivity : ComponentActivity() {
             stylePath = "$stylePath;$stylePath2;${viewModel.mixAlpha.floatValue}"
         }
         launchPlaybackActivity(text, stylePath)
+    }
+
+    /** A book continued at its place: the player opens there; "Play" (or [autoPlay]) goes on from it. */
+    private fun openPlayerAtPlace(text: String, autoPlay: Boolean) {
+        if (!AssetManager.isReady(this)) {
+            startDownload()
+            return
+        }
+        val voiceDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
+        val stylePath = File(voiceDir, viewModel.selectedVoiceFile.value).absolutePath
+        startActivity(Intent(this, PlaybackActivity::class.java).apply {
+            putExtra(PlaybackActivity.EXTRA_TEXT, text)
+            putExtra(PlaybackActivity.EXTRA_VOICE_PATH, stylePath)
+            putExtra(PlaybackActivity.EXTRA_SPEED, viewModel.currentSpeed.floatValue)
+            putExtra(PlaybackActivity.EXTRA_STEPS, viewModel.currentSteps.intValue)
+            putExtra(PlaybackActivity.EXTRA_LANG, viewModel.currentLang.value)
+            putExtra("is_resume", true)
+            putExtra("fresh", true)
+            if (!autoPlay) putExtra("no_autoplay", true)
+        })
     }
 
     private fun launchPlaybackActivity(text: String, stylePath: String) {

@@ -150,25 +150,68 @@ pub fn clean_plus(s: &str) -> String {
         .collect()
 }
 
-/// Stress written as a combining acute after the vowel ("замо́к", as in the
-/// app's accent dictionaries, the user lexicon and stress-marked books)
-/// becomes TeraTTS notation ("зам+ок"). Stray accents are dropped.
+fn is_cyr(c: char) -> bool {
+    matches!(c, 'А'..='я' | 'Ё' | 'ё')
+}
+
+/// Stress marks in every form people actually type or copy, turned into
+/// TeraTTS notation ("зам+ок"):
+///  - a combining acute after the vowel ("замо́к" — accent dictionaries, the
+///    user lexicon, stress-marked books), or a grave (NFC makes ѐ/ѝ of it);
+///  - a Latin look-alike with an accent inside a Russian word ("замóк", "тáк" —
+///    copied from dictionary sites);
+///  - "+" after the vowel ("замо+к", as some other TTS engines write it): a "+"
+///    before a consonant means nothing else, so it marks the vowel before it.
+/// Stray accents are dropped.
 pub fn acute_to_plus(s: &str) -> String {
-    let ch: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len() + 8);
+    let src: Vec<char> = s.chars().collect();
+    // 1) look-alikes and Cyrillic letters with a grave → vowel + combining acute
+    let mut ch: Vec<char> = Vec::with_capacity(src.len() + 8);
+    for (i, &c) in src.iter().enumerate() {
+        let near_cyr = (i > 0 && is_cyr(src[i - 1])) || src.get(i + 1).map_or(false, |&n| is_cyr(n));
+        let latin = match c {
+            'á' => Some('а'), 'Á' => Some('А'), 'é' => Some('е'), 'É' => Some('Е'),
+            'ó' => Some('о'), 'Ó' => Some('О'), 'ý' => Some('у'), 'Ý' => Some('У'),
+            _ => None,
+        };
+        let cyr = match c {
+            'ѐ' => Some('е'), 'Ѐ' => Some('Е'), 'ѝ' => Some('и'), 'Ѝ' => Some('И'),
+            _ => None,
+        };
+        match (latin, cyr) {
+            (Some(b), _) if near_cyr => { ch.push(b); ch.push('\u{301}'); }
+            (_, Some(b)) => { ch.push(b); ch.push('\u{301}'); }
+            _ => ch.push(if c == '\u{300}' { '\u{301}' } else { c }),
+        }
+    }
+    // 2) acute after a vowel → "+" before it; "+" after a vowel → before it
+    let mut out: Vec<char> = Vec::with_capacity(ch.len() + 8);
     let mut i = 0;
     while i < ch.len() {
-        if ch[i] == '\u{301}' {
+        let c = ch[i];
+        if c == '\u{301}' {
             i += 1;
             continue;
         }
-        if ch.get(i + 1) == Some(&'\u{301}') && RU_VOWELS.contains(ch[i]) {
+        if c == '+' {
+            let next_vowel = ch.get(i + 1).map_or(false, |n| RU_VOWELS.contains(*n));
+            let prev = out.last().copied();
+            if !next_vowel && prev.map_or(false, |p| RU_VOWELS.contains(p)) {
+                let at = out.len() - 1;
+                if at == 0 || out[at - 1] != '+' {
+                    out.insert(at, '+');
+                }
+                i += 1;
+                continue;
+            }
+        }
+        if ch.get(i + 1) == Some(&'\u{301}') && RU_VOWELS.contains(c) && out.last() != Some(&'+') {
             out.push('+');
         }
-        out.push(ch[i]);
+        out.push(c);
         i += 1;
     }
-    out
+    out.into_iter().collect()
 }
 
 /// Dialogue dashes and spaced dashes become pauses (commas) — the model has
@@ -842,6 +885,14 @@ mod tests {
     fn acute() {
         assert_eq!(acute_to_plus("Замо́к и молоко́. Ёлка"), "Зам+ок и молок+о. Ёлка");
         assert_eq!(acute_to_plus("x\u{301}y"), "xy");
+        // other ways to mark stress
+        assert_eq!(acute_to_plus("замо+к, молоко+. дома+"), "зам+ок, молок+о. дом+а");
+        assert_eq!(acute_to_plus("зам+ок з+амок 2+2"), "зам+ок з+амок 2+2");
+        assert_eq!(acute_to_plus("замóк, ЗАМÓК, сáмый, у́же"), "зам+ок, ЗАМ+ОК, с+амый, +уже");
+        assert_eq!(acute_to_plus("Café и ó"), "Café и ó");
+        assert_eq!(acute_to_plus("за\u{300}мок"), "з+амок");
+        assert_eq!(pre_normalize("за\u{300}мок"), "з+амок");
+        assert_eq!(acute_to_plus("зам+о\u{301}к"), "зам+ок");
         // the whole front-end keeps the converted marks
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru+".chars().enumerate() { table[c as usize] = i as i64 + 1; }

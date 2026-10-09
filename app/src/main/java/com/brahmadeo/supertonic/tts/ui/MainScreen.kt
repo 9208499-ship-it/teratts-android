@@ -272,7 +272,7 @@ fun MainScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .then(
-                                    if (isTextExpanded) Modifier.heightIn(min = 200.dp)
+                                    if (isTextExpanded) Modifier.heightIn(min = 320.dp)
                                     else Modifier.heightIn(max = 130.dp)
                                 )
                                 .onFocusChanged {

@@ -316,6 +316,8 @@ class TextNormalizer {
     private val footnoteSuperscript = Regex("(?<![мМ])[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
     private val footnoteAsterisk = Regex("(?<=[\\p{L}.,!?»\")])\\*{1,3}(?![\\p{L}*])")
 
+    private val invisibleChars = Regex("[\u00AD\u200B\u2060\uFEFF]")
+
     fun stripFootnoteMarks(text: String): String {
         var t = footnoteBracket.replace(text, "")
         t = footnoteSuperscript.replace(t, "")
@@ -339,9 +341,15 @@ class TextNormalizer {
         //   3) bulk accent dictionary — applied last so it can stress the
         //      words that the number normaliser just emitted ("две тысячи
         //      двадцать четыре" -> "две ты́сячи два́дцать четы́ре").
+        // invisible characters inside words (soft hyphens from books) would keep
+        // lexicon rules from matching
+        inputText = inputText.replace(invisibleChars, "")
         var processedText = if (lowerLang != "ko") {
             var t = LexiconManager.apply(inputText)
             if (lowerLang.startsWith("ru")) {
+                // Russian words in CAPITALS are read as words (after the user's rules,
+                // so a rule for "МВД" still wins)
+                t = RussianCaps.fix(t) { AccentDictionaryManager.has(it) }
                 t = russianNumbers.normalize(t)
             }
             AccentDictionaryManager.apply(t, lowerLang)

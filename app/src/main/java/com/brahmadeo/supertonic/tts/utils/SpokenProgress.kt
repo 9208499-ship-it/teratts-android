@@ -65,6 +65,55 @@ object SpokenProgress {
         return start..end
     }
 
+    /** Where the sentences of [text] start (their first letter or digit) — the same cut as [sentenceAt]. */
+    fun sentenceStarts(text: String): List<Int> {
+        val res = ArrayList<Int>()
+        var expect = true
+        for (i in text.indices) {
+            val c = text[i]
+            if (expect && c.isLetterOrDigit()) { res.add(i); expect = false }
+            if (c == '\n' || endsSentence(text, i)) expect = true
+        }
+        return res
+    }
+
+    /** [text] cut into sentences (punctuation before the first one stays with it). */
+    fun splitSentences(text: String): List<String> {
+        val starts = sentenceStarts(text)
+        if (starts.size <= 1) return listOf(text)
+        // a cut goes before the sentence's opening dash or quote: "…сказала она. | — Как дела?"
+        val cuts = IntArray(starts.size) { k ->
+            if (k == 0) 0 else {
+                var c = starts[k]
+                while (c > starts[k - 1] + 1 && (text[c - 1].isWhitespace() || text[c - 1] in "«„“\"—–-(")) c--
+                c
+            }
+        }
+        val out = ArrayList<String>(starts.size)
+        for (k in starts.indices) {
+            val a = cuts[k]
+            val b = if (k + 1 < starts.size) cuts[k + 1] else text.length
+            val part = text.substring(a, b).trim()
+            if (part.isNotEmpty()) out.add(part)
+        }
+        return out
+    }
+
+    /** A share of [text] at which [sentenceAt] gives the sentence that starts at [pos]. */
+    fun fractionAt(text: String, pos: Int): Float {
+        val words = WORD.findAll(text).toList()
+        if (words.isEmpty()) return 0f
+        val w = FloatArray(words.size) { weightOf(words[it].value) }
+        val p = FloatArray(words.size) { pauseAfter(text, words[it].range.last + 1) }
+        val total = w.sum() + p.sum()
+        var acc = 0f
+        for (i in words.indices) {
+            if (words[i].range.first >= pos) return ((acc + w[i] * 0.5f) / total).coerceIn(0f, 1f)
+            acc += w[i] + p[i]
+        }
+        return 1f
+    }
+
     /** Character range of the word being spoken at [fraction] (0..1) of [text], or null. */
     fun wordAt(text: String, fraction: Float): IntRange? {
         val words = WORD.findAll(text).toList()

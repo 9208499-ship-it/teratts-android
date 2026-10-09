@@ -91,6 +91,8 @@ class EbookOutlineActivity : ComponentActivity() {
     private var bookPath: String? = null
     /** "Continue": the main screen starts reading right away, from the saved place. */
     private var autoPlay = false
+    /** The book is continued at its saved place: the main screen opens the player there. */
+    private var openPlayer = false
 
 
     private lateinit var ebookParser: EbookParser
@@ -122,6 +124,7 @@ class EbookOutlineActivity : ComponentActivity() {
                         val resultIntent = Intent()
                         resultIntent.putExtra(EXTRA_TEXT, text)
                         resultIntent.putExtra("auto_play", autoPlay)
+                        resultIntent.putExtra("open_player", openPlayer)
                         setResult(RESULT_OK, resultIntent)
                         finish()
                     },
@@ -164,6 +167,21 @@ class EbookOutlineActivity : ComponentActivity() {
                 val title = publication?.metadata?.title ?: ebookFile.nameWithoutExtension
                 EbookManager.addBook(this@EbookOutlineActivity, title, ebookFile.absolutePath)
                 if (isPdf) selectedTabIndex = 1 // Default to Pages for PDF
+                // opened from the library: straight to the place where the book was left
+                val pub = publication
+                val book = bookPath
+                val saved = book?.let { com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookOutlineActivity, File(it).name) }
+                if (intent.getBooleanExtra(EXTRA_CONTINUE, false) && !isPdf && pub != null && book != null &&
+                    saved != null && saved.chapter in pub.readingOrder.indices) {
+                    isExtracting = true
+                    val text = ebookParser.extractText(pub, pub.readingOrder[saved.chapter]).getOrNull()
+                    isExtracting = false
+                    if (!text.isNullOrBlank()) {
+                        com.brahmadeo.supertonic.tts.utils.BookSession.start(this@EbookOutlineActivity, book, saved.chapter, text)
+                        openPlayer = true
+                        onTextExtracted(text)
+                    }
+                }
             }
         }
 
@@ -257,6 +275,7 @@ class EbookOutlineActivity : ComponentActivity() {
                                 result.onSuccess { text ->
                                     com.brahmadeo.supertonic.tts.utils.BookSession.start(this@EbookOutlineActivity, book, saved.chapter, text)
                                     autoPlay = true
+                                    openPlayer = true
                                     onTextExtracted(text)
                                 }
                             }
@@ -615,5 +634,6 @@ class EbookOutlineActivity : ComponentActivity() {
     companion object {
         const val EXTRA_URI = "ebook_uri"
         const val EXTRA_TEXT = "extracted_text"
+        const val EXTRA_CONTINUE = "continue_book"
     }
 }

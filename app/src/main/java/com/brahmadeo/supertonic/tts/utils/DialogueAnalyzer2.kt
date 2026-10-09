@@ -86,9 +86,9 @@ object DialogueAnalyzer2 {
     // ------------------------------------------------------------- lexicons
 
     private val dashes = setOf('—', '–', '-', '―')
-    private val SPACED_DASH = Regex("""\s[—–―-]\s""")
+    private val SPACED_DASH = Regex("""[\s\u00A0\u202F][—–―-][\s\u00A0\u202F]""")
     /** A dash opening a line inside a paragraph: after ":" or the end of a sentence, before a capital or a quote. */
-    private val INNER_DASH_LINE = Regex("""(?<=[:.!?…])\s+[—–―]\s+(?=[«"„“\p{Lu}])""")
+    private val INNER_DASH_LINE = Regex("""(?<=[:.!?…])[\s\u00A0\u202F]+[—–―][\s\u00A0\u202F]+(?=[«"„“\p{Lu}])""")
     private val WORD = Regex("""\d+[‑-][а-яё]+|[А-Яа-яЁё]+""")
 
     /** First-person narration: "— … — уточнил я". The hero speaks in the narrator's voice. */
@@ -104,10 +104,13 @@ object DialogueAnalyzer2 {
     /** Content of a bare «…» message that reads like a system report rather than the hero's thought. */
     private val systemContent = Regex(
         // (?<![а-яё]) instead of \b: Java's \b does not see Cyrillic letters as word characters
-        """(?i)(?<![а-яё])(подключен|инсталлирован|вероятност|опци|операци|выполнено|принято|завершен|""" +
-            """уровень|модул|параметр|загрузк|доступ|обнаружен|активирован|установлен|ошибк|предупреждени)|%"""
+        """(?iu)(?<![а-яё])(подключен|инсталлирован|вероятност|опци|операци|выполнено|принято|завершен|""" +
+            """уровень|модул|модел|параметр|загрузк|доступ|обнаружен|активирован|установлен|ошибк|предупреждени|""" +
+            """пользовател|погрешност)|%"""
     )
-    private val firstPersonThought = Regex("""(?i)(^|[^а-яё])(я|мне|меня|мой|моя|моё|мои|мы|нам|нас)([^а-яё]|$)""")
+    // "я/мне/мой" — only the hero; "мы/нам" is also how the voices in his head speak of themselves
+    private val firstPersonSingular = Regex("""(?iu)(^|[^а-яё])(я|мне|меня|мой|моя|моё|мои)([^а-яё]|$)""")
+    private val firstPersonThought = Regex("""(?iu)(^|[^а-яё])(я|мне|меня|мой|моя|моё|мои|мы|нам|нас)([^а-яё]|$)""")
 
     private val notNames = setOf(
         "Он", "Она", "Они", "Оно", "Я", "Мы", "Вы", "Ты", "Это", "Тот", "Та", "То", "Те", "Там", "Тут",
@@ -204,6 +207,11 @@ object DialogueAnalyzer2 {
     // ------------------------------------------------------------------ API
 
     fun analyze(text: String, prior: Prior? = null): Result {
+        properTL.set(MID_CAPS.findAll(text).map { normHyphen(it.value) }.toHashSet())
+        try { return analyzeImpl(text, prior) } finally { properTL.remove() }
+    }
+
+    private fun analyzeImpl(text: String, prior: Prior?): Result {
         val paragraphs = paragraphRanges(text)
         val parsed = paragraphs.map { (s, e) -> parseParagraph(text, s, e) }
 
@@ -228,7 +236,7 @@ object DialogueAnalyzer2 {
         for ((n, g) in nameGender) if (n.first().isUpperCase() || n.first().isDigit()) {
             for (f in nameForms(n, g == G.F)) nameOf.putIfAbsent(f, n)
         }
-        fun canon(w: String): String? = nameOf[w.lowercase().replace('ё', 'е')]
+        fun canon(w: String): String? = nameOf[normHyphen(w).lowercase().replace('ё', 'е')]
         // who is spoken TO: "— Маша, иди сюда", "…, Маша!", "сказал Петру", "посмотрела на Машу"
         // a vocative is in the nominative, so even a name not seen before counts
         fun known(w: String): String? = canon(w) ?: run {
@@ -239,7 +247,12 @@ object DialogueAnalyzer2 {
         }
         fun vocative(w: String): String? {
             if (w.lowercase() in titles) return null
-            return known(w) ?: w.takeIf { it.length >= 3 && it[0].isUpperCase() && it !in notNames && it !in notVocatives }
+            // an unknown word is a name only if the text uses it as one elsewhere, or it is a
+            // common first name: "— Стойте, …", "— Думаю, …" are not addressing anybody
+            return known(w) ?: w.takeIf {
+                it.length >= 3 && it[0].isUpperCase() && it !in notNames && it !in notVocatives &&
+                    (isProper(it) || it.lowercase() in diminutives || diminutives.values.any { v -> it.lowercase() in v })
+            }
         }
         fun addresseeIn(speech: String, authorWords: List<String>): String? {
             val sw = WORD.findAll(speech).map { it.value }.toList()
@@ -266,7 +279,12 @@ object DialogueAnalyzer2 {
             speaker.first().isDigit() && nameGender[speaker] == null ->
                 if (speaker.endsWith("я")) G.F else G.M
             speaker in speakerNouns -> speakerNouns[speaker]
-            else -> nameGender[speaker]
+            // the text says nothing ("— Андрей, ты где?", a book in the present tense):
+            // a dictionary of names and their endings
+            else -> nameGender[speaker] ?: if (speaker.first().isUpperCase() && speaker.length > 1 &&
+                    !speaker.all { it.isUpperCase() }) {
+                when (NameGender.guess(speaker)) { NameGender.G.M -> G.M; NameGender.G.F -> G.F; null -> null }
+            } else null
         }
 
         // pass 2: speakers, with a memory of the current dialogue
@@ -279,8 +297,19 @@ object DialogueAnalyzer2 {
         var pendingFromIntro = false                   // true only for an introduction ending with ":"
         var lastAddressee: String? = null              // who the previous line spoke to — likely answers next
         var heroAttributed = 0                         // "сказал я": the book is told in the first person
+        var systemSeen = false
+        var lastQuoteBody = ""                         // the book has a voice in the head
 
-        for (p in parsed) {
+        // who the next line is plainly attributed to ("— …, — заинтересовался я.")
+        fun explicitAt(i: Int): String? {
+            val q = parsed.getOrNull(i) ?: return null
+            if (q.speech.isEmpty() || q.quoted) return null
+            val hh = authorPieces(text, q).asSequence().map { (a, b) -> hint(words(text, a, b)) }
+                .firstOrNull { it.name != null || it.hero } ?: return null
+            return if (hh.hero) HERO else hh.name?.let { canon(it) ?: it }
+        }
+
+        for ((pi, p) in parsed.withIndex()) {
             if (p.speech.isEmpty()) {
                 // narration: remember who was mentioned; a long passage ends the exchange
                 for (w in words(text, p.start, p.end)) {
@@ -327,13 +356,28 @@ object DialogueAnalyzer2 {
                 if (speaker == null && authors.isEmpty()) {
                     val body = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
                     speaker = when {
-                        firstPersonThought.containsMatchIn(body) -> HERO      // the hero thinking: narrator's voice
+                        // introduced right before ("я задал вопрос:", "В голове прозвучало:")
+                        pendingFromIntro && pendingQuoteSpeaker != null -> pendingQuoteSpeaker
+                        // «Сеть, Магик, озвучьте…» is said TO them: in a first-person book, by the hero
+                        addresseeIn(body, emptyList()) != null -> HERO
+                        firstPersonSingular.containsMatchIn(body) -> HERO     // the hero thinking: narrator's voice
+                        // «Да». «Да». — both voices answered the same
+                        pendingQuoteSpeaker != null && body.trim() == lastQuoteBody -> pendingQuoteSpeaker
+                        // the hero asked the voice in his head: this is its answer
+                        pendingQuoteSpeaker == HERO && systemSeen -> SYSTEM
+                        // the voice reports, the hero asks back ("…Что дальше?")
+                        pendingQuoteSpeaker == SYSTEM && body.trimEnd(' ', '»', '"', '.').endsWith("?") -> HERO
+                        // …and the hero answers the voice
+                        pendingQuoteSpeaker == SYSTEM && !systemContent.containsMatchIn(body) -> HERO
                         pendingQuoteSpeaker != null -> pendingQuoteSpeaker     // a run of messages
                         systemContent.containsMatchIn(body) -> SYSTEM
+                        firstPersonThought.containsMatchIn(body) -> HERO
                         else -> null
                     }
                 }
                 pendingQuoteSpeaker = if (authors.isEmpty()) speaker else null
+                lastQuoteBody = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }.trim()
+                if (speaker == SYSTEM) systemSeen = true
                 pendingFromIntro = false   // a run of «…» messages does not carry over to dash lines
                 gender = if (speaker == SYSTEM) G.F else h?.verbGender ?: genderOf(speaker)
             } else if (authors.isEmpty() && pendingQuoteSpeaker != null && pendingFromIntro) {
@@ -374,7 +418,12 @@ object DialogueAnalyzer2 {
                     speaker = asked
                 } else {
                     val distinct = run.distinct()
-                    if (distinct.size >= 2 && run.size >= 2) speaker = run[run.size - 2]
+                    if (distinct.size >= 2 && run.size >= 2) {
+                        speaker = run[run.size - 2]
+                        // the same person rarely speaks twice in a row: if the next line is plainly
+                        // theirs, this one is the other's ("— Согласен." «…» — Только сначала…)
+                        if (speaker == explicitAt(pi + 1)) speaker = run.lastOrNull { it != speaker } ?: speaker
+                    }
                 }
             }
             if (forced == null && addressee != null) {
@@ -592,13 +641,31 @@ object DialogueAnalyzer2 {
 
     /** "искина" → "искин", "Сети" → "Сеть", "896‑го" → "896‑й": base forms after "голос …". */
     private fun baseForms(w: String): List<String> {
-        if (w.first().isDigit()) return listOf(w.substringBefore('‑').substringBefore('-') + "‑й", w)
+        if (w.first().isDigit()) return listOf(normHyphen(w).substringBefore('-') + "-й", normHyphen(w))
         val l = w.lowercase()
         return listOf(l, l.dropLast(1), l.dropLast(1) + "ь", l.dropLast(1) + "а", l.dropLast(2))
     }
 
+    /** Non-breaking and other hyphens → "-": "896‑й" and "896-й" are one name. */
+    private val NUMBERED_CASE = Regex("""^(\d+)-(го|му|м|ым|ом|й)$""")
+    /** Non-breaking and other hyphens → "-", numbered names to one form: "896‑му", "896-го" → "896-й". */
+    private fun normHyphen(w: String): String {
+        val h = w.replace('\u2011', '-').replace('\u2010', '-')
+        return NUMBERED_CASE.matchEntire(h)?.let { it.groupValues[1] + "-й" } ?: h
+    }
+
+    /**
+     * Capitalised words met in the text NOT at the start of a sentence ("сказал Пётр",
+     * "с Машей"): real names. "Стойте", "Думаю", "Промаявшись" open sentences only.
+     */
+    private val properTL = ThreadLocal<Set<String>>()
+    private val MID_CAPS = Regex("""(?<=[\p{Ll}\d,;:)»”][\s\u00A0]{1,3})(\p{Lu}[\p{Ll}]+)""")
+    private fun isProper(w: String): Boolean =
+        w.isNotEmpty() && (w[0].isDigit() || (w.length in 2..5 && w.all { it.isUpperCase() }) ||   // "ИИ"
+            properTL.get()?.contains(w) != false)
+
     private fun words(text: String, a: Int, b: Int): List<String> =
-        WORD.findAll(text.substring(a, b)).map { it.value }.toList()
+        WORD.findAll(text.substring(a, b)).map { normHyphen(it.value) }.toList()
 
     private fun authorPieces(text: String, p: Parsed): List<Pair<Int, Int>> =
         p.pieces.filter { !it.third && text.substring(it.first, it.second).any { c -> c.isLetter() } }
@@ -619,8 +686,17 @@ object DialogueAnalyzer2 {
         if (!t.endsWith(":")) return null
         val lastSentence = t.substringAfterLast('.').substringAfterLast('!').substringAfterLast('?')
         val low = lastSentence.lowercase()
+        // "я задал вопрос:", "отдал мысленный приказ:" — the hero speaks or thinks (not "я услышал:")
+        val ws0 = WORD.findAll(lastSentence).map { it.value }.toList()
+        val hears = listOf("услыш", "прозвуч", "раздал", "высветил", "увидел", "прочитал", "прочёл", "пришло", "голос")
+        val speaks = listOf("спросил", "задал", "приказ", "попросил", "подумал", "мысленно", "обратился",
+            "уточнил", "уточнить", "сказал", "ответил", "распорядил", "скомандовал", "задумал")
+        val someoneNamed = ws0.drop(1).any { it[0].isUpperCase() && it != "Я" } || ws0.any { it.lowercase() in speakerNouns }
+        val third = ws0.any { it.lowercase() in setOf("он", "она", "они", "оно") }
+        if (hears.none { low.contains(it) } && !someoneNamed && !third &&
+            (ws0.any { it.lowercase() == "я" } || speaks.any { low.contains(it) })) return HERO
         if (systemCues.none { low.contains(it) }) return null
-        val ws = WORD.findAll(lastSentence).map { it.value }.toList()
+        val ws = WORD.findAll(lastSentence).map { normHyphen(it.value) }.toList()
         val vi = ws.indexOfFirst { it.lowercase() == "голос" }
         val owner = if (vi >= 0) ws.getOrNull(vi + 1) else null
         if (owner != null) {
@@ -635,7 +711,7 @@ object DialogueAnalyzer2 {
     /** Gender of a past-tense verb ("сказал", "спросила", "усмехнулся", "произнёс"), or null. */
     private fun pastGender(w: String, first: Boolean): G? {
         val lw = w.lowercase()
-        if (lw.length < 4 || (w[0].isUpperCase() && !first) || w[0].isDigit()) return null
+        if (lw.length < 3 || (w[0].isUpperCase() && !first) || w[0].isDigit()) return null
         return when {
             lw.endsWith("лась") -> G.F
             lw.endsWith("лся") -> G.M
@@ -647,7 +723,9 @@ object DialogueAnalyzer2 {
     }
 
     private fun isNameWord(w: String) =
-        w.length >= 2 && (w[0].isUpperCase() || w[0].isDigit()) && w !in notNames && w != "Я"
+        // two letters only for acronyms ("ИИ"): "На", "По", "Ну" open sentences, they are not names
+        (w.length >= 3 || w.all { it.isUpperCase() }) && w.length >= 2 &&
+            (w[0].isUpperCase() || w[0].isDigit()) && w !in notNames && w != "Я"
 
     /**
      * Who the author words point at. Russian puts the speaker next to the speech
@@ -681,12 +759,13 @@ object DialogueAnalyzer2 {
                     lw in speakerNouns -> return Hint(null, lw, null, g)
                     lw == "он" -> return Hint(null, null, G.M, g)
                     lw == "она" -> return Hint(null, null, G.F, g)
-                    isNameWord(w) && pastGender(w, false) == null -> return Hint(w, null, null, g)
+                    isNameWord(w) && isProper(w) && pastGender(w, false) == null -> return Hint(w, null, null, g)
                 }
             }
         }
         // no verb+subject pair: a name, then a role noun (the last one), then pronouns
-        head.firstOrNull { isNameWord(it) && it != head.firstOrNull() || isNameWord(it) && it[0].isDigit() }
+        // the first word too ("— …? — Андрей хмурится"): isProper keeps out "Наконец", "Промаявшись"
+        head.firstOrNull { isNameWord(it) && isProper(it) }
             ?.let { return Hint(it, null, null, firstVerbG) }
         head.lastOrNull { it.lowercase() in speakerNouns }?.let { return Hint(null, it.lowercase(), null, firstVerbG) }
         for (w in head.take(4)) when (w.lowercase()) {
@@ -716,6 +795,36 @@ object DialogueAnalyzer2 {
                 if (i > start) res.add(start to i)
                 start = i + 1
             }
+        }
+        return joinQuoteParagraphs(text, res)
+    }
+
+    /** A «…» message that runs over several lines ("«Принято.\nДля задачи нужны значения».")
+     *  is one paragraph: otherwise its lines are read by the narrator. */
+    private fun joinQuoteParagraphs(text: String, ps: List<Pair<Int, Int>>): List<Pair<Int, Int>> {
+        fun balance(a: Int, b: Int): Int {
+            var d = 0
+            for (k in a until b) { if (text[k] == '«') d++ else if (text[k] == '»') d-- }
+            return d
+        }
+        val res = ArrayList<Pair<Int, Int>>()
+        var i = 0
+        while (i < ps.size) {
+            val (s, e) = ps[i]
+            var k = s
+            while (k < e && text[k].isWhitespace()) k++
+            var d = if (k < e && text[k] == '«') balance(s, e) else 0
+            var j = i
+            if (d > 0) {
+                while (j + 1 < ps.size && j - i < 30 && ps[j + 1].second - s < 4000) {
+                    j++
+                    d += balance(ps[j].first, ps[j].second)
+                    if (d <= 0) break
+                }
+                if (d != 0) j = i   // never closed: leave the lines alone
+            }
+            res.add(s to ps[j].second)
+            i = j + 1
         }
         return res
     }

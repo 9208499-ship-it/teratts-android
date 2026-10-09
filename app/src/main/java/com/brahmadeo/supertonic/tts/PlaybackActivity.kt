@@ -33,6 +33,7 @@ class PlaybackActivity : ComponentActivity() {
 
     // Reactive State
     private var sentencesState = mutableStateOf<List<String>>(emptyList())
+    private var textState = mutableStateOf("")   // the chapter as it is, for the book page
     private var currentIndexState = mutableIntStateOf(-1)
     private var isPlayingState = mutableStateOf(false)
     private var isServiceActiveState = mutableStateOf(false)
@@ -131,7 +132,8 @@ class PlaybackActivity : ComponentActivity() {
                 isBound = true
 
                 if (intent.getBooleanExtra("is_resume", false)) {
-                    val isActive = playbackService?.isServiceActive == true
+                    // a book just opened at its place: whatever the service was playing is not it
+                    val isActive = playbackService?.isServiceActive == true && !intent.getBooleanExtra("fresh", false)
                     if (isActive) {
                         val serviceIndex = playbackService?.getCurrentIndex() ?: -1
                         if (serviceIndex != -1) {
@@ -193,6 +195,8 @@ class PlaybackActivity : ComponentActivity() {
             SupertonicTheme(voiceFile = currentVoicePath) {
                 PlaybackScreen(
                     sentences = sentencesState.value,
+                    text = textState.value,
+                    title = textState.value.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: "",
                     currentIndex = currentIndexState.intValue,
                     isPlaying = isPlayingState.value,
                     isServiceActive = isServiceActiveState.value,
@@ -277,6 +281,7 @@ class PlaybackActivity : ComponentActivity() {
     private fun setupList(text: String) {
         val normalizer = TextNormalizer()
         val sentences = normalizer.splitIntoSentences(text, currentLang)
+        textState.value = text
         sentencesState.value = sentences
     }
 
@@ -337,7 +342,7 @@ class PlaybackActivity : ComponentActivity() {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
             val roster = com.brahmadeo.supertonic.tts.utils.BookRoster.cached(ctx, scope)
-            val (result, line) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val (result, line, now) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text,
                         com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(roster?.genders ?: emptyMap(),
@@ -347,7 +352,7 @@ class PlaybackActivity : ComponentActivity() {
                 // the whole line (a span) this phrase belongs to
                 val span = if (rg == null) null else r.spans.firstOrNull { it.start <= rg.last && it.end > rg.first &&
                     it.role != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.NARRATOR }
-                r to span?.let { text.substring(it.start, it.end) }
+                Triple(r, span?.let { text.substring(it.start, it.end) }, span?.speaker)
             }
             if (line == null) {
                 android.widget.Toast.makeText(ctx, getString(R.string.speaker_no_line), android.widget.Toast.LENGTH_SHORT).show()
@@ -358,7 +363,9 @@ class PlaybackActivity : ComponentActivity() {
             val labels = names.map { if (it == hero) getString(R.string.characters_hero) else it } +
                 listOf(getString(R.string.speaker_unknown), getString(R.string.speaker_narrator))
             com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
-                .setTitle(getString(R.string.speaker_who) + "\n«" + line.trim().take(80) + "»")
+                .setTitle(getString(R.string.speaker_who) + "\n«" + line.trim().take(80) + "»\n" +
+                    getString(R.string.speaker_now, when (now) { null -> getString(R.string.speaker_unknown)
+                        hero -> getString(R.string.characters_hero); else -> now }))
                 .setItems(labels.toTypedArray()) { _, which ->
                     val choice = when {
                         which < names.size -> names[which]

@@ -287,4 +287,5 @@
     <string name="err_busy">Уже идёт другая загрузка или импорт словаря. Дождитесь окончания и попробуйте ещё раз.</string>
     <string name="err_unknown_fmt">Неизвестная ошибка (код %1$d).</string>
     <string name="assets_not_ready">Ресурсы не готовы. Сначала скачайте их на главном экране.</string>
+    <string name="speaker_now">Сейчас читает: %1$s</string>
 </resources>

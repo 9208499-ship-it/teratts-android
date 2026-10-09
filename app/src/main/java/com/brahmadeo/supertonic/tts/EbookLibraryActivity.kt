@@ -84,6 +84,8 @@ class EbookLibraryActivity : ComponentActivity() {
     private fun openBook(path: String) {
         val intent = Intent(this, EbookOutlineActivity::class.java).apply {
             putExtra(EbookOutlineActivity.EXTRA_URI, path)
+            // a book read before opens at its place, as in reading apps (the contents are one "Back" away)
+            putExtra(EbookOutlineActivity.EXTRA_CONTINUE, true)
         }
         ebookOutlineLauncher.launch(intent)
     }
@@ -131,7 +133,13 @@ class EbookLibraryActivity : ComponentActivity() {
                     items(recentBooks) { book ->
                         ListItem(
                             headlineContent = { Text(book.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text(book.path, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = {
+                                val pos = remember(book.path) {
+                                    com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookLibraryActivity, java.io.File(book.path).name)
+                                }
+                                Text(if (pos != null && pos.quote.isNotBlank()) "▶ «" + pos.quote.trim().take(60) + "…»" else book.path,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
                             leadingContent = { Icon(Icons.Default.Book, contentDescription = null) },
                             modifier = Modifier.clickable { onBookClick(book) }
                         )

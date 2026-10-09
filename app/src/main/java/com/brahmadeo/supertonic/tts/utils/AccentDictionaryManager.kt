@@ -194,7 +194,9 @@ object AccentDictionaryManager {
     // Including \p{M} makes the matcher consume the existing diacritic, so
     // its lowercased form misses the (unstressed-key) dictionary and the
     // word is preserved as the user marked it.
-    private val wordPattern: Pattern = Pattern.compile("[\\p{L}\\p{M}]+")
+    // '+' too: "зам+ок" from the user lexicon is one marked word, not "зам" and
+    // "ок" — otherwise "зам" got its own stress ("за́м+ок") and the model heard two.
+    private val wordPattern: Pattern = Pattern.compile("[\\p{L}\\p{M}+]+")
     private const val META_PREFS = "AccentDictMeta"
     private const val META_KEY_SOURCE = "source"
     private const val META_KEY_ENTRIES = "entries"
@@ -323,6 +325,13 @@ object AccentDictionaryManager {
 
     fun isReady(): Boolean = binaryDict != null || entries.isNotEmpty()
 
+    /** Is this word in the accent dictionary (any case)? */
+    fun has(word: String): Boolean {
+        val lower = word.lowercase()
+        val bin = binaryDict
+        return if (bin != null) bin.lookup(lower.toByteArray(Charsets.UTF_8)) != null else entries.containsKey(lower)
+    }
+
     fun apply(text: String, lang: String = ""): String {
         // Snapshot the backends once per call so concurrent reload doesn't
         // flip us mid-iteration.
@@ -334,6 +343,8 @@ object AccentDictionaryManager {
         val sb = StringBuffer()
         while (matcher.find()) {
             val original = matcher.group() ?: continue
+            // already stressed by the user (lexicon, a stress-marked book): keep as is
+            if (original.indexOf('+') >= 0 || original.indexOf('\u0301') >= 0 || original.indexOf('\u0300') >= 0) continue
             val lower = original.lowercase()
             // Look up in whichever backend is live. The .sacc reader takes
             // UTF-8 bytes; the JSON HashMap is keyed by the lowercased String.
