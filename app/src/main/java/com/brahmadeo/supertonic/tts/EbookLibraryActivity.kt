@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Toc
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -75,17 +76,18 @@ class EbookLibraryActivity : ComponentActivity() {
                 LibraryScreen(
                     onBack = { finish() },
                     onOpenNew = { ebookPickerLauncher.launch(arrayOf("*/*")) },
-                    onBookClick = { openBook(it.path) }
+                    onBookClick = { openBook(it.path) },
+                    onTocClick = { openBook(it.path, toContents = true) }
                 )
             }
         }
     }
 
-    private fun openBook(path: String) {
+    private fun openBook(path: String, toContents: Boolean = false) {
         val intent = Intent(this, EbookOutlineActivity::class.java).apply {
             putExtra(EbookOutlineActivity.EXTRA_URI, path)
-            // a book read before opens at its place, as in reading apps (the contents are one "Back" away)
-            putExtra(EbookOutlineActivity.EXTRA_CONTINUE, true)
+            // a book read before opens at its place, as in reading apps; the list icon — its contents
+            putExtra(EbookOutlineActivity.EXTRA_CONTINUE, !toContents)
         }
         ebookOutlineLauncher.launch(intent)
     }
@@ -95,7 +97,8 @@ class EbookLibraryActivity : ComponentActivity() {
     fun LibraryScreen(
         onBack: () -> Unit,
         onOpenNew: () -> Unit,
-        onBookClick: (RecentBook) -> Unit
+        onBookClick: (RecentBook) -> Unit,
+        onTocClick: (RecentBook) -> Unit = {}
     ) {
         val recentBooks by remember { mutableStateOf(EbookManager.getRecentBooks(this@EbookLibraryActivity)) }
 
@@ -132,15 +135,27 @@ class EbookLibraryActivity : ComponentActivity() {
                 ) {
                     items(recentBooks) { book ->
                         ListItem(
-                            headlineContent = { Text(book.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            headlineContent = {
+                                val shown = if (book.title.startsWith("book_"))
+                                    com.brahmadeo.supertonic.tts.utils.EbookManager.originalName(this@EbookLibraryActivity, book.path) ?: book.title
+                                else book.title
+                                Text(shown, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            },
                             supportingContent = {
                                 val pos = remember(book.path) {
                                     com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookLibraryActivity, java.io.File(book.path).name)
                                 }
-                                Text(if (pos != null && pos.quote.isNotBlank()) "▶ «" + pos.quote.trim().take(60) + "…»" else book.path,
+                                Text(if (pos != null && pos.quote.isNotBlank()) "▶ «" + pos.quote.trim().take(60) + "…»"
+                                     else com.brahmadeo.supertonic.tts.utils.EbookManager.originalName(this@EbookLibraryActivity, book.path)
+                                        ?: book.path.substringAfterLast('/'),
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             leadingContent = { Icon(Icons.Default.Book, contentDescription = null) },
+                            trailingContent = {
+                                IconButton(onClick = { onTocClick(book) }) {
+                                    Icon(Icons.Default.Toc, contentDescription = getString(R.string.player_toc))
+                                }
+                            },
                             modifier = Modifier.clickable { onBookClick(book) }
                         )
                         HorizontalDivider()

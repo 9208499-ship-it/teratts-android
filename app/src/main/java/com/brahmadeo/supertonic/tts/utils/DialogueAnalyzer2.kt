@@ -299,6 +299,8 @@ object DialogueAnalyzer2 {
         var heroAttributed = 0                         // "сказал я": the book is told in the first person
         var systemSeen = false
         var lastQuoteBody = ""                         // the book has a voice in the head
+        var introHint: Hint? = null                    // "Она сказала:" / "Лена улыбнулась:" — who speaks next
+        var beatHint: Hint? = null                     // "Она кивнула." — likely who speaks next
 
         // who the next line is plainly attributed to ("— …, — заинтересовался я.")
         fun explicitAt(i: Int): String? {
@@ -320,13 +322,24 @@ object DialogueAnalyzer2 {
                 // "В голове прозвучало:" / "Раздался голос 896‑го:" → who speaks in the next «…»
                 pendingQuoteSpeaker = introSpeaker(text.substring(p.start, p.end))
                 pendingFromIntro = pendingQuoteSpeaker != null
+                introHint = if (pendingQuoteSpeaker == null) speakerIntro(text.substring(p.start, p.end)) else null
+                // "Она кивнула." right before a bare line: the line is usually hers
+                beatHint = if (introHint == null && pendingQuoteSpeaker == null) actionBeat(text.substring(p.start, p.end)) else null
                 if (p.end - p.start > 300) { run.clear(); lastAddressee = null }
                 out.addAll(p.spans(null, null, Manner.NORMAL))
                 continue
             }
             val authors = authorPieces(text, p)
+            // the line's own author words; none — the paragraph before it, if it ended with
+            // "Она сказала:" (the line is hers: before, it fell to the unknown — a man's — voice)
+            // a beat yields to a name in the line: "Андрей кивнул. — Что скажешь, Андрей?" is not his
+            val beat = beatHint?.takeIf { !p.quoted && addresseeIn(p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }, emptyList()) == null }
+            val fromIntro = if (authors.isEmpty()) introHint ?: beat else null
+            introHint = null
+            beatHint = null
             val h = authors.asSequence().map { (a, b) -> hint(words(text, a, b)) }
                 .firstOrNull { it.name != null || it.noun != null || it.hero || it.pronoun != null || it.verbGender != null }
+                ?: fromIntro
             val manner = authors.asSequence().map { (a, b) -> mannerOf(text.substring(a, b)) }
                 .firstOrNull { it != Manner.NORMAL } ?: Manner.NORMAL
 
@@ -353,7 +366,7 @@ object DialogueAnalyzer2 {
                 val intro = authors.firstOrNull()?.let { (a, b) -> introSpeaker(text.substring(a, b)) }
                 val bySubject = h?.let { it.name ?: it.noun ?: if (it.hero) HERO else null }
                 speaker = intro ?: bySubject
-                if (speaker == null && authors.isEmpty()) {
+                if (speaker == null && authors.isEmpty() && fromIntro == null) {
                     val body = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
                     speaker = when {
                         // introduced right before ("я задал вопрос:", "В голове прозвучало:")
@@ -379,7 +392,7 @@ object DialogueAnalyzer2 {
                 lastQuoteBody = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }.trim()
                 if (speaker == SYSTEM) systemSeen = true
                 pendingFromIntro = false   // a run of «…» messages does not carry over to dash lines
-                gender = if (speaker == SYSTEM) G.F else h?.verbGender ?: genderOf(speaker)
+                gender = if (speaker == SYSTEM) G.F else h?.verbGender ?: h?.pronoun ?: genderOf(speaker)
             } else if (authors.isEmpty() && pendingQuoteSpeaker != null && pendingFromIntro) {
                 // "Раздался голос 896‑го:" followed by a dash line
                 speaker = pendingQuoteSpeaker
@@ -708,6 +721,52 @@ object DialogueAnalyzer2 {
         return SYSTEM
     }
 
+    /**
+     * A narration paragraph that ends by introducing the next line ("Она сказала:",
+     * "Лена улыбнулась:", "Девушка ответила, что ей всё равно, и добавила:"): who speaks —
+     * a name, a role noun or "он/она", or at least a speech verb with its gender.
+     */
+    private fun speakerIntro(par: String): Hint? {
+        val t = par.trim()
+        if (!t.endsWith(":")) return null
+        val last = t.dropLast(1).split(Regex("""(?<=[.!?…])\s+""")).last()
+        val ws = WORD.findAll(last).map { normHyphen(it.value) }.toList()
+        if (ws.isEmpty() || ws.size > 24) return null
+        val h = hint(ws)
+        if (h.hero) return null
+        if (h.name != null || h.noun != null || h.pronoun != null) return h
+        val low = last.lowercase()
+        return if (h.verbGender != null && speechStems.any { low.contains(it) }) h else null
+    }
+
+    /**
+     * A short action beat: the subject, then its past-tense verb ("Она кивнула.", "Вера
+     * улыбнулась и отвернулась.", "Я пожал плечами.") — a bare line right after it is the
+     * subject's in most books.
+     */
+    private fun actionBeat(par: String): Hint? {
+        val t = par.trim()
+        if (t.length > 140 || t.endsWith(":") || t.any { it in quotePairs.keys }) return null
+        val ws = WORD.findAll(t).map { normHyphen(it.value) }.toList()
+        if (ws.size < 2) return null
+        val subj = ws[0]
+        val low = subj.lowercase()
+        val verbG = (1..minOf(3, ws.size - 1)).firstNotNullOfOrNull { pastGender(ws[it], false) } ?: return null
+        return when {
+            // "Я пожал плечами." — no: in a first-person book the narrator does everything
+            low == "я" -> null
+            low == "он" -> if (verbG == G.M) Hint(null, null, G.M, verbG) else null
+            low == "она" -> if (verbG == G.F) Hint(null, null, G.F, verbG) else null
+            low in speakerNouns -> if (speakerNouns[low] == null || speakerNouns[low] == verbG) Hint(null, low, null, verbG) else null
+            isNameWord(subj) && isProper(subj) -> Hint(subj, null, null, verbG)
+            else -> null
+        }
+    }
+
+    private val speechStems = listOf("сказа", "ответи", "спроси", "произн", "добави", "крикн", "закрича",
+        "прошепт", "пробормот", "воскликн", "заяви", "проговори", "продолжи", "повтори", "попроси",
+        "возрази", "шепну", "буркн", "огрызн", "отрезал", "сообщи", "объясни", "предложи", "велел", "приказа")
+
     /** Gender of a past-tense verb ("сказал", "спросила", "усмехнулся", "произнёс"), or null. */
     private fun pastGender(w: String, first: Boolean): G? {
         val lw = w.lowercase()
@@ -877,16 +936,22 @@ object DialogueAnalyzer2 {
         val pieces = ArrayList<Triple<Int, Int, Boolean>>()
         var pos = start
         var i = start
+        var lastSpeechEnd = -1
         while (i < end) {
             val close = quotePairs[text[i]]
             if (close != null) {
                 val at = text.indexOf(close, i + 1).let { if (it < 0 || it >= end) -1 else it }
                 if (at < 0) break
                 val before = text.substring(start, i).trimEnd()
-                if (before.isEmpty() || before.endsWith(":")) {
+                // «Ты опоздал», – сказала она. «Опять». — the line goes on after the author words
+                val gap = if (lastSpeechEnd >= 0) text.substring(lastSpeechEnd, i).trim() else ""
+                val continued = lastSpeechEnd >= 0 && gap.length < 160 &&
+                    gap.trimStart(',', '.', '!', '?', '…', ' ').firstOrNull()?.let { it in dashes } == true
+                if (before.isEmpty() || before.endsWith(":") || continued) {
                     if (i > pos) pieces.add(Triple(pos, i, false))
                     pieces.add(Triple(i, at + 1, true))
                     pos = at + 1
+                    lastSpeechEnd = at + 1
                 }
                 i = at + 1
                 continue

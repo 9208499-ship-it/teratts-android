@@ -22,6 +22,8 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.graphics.drawable.toBitmap
+import android.support.v4.media.MediaMetadataCompat
 import com.brahmadeo.supertonic.tts.R
 import com.brahmadeo.supertonic.tts.SupertonicTTS
 import com.brahmadeo.supertonic.tts.utils.PlaybackPrefs
@@ -58,7 +60,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
 
         override fun play() {
-            this@PlaybackService.play()
+            // paused: go on from the very word; nothing left to go on with: start the last text again
+            if (this@PlaybackService.isSynthesizing) this@PlaybackService.play() else this@PlaybackService.playOrResume()
         }
 
         override fun pause() {
@@ -120,6 +123,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     private var lastTrackRate: Int = -1
     @Volatile private var isPlaying = false
     @Volatile private var isSynthesizing = false
+    /**
+     * Every start and every stop takes a new number. A start that was still getting ready
+     * (waiting for the previous phrase to finish, or for the next chapter to load) when
+     * "pause" came, sees a newer number and does not start — it used to start anyway, so
+     * the reading came back a second or two after the pause.
+     */
+    private val playGen = java.util.concurrent.atomic.AtomicInteger(0)
+    @Volatile private var starting = false
     private val textNormalizer = TextNormalizer()
     private var resumeOnFocusGain = false
     
@@ -190,6 +201,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     companion object {
         /** startIndex meaning "continue where this text was left off". */
         const val RESUME_INDEX = -1
+        /** Say a phrase in a voice (the Characters window): extras "text", "voice" (style path), "speed". */
+        const val ACTION_PREVIEW = "PREVIEW_VOICE"
         /** Going back this much when reading is resumed later (a minute, as audiobook players do). */
         const val RESUME_REWIND_SECONDS = 60f
 
@@ -199,6 +212,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
          * replayed from its start anyway; an evening — a little; days — up to a minute.
          * A fixed minute made the place creep backwards on every short stop.
          */
+        /**
+         * The very first sentence of a start, if long, is cut after its first comma (40+ letters
+         * in): the voice begins as soon as that short part is ready instead of after the whole
+         * sentence — a few seconds sooner on a cold start. Only at a comma: it sounds natural.
+         */
+        fun quickStartSplit(subs: List<String>): List<String> {
+            val first = subs.firstOrNull() ?: return subs
+            if (first.length < 90) return subs
+            val cut = Regex("[,;:]\\s").findAll(first).map { it.range.first + 1 }
+                .firstOrNull { it in 40..(first.length - 30) } ?: return subs
+            return listOf(first.substring(0, cut).trim(), first.substring(cut).trim()) + subs.drop(1)
+        }
+
         fun rewindSecondsFor(savedAt: Long): Float {
             if (savedAt <= 0L) return 15f
             val minutes = (System.currentTimeMillis() - savedAt) / 60000f
@@ -265,7 +291,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         private const val POSITIONS_PREFS = "TeraReadingPositions"
         fun positionKey(text: String) = "pos_" + Integer.toHexString(text.hashCode()) + "_" + text.length
 
-        const val CHANNEL_ID = "supertonic_playback"
+        // a new channel: the importance of an existing one cannot be changed from the app
+        const val CHANNEL_ID = "tera_now_playing"
         const val NOTIFICATION_ID = 1
         const val TAG = "PlaybackService"
         // TeraTTS outputs full-scale speech; the 2.5× boost tuned for Supertonic clipped it
@@ -300,9 +327,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         
         mediaSession = MediaSessionCompat(attributionContext, "SupertonicMediaSession").apply {
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() { this@PlaybackService.play() }
+                // the lock screen / always-on display / headset: play also after a stop
+                override fun onPlay() { this@PlaybackService.playOrResume() }
                 override fun onPause() { this@PlaybackService.pause() }
                 override fun onStop() { this@PlaybackService.stopPlayback() }
+                override fun onSkipToNext() { this@PlaybackService.skipPhrase(1) }
+                override fun onSkipToPrevious() { this@PlaybackService.skipPhrase(-1) }
             })
             isActive = true
         }
@@ -333,6 +363,17 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_PLAYBACK") {
             stopPlayback()
+        } else if (intent?.action == "TERA_PLAY") {
+            playOrResume()
+        } else if (intent?.action == "TERA_PAUSE") {
+            pause()
+        } else if (intent?.action == "TERA_NEXT") {
+            skipPhrase(1)
+        } else if (intent?.action == "TERA_PREV") {
+            skipPhrase(-1)
+        } else if (intent?.action == ACTION_PREVIEW) {
+            previewVoice(intent.getStringExtra("text") ?: "", intent.getStringExtra("voice") ?: "",
+                intent.getFloatExtra("speed", 1f))
         } else if (intent?.action == "RESET_ENGINE") {
             // reload in the background: loading the models takes seconds, and on the
             // main thread it froze the app ("не отвечает"); reading waits for engineReady
@@ -365,6 +406,66 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     }
 
     private var synthesisJob: Job? = null
+    private var previewJob: Job? = null
+    @Volatile private var sleepPhrase = -1          // sleep timer: the phrase let to finish
+    private var previewTrack: AudioTrack? = null
+
+    /**
+     * A phrase in [voice] for the Characters window — on its own short track, apart
+     * from the reading (which is stopped first, so the two do not talk at once).
+     */
+    private fun previewVoice(text: String, voice: String, speed: Float) {
+        if (text.isBlank() || voice.isEmpty()) return
+        previewJob?.cancel()
+        try { previewTrack?.stop(); previewTrack?.release() } catch (_: Exception) {}
+        previewTrack = null
+        previewJob = serviceScope.launch(Dispatchers.IO) {
+            if (isPlaying || isSynthesizing) {
+                withContext(Dispatchers.Main) { stopServicePlayback() }
+                delay(300)
+                synthesisJob?.join()
+            }
+            engineReady?.join()
+            SupertonicTTS.setCancelled(false)
+            val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+            val lang = prefs.getString("selected_lang", "ru") ?: "ru"
+            val steps = prefs.getInt("diffusion_steps", 5)
+            val prepared = textNormalizer.normalize(text, lang, false)
+            // as loud as it will be in the book: next to the narrator (or the main voice)
+            val main = prefs.getString("last_voice_path", "") ?: ""
+            val ref = com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService).takeIf { it.isNotEmpty() }
+                ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: main
+            val gain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, voice, ref)
+            val pcm = SupertonicTTS.generateAudio(prepared, lang, voice, speed.coerceIn(0.5f, 2.5f), 0f, steps,
+                gain, null) ?: return@launch
+            com.brahmadeo.supertonic.tts.utils.VoiceLoudness.observe(this@PlaybackService, voice, pcm, gain, SupertonicTTS.getAudioSampleRate())
+            if (!isActive || pcm.isEmpty()) return@launch
+            val rate = SupertonicTTS.getAudioSampleRate()
+            val track = try {
+                AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(pcm.size)
+                    .build()
+            } catch (e: Exception) { Log.e(TAG, "preview track", e); return@launch }
+            previewTrack = track
+            try {
+                track.write(pcm, 0, pcm.size)
+                track.play()
+                delay(pcm.size / 2 * 1000L / rate + 300)
+            } catch (_: Exception) {
+            } finally {
+                try { track.stop(); track.release() } catch (_: Exception) {}
+                if (previewTrack === track) previewTrack = null
+            }
+        }
+    }
 
     // ---- what is being heard: phrase start frames in the written audio vs the playback head ----
     private val timeline = java.util.concurrent.CopyOnWriteArrayList<LongArray>()   // [phrase index, start frame]
@@ -382,8 +483,72 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     /** Reading speed; the slider on the playback screen changes it while reading (next sentence on). */
     @Volatile var liveSpeed: Float = 1.0f
 
+    // ---- "now playing": the book and the phrase, for the notification, lock screen and AOD ----
+    private data class PlayArgs(val text: String, val lang: String, val style: String, val steps: Int)
+    @Volatile private var lastPlay: PlayArgs? = null
+    @Volatile private var nowBook = ""
+    @Volatile private var nowChapter = ""
+    @Volatile private var nowPhrase = ""
+    private var appIconBitmap: android.graphics.Bitmap? = null
+
+    private fun appIcon(): android.graphics.Bitmap? = appIconBitmap ?: try {
+        androidx.core.content.ContextCompat.getDrawable(this, R.mipmap.ic_launcher)?.toBitmap(192, 192)
+    } catch (e: Exception) { null }.also { appIconBitmap = it }
+
+    /** The book's title (as in the library) for a chapter of it; the app's name otherwise. */
+    private fun bookTitleFor(text: String): String {
+        val path = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this)
+        if (path != null && com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this, text).isNotEmpty()) {
+            com.brahmadeo.supertonic.tts.utils.EbookManager.getRecentBooks(this).firstOrNull { it.path == path }
+                ?.title?.takeIf { it.isNotBlank() && !it.startsWith("book_") }?.let { return it }
+            com.brahmadeo.supertonic.tts.utils.EbookManager.originalName(this, path)?.let { return it }
+        }
+        return getString(R.string.app_name)
+    }
+
+    /** The phrase being heard: the title on the lock screen / AOD card and in the notification. */
+    private fun setNowPlaying(phrase: String) {
+        nowPhrase = phrase.trim().replace(Regex("\\s+"), " ").take(160)
+        try {
+            mediaSession.setMetadata(MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, nowPhrase.ifEmpty { nowBook })
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, nowPhrase.ifEmpty { nowBook })
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, nowBook)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, nowBook)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, nowChapter)
+                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, appIcon())
+                .build())
+            if (isPlaying) updateNotification(getString(R.string.notif_playing))
+        } catch (e: Exception) { Log.w(TAG, "now playing", e) }
+    }
+
+    /** Play from the lock screen / notification: continue a paused reading, or start the last one again. */
+    fun playOrResume() {
+        if (isSynthesizing) { play(); return }
+        val a = lastPlay ?: run {
+            val p = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+            val t = p.getString("last_text", "") ?: ""
+            if (t.isEmpty()) return
+            PlayArgs(t, p.getString("last_lang", "ru") ?: "ru", p.getString("last_voice_path", "") ?: "", p.getInt("last_steps", 5))
+        }
+        synthesizeAndPlay(a.text, a.lang, a.style, liveSpeed, a.steps,
+            if (lastPlay != null && currentSentenceIndex >= 0) currentSentenceIndex else RESUME_INDEX)
+    }
+
+    /** A phrase back / forward from the notification or the lock screen. */
+    fun skipPhrase(d: Int) {
+        val a = lastPlay ?: return
+        val i = (currentSentenceIndex.coerceAtLeast(0) + d).coerceAtLeast(0)
+        synthesizeAndPlay(a.text, a.lang, a.style, liveSpeed, a.steps, i)
+    }
+
     fun synthesizeAndPlay(text: String, lang: String, stylePath: String, speed: Float, steps: Int, startIndex: Int = 0) {
+        val gen = playGen.incrementAndGet()
+        starting = true
         liveSpeed = speed
+        lastPlay = PlayArgs(text, lang, stylePath, steps)
+        nowBook = bookTitleFor(text)
+        nowChapter = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: ""
         serviceScope.launch {
             // Cancel any in-flight synthesis, but keep the AudioTrack alive so the
             // next sentence can stream straight in without a re-init delay.
@@ -391,6 +556,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 SupertonicTTS.setCancelled(true)
                 synthesisJob?.cancelAndJoin()
             }
+            // paused / stopped (or started again) while the previous phrase was finishing
+            if (gen != playGen.get()) return@launch
 
             val rate = SupertonicTTS.getAudioSampleRate()
             ensureAudioTrack(rate)
@@ -406,7 +573,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
             updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING)
             startForegroundService(getString(R.string.notif_synthesizing), false)
-            notifyListenerState(false)
+            // the player shows "pause" at once: a tap while the first phrase is being made
+            // pauses it (it used to show "play", and a tap restarted the phrase)
+            notifyListenerState(true)
 
             wakeLock?.acquire(10 * 60 * 1000L)
 
@@ -442,8 +611,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             // dictionary).
             val effectiveLang = autoDetectRussian(text, lang)
 
+            val tStart = android.os.SystemClock.elapsedRealtime()
+            var firstSoundLogged = false
+            starting = false
             synthesisJob = launch(Dispatchers.IO) {
                 engineReady?.join()
+                Log.i("TeraStart", "engine ready after ${android.os.SystemClock.elapsedRealtime() - tStart} ms")
                 // with the screen off the phone cuts CPU, so give it audio priority
                 try {
                     android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
@@ -478,6 +651,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
                 val validStartIndex = if (requestedIndex in 0 until totalSentences) requestedIndex else 0
                 currentSentenceIndex = validStartIndex
+                // a timer that ran out while nothing was read does not stop the reading just started
+                if (com.brahmadeo.supertonic.tts.utils.SleepTimer.expired(this@PlaybackService)) {
+                    com.brahmadeo.supertonic.tts.utils.SleepTimer.off(this@PlaybackService)
+                }
+                sleepPhrase = -1
 
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
                 val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
@@ -627,8 +805,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             currentSentenceIndex = idx
                             notifyListenerProgress(idx, totalSentences)
                             savePosition(idx)
+                            setNowPlaying(sentences.getOrNull(idx) ?: "")
                         }
                         notifyListenerSpoken(idx, fraction)
+                        // sleep timer: the time is up — let the phrase being heard finish, then stop
+                        if (com.brahmadeo.supertonic.tts.utils.SleepTimer.expired(this@PlaybackService)) {
+                            if (sleepPhrase < 0) sleepPhrase = idx
+                            else if (idx != sleepPhrase) {
+                                sleepPhrase = -1
+                                com.brahmadeo.supertonic.tts.utils.SleepTimer.off(this@PlaybackService)
+                                stopServicePlayback()
+                                break
+                            }
+                        }
                     }
                 }
 
@@ -686,11 +875,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 Log.w(TAG, "AudioTrack.play() self-heal failed", e)
                             }
                         }
+                        if (!firstSoundLogged) {
+                            firstSoundLogged = true
+                            Log.i("TeraStart", "first sound after ${android.os.SystemClock.elapsedRealtime() - tStart} ms")
+                        }
                         writeToTrackBlocking(data)
                     }
                 }
 
                 var producedSentences = 0
+                var quickStart = true      // the first phrase of this start: speak as soon as possible
                 try {
                     for (index in validStartIndex until totalSentences) {
                         if (SupertonicTTS.isCancelled() || !isActive) break
@@ -738,11 +932,15 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             // character's own pace × how this line is said (выпалил / протянул)
                             val pieceSpeed = (liveSpeed * (pc.speaker?.let { charSpeed[it] } ?: 1f) *
                                 com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner)).coerceIn(0.5f, 2.5f)
-                            val pieceGain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner)
+                            // every voice as loud as the main one (voices differ by a lot), then how the line is said
+                            val pieceGain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner) *
+                                com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, pieceStyle, narratorStyle)
                             // sentence by sentence, each with its marker: the highlight follows the
                             // voice exactly, as readers do with system TTS (the engine cuts at
                             // sentence ends anyway, so this costs nothing)
-                            for (sub in com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)) {
+                            var subs = com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)
+                            if (quickStart) { subs = quickStartSplit(subs); quickStart = false }
+                            for (sub in subs) {
                                 if (SupertonicTTS.isCancelled() || !isActive) break
                                 if (sentStarts.size > 1) {
                                     val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
@@ -759,7 +957,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                     normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
                                     pieceGain, streamingListener
                                 )
-                                if (r != null && r.isNotEmpty()) { result = r; sentenceBytes += r.size }
+                                if (r != null && r.isNotEmpty()) {
+                                    result = r; sentenceBytes += r.size
+                                    com.brahmadeo.supertonic.tts.utils.VoiceLoudness.observe(this@PlaybackService, pieceStyle, r, pieceGain,
+                                        SupertonicTTS.getAudioSampleRate())
+                                }
                             }
                         }
                         recordReaderRtf(sentenceBytes, System.nanoTime() - sentenceStarted)
@@ -778,11 +980,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             ) {
                                 preRollSignal.complete(Unit)
                             }
-                            if (!statePromotedToPlaying) {
+                            if (!statePromotedToPlaying && isPlaying) {
                                 statePromotedToPlaying = true
                                 withContext(Dispatchers.Main) {
                                     updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
                                     notifyListenerState(true)
+                                    // from "preparing" to the player: book, phrase, ⏮ ⏯ ⏭
+                                    try { updateNotification(getString(R.string.notif_playing)) } catch (_: Exception) {}
                                 }
                             }
                             // Inter-sentence breath. Suspending send — never
@@ -824,7 +1028,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 .remove(positionKey(text)).apply()
                         }
                         notifyListenerState(true)
-                        if (!wasCancelled) {
+                        if (!wasCancelled && com.brahmadeo.supertonic.tts.utils.SleepTimer.atChapterEnd(this@PlaybackService)) {
+                            // sleep timer "to the end of the chapter": no next chapter, no queue
+                            com.brahmadeo.supertonic.tts.utils.SleepTimer.off(this@PlaybackService)
+                            stopPlayback()
+                        } else if (!wasCancelled) {
                             val nextItem = QueueManager.next()
                             if (nextItem != null) {
                                 SupertonicTTS.reset()
@@ -1035,6 +1243,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     fun pause() {
         resumeOnFocusGain = false
+        // a start still getting ready, or between chapters: nothing to hold — stop it,
+        // the place is kept and "play" continues from it
+        if (starting || (!isSynthesizing && isPlaying)) { stopServicePlayback(); return }
         if (isPlaying) {
             isPlaying = false
             try {
@@ -1076,6 +1287,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     }
 
     fun stopServicePlayback() {
+        playGen.incrementAndGet()
+        starting = false
         isPlaying = false
         try {
             if (audioTrack?.state == AudioTrack.STATE_INITIALIZED) {
@@ -1112,12 +1325,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     }
 
     private fun continueWithNextChapter(lang: String, stylePath: String, steps: Int) {
+        val gen = playGen.get()
         serviceScope.launch {
             val next = try {
                 withContext(Dispatchers.IO) { com.brahmadeo.supertonic.tts.utils.BookSession.nextChapter(this@PlaybackService) }
             } catch (e: Exception) {
                 Log.e(TAG, "Next chapter failed", e); null
             }
+            if (gen != playGen.get()) return@launch      // paused while the chapter was loading
             if (next == null) { stopPlayback(); return@launch }
             // same preparation as for a chapter opened by hand (MainActivity.prepareTextForTts)
             val prepared = if (lang.lowercase().startsWith("ko") || next.endsWith(" .")) next else "$next ."
@@ -1282,7 +1497,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     private fun updatePlaybackState(state: Int) {
         val playbackState = PlaybackStateCompat.Builder()
-            .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP)
+            .setActions(PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS)
             .setState(state, PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN, 1.0f)
             .build()
         mediaSession.setPlaybackState(playbackState)
@@ -1330,32 +1546,50 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             putExtra("is_resume", true)
         }
         val pendingIntent = PendingIntent.getActivity(this, 0, activityIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        // the phrase being heard on top, the book under it (as Moon+ Reader shows it); the
+        // speed diagnostics, if any, go to the small header line
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(status)
+            .setContentTitle(nowPhrase.ifEmpty { nowBook.ifEmpty { getString(R.string.app_name) } })
+            .setContentText(if (nowPhrase.isNotEmpty()) nowBook else status)
+            .setSubText(if (nowPhrase.isNotEmpty() && status.contains('×')) status else null)
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setLargeIcon(appIcon())
             .setContentIntent(pendingIntent)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
 
+        // the buttons go straight to this service (there is no media-button receiver in the app,
+        // so the old MediaButtonReceiver intents did nothing)
+        fun action(a: String, code: Int) = PendingIntent.getService(this, code,
+            Intent(this, PlaybackService::class.java).setAction(a), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         if (showControls) {
-            if (isPlaying) {
-                builder.addAction(android.R.drawable.ic_media_pause, getString(R.string.notif_paused),
-                    androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_PAUSE))
-            } else {
-                builder.addAction(android.R.drawable.ic_media_play, getString(R.string.yes), // No play string in resources, reusing yes for now or just generic
-                    androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_PLAY))
-            }
+            builder.addAction(android.R.drawable.ic_media_previous, getString(R.string.player_prev), action("TERA_PREV", 11))
+            if (isPlaying) builder.addAction(android.R.drawable.ic_media_pause, getString(R.string.notif_paused), action("TERA_PAUSE", 12))
+            else builder.addAction(android.R.drawable.ic_media_play, getString(R.string.notif_playing), action("TERA_PLAY", 13))
+            builder.addAction(android.R.drawable.ic_media_next, getString(R.string.player_next), action("TERA_NEXT", 14))
+            builder.setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                .setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0, 1, 2))
         } else {
-             builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.cancel),
-                androidx.media.session.MediaButtonReceiver.buildMediaButtonPendingIntent(this, PlaybackStateCompat.ACTION_STOP))
+            builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.cancel), action("STOP_PLAYBACK", 15))
+            builder.setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                .setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
         }
         return builder.build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Playback", NotificationManager.IMPORTANCE_LOW)
+            // DEFAULT (but silent), not LOW: Huawei and others hide "silent" notifications from
+            // the lock screen and the always-on display — and the reading card with them
+            val channel = NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_reading), NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+            try { (attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).deleteNotificationChannel("supertonic_playback") } catch (_: Exception) {}
             val manager = attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }

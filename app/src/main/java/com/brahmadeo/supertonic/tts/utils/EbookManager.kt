@@ -61,7 +61,55 @@ object EbookManager {
         }
     }
 
+    private const val NAMES = "EbookNames"
+
+    /** "Мастер и Маргарита.fb2.zip" → "Мастер и Маргарита". */
+    private fun cleanName(name: String?): String? =
+        name?.replace(Regex("""(?i)(\.(fb2|fb3|epub|pdf|txt))?(\.zip)?$"""), "")?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** The name the book file had on the phone (the copy inside the app is book_<hash>). */
+    fun originalName(context: Context, path: String): String? =
+        context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).getString(path, null)
+
+    private fun displayNameOf(context: Context, uri: Uri): String? {
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i != -1 && c.moveToFirst()) c.getString(i)?.let { return it }
+            }
+        } catch (e: Exception) { }
+        // some file managers give no name: the last part of the address (already decoded)
+        return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+    }
+
+    /** What the file really is, by its content — names and types from file managers lie. */
+    private fun sniff(file: File): String? {
+        val head = try {
+            file.inputStream().use { val b = ByteArray(2048); val n = it.read(b); String(b, 0, maxOf(n, 0), Charsets.ISO_8859_1) }
+        } catch (e: Exception) { return null }
+        if (head.startsWith("%PDF")) return "pdf"
+        if (head.contains("<FictionBook")) return "fb2"
+        if (head.startsWith("PK")) {
+            if (head.contains("application/epub+zip")) return "epub"
+            val names = try { BookConverter.zipEntryNames(file) } catch (e: Exception) { return null }
+            return when {
+                names.any { it.lowercase().endsWith(".fb2") } -> "fb2.zip"
+                names.any { it.lowercase().endsWith("body.xml") } -> "fb3"
+                names.any { it == "META-INF/container.xml" } -> "epub"
+                else -> null
+            }
+        }
+        return null
+    }
+
     fun importBook(context: Context, uri: Uri): String? {
+        val name = cleanName(displayNameOf(context, uri))
+        val path = importCopy(context, uri, name) ?: return null
+        if (name != null) context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).edit { putString(path, name) }
+        return path
+    }
+
+    private fun importCopy(context: Context, uri: Uri, niceName: String?): String? {
         try {
             val contentResolver = context.contentResolver
             
@@ -75,12 +123,13 @@ object EbookManager {
                     }
                 }
             } catch (e: Exception) { e.printStackTrace() }
+            if (displayName == null) displayName = displayNameOf(context, uri)
 
             // Try to get correct extension
             val mimeType = contentResolver.getType(uri)
             val uriString = uri.toString().lowercase()
             val lowerName = displayName?.lowercase() ?: ""
-            val extension = when {
+            val byName = when {
                 mimeType == "application/pdf" -> "pdf"
                 mimeType == "application/epub+zip" -> "epub"
                 lowerName.endsWith(".pdf") -> "pdf"
@@ -99,7 +148,7 @@ object EbookManager {
 
             // Name the copy after its content: the same book opened again is the same file,
             // so its reading place, characters and voices are kept (as reading apps do).
-            val tmp = File(context.filesDir, "ebooks/import_${System.currentTimeMillis()}.$extension")
+            val tmp = File(context.filesDir, "ebooks/import_${System.currentTimeMillis()}.$byName")
             tmp.parentFile?.mkdirs()
             val digest = java.security.MessageDigest.getInstance("SHA-1")
             contentResolver.openInputStream(uri)?.use { input ->
@@ -113,6 +162,8 @@ object EbookManager {
                     }
                 }
             } ?: return null
+            // the content decides (an .fb2 shown as "bin" or without a name still opens)
+            val extension = sniff(tmp) ?: byName
             val stamp = digest.digest().take(8).joinToString("") { "%02x".format(it) }
             File(context.filesDir, "ebooks/book_$stamp.$extension").takeIf { it.exists() }
                 ?.let { tmp.delete(); return it.absolutePath }
@@ -123,12 +174,18 @@ object EbookManager {
 
             // FB2 / FB3 / TXT: convert to EPUB so the Readium reader can open it.
             val header = destFile.inputStream().use { val b = ByteArray(512); val n = it.read(b); b.copyOf(maxOf(n, 0)) }
-            val format = if (extension == "pdf" || extension == "epub") null
-                         else BookConverter.detectFormat(displayName ?: destFile.name, header)
+            val format = when (extension) {
+                "pdf", "epub" -> null
+                "fb2" -> "fb2"
+                "fb2.zip" -> "fb2zip"
+                "fb3" -> "fb3"
+                "txt" -> "txt"
+                else -> BookConverter.detectFormat(displayName ?: destFile.name, header)
+            }
             if (format != null) {
                 val epub = File(context.filesDir, "ebooks/book_$stamp.epub")
                 try {
-                    BookConverter.convert(destFile, format, epub)
+                    BookConverter.convert(destFile, format, epub, niceName)
                     destFile.delete()
                     return epub.absolutePath
                 } catch (e: Exception) {

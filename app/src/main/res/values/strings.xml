@@ -288,4 +288,27 @@
     <string name="voice_f4">Olivia - Crisp, Confident</string>
     <string name="voice_f5">Emily - Kind, Gentle</string>
     <string name="speaker_now">Now: %1$s</string>
+    <string name="player_toc">Contents</string>
+    <string name="player_prev_chapter">Previous chapter</string>
+    <string name="player_next_chapter">Next chapter</string>
+    <string name="player_no_chapter">No more chapters this way</string>
+    <string name="sleep_title">Sleep timer</string>
+    <string name="sleep_minutes_fmt">%1$d min</string>
+    <string name="sleep_chapter">To the end of the chapter</string>
+    <string name="sleep_chapter_short">ch.</string>
+    <string name="sleep_off">Turn off</string>
+    <string name="characters_listen">Listen</string>
+    <string name="characters_sample">Hello! This is how I will sound in this book.</string>
+    <string name="notif_channel_reading">Reading</string>
+    <string name="stress_title">Stress</string>
+    <string name="stress_hint">Tap the stressed vowel</string>
+    <string name="stress_save">Save to dictionary</string>
+    <string name="stress_saved">Saved to the dictionary: %1$s</string>
+    <string name="search_title">Search in the book</string>
+    <string name="search_hint">Word or phrase</string>
+    <string name="search_chapter_fmt">chapter %1$s</string>
+    <string name="search_found_fmt">Found: %1$d</string>
+    <string name="search_no_book">Open a book from the library to search in it</string>
+    <string name="roles_loudness_title">Even out voice loudness</string>
+    <string name="roles_loudness_desc">All voices sound equally loud: as loud as the main voice, or louder if the main voice itself is quiet. Each voice is measured on its first lines</string>
 </resources>

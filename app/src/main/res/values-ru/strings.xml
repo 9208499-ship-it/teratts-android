@@ -288,4 +288,27 @@
     <string name="err_unknown_fmt">Неизвестная ошибка (код %1$d).</string>
     <string name="assets_not_ready">Ресурсы не готовы. Сначала скачайте их на главном экране.</string>
     <string name="speaker_now">Сейчас читает: %1$s</string>
+    <string name="player_toc">Оглавление</string>
+    <string name="player_prev_chapter">Предыдущая глава</string>
+    <string name="player_next_chapter">Следующая глава</string>
+    <string name="player_no_chapter">Дальше глав нет</string>
+    <string name="sleep_title">Таймер сна</string>
+    <string name="sleep_minutes_fmt">%1$d мин</string>
+    <string name="sleep_chapter">До конца главы</string>
+    <string name="sleep_chapter_short">гл.</string>
+    <string name="sleep_off">Выключить</string>
+    <string name="characters_listen">Послушать</string>
+    <string name="characters_sample">Здравствуйте! Вот так я буду звучать в этой книге.</string>
+    <string name="notif_channel_reading">Чтение</string>
+    <string name="stress_title">Ударение</string>
+    <string name="stress_hint">Нажмите на ударную гласную</string>
+    <string name="stress_save">В словарь</string>
+    <string name="stress_saved">Добавлено в словарь: %1$s</string>
+    <string name="search_title">Поиск по книге</string>
+    <string name="search_hint">Слово или фраза</string>
+    <string name="search_chapter_fmt">глава %1$s</string>
+    <string name="search_found_fmt">Найдено: %1$d</string>
+    <string name="search_no_book">Чтобы искать, откройте книгу из библиотеки</string>
+    <string name="roles_loudness_title">Выравнивать громкость голосов</string>
+    <string name="roles_loudness_desc">Все голоса звучат одинаково громко: по основному голосу, а если он сам тихий, — громче него. Каждый голос измеряется по первым репликам</string>
 </resources>

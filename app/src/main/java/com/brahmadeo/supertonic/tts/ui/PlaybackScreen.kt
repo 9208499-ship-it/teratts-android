@@ -20,10 +20,15 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Subject
+import androidx.compose.material.icons.filled.Toc
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -174,7 +179,18 @@ fun PlaybackScreen(
     onSentenceLongClick: (Int) -> Unit = {},
     currentFraction: Float = -1f,     // share of the current phrase heard; < 0 = no word highlight
     text: String = "",                // the whole chapter, for the book page
-    title: String = ""                // shown in the top bar (the chapter's first line)
+    title: String = "",               // shown in the top bar (the chapter's first line)
+    // a book: its contents and the chapters around this one (null — not a book)
+    onToc: (() -> Unit)? = null,
+    onPrevChapter: (() -> Unit)? = null,
+    onNextChapter: (() -> Unit)? = null,
+    // sleep timer: minutes left, SleepTimer.CHAPTER_END, or null (off); set: minutes / CHAPTER_END / 0
+    sleepLeft: Int? = null,
+    onSleepTimer: (Int) -> Unit = {},
+    // a double tap on a word of the book page: its stress, for the user's dictionary
+    onWordDoubleTap: (String) -> Unit = {},
+    // search the whole book (null — not a book)
+    onSearch: (() -> Unit)? = null
 ) {
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
@@ -186,7 +202,8 @@ fun PlaybackScreen(
 
     // followVoice: the text scrolls after the voice until the user scrolls it by hand;
     // then "Play" starts from the top visible phrase (as in Moon+ Reader)
-    var followVoice by remember { mutableStateOf(true) }
+    // another chapter (from the contents or the search) follows the voice / the found place again
+    var followVoice by remember(text) { mutableStateOf(true) }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragged) { if (dragged) followVoice = false }
     LaunchedEffect(currentIndex, showList, followVoice, book) {
@@ -242,6 +259,16 @@ fun PlaybackScreen(
                     }
                 },
                 actions = {
+                    if (onSearch != null) {
+                        IconButton(onClick = onSearch) {
+                            Icon(Icons.Default.Search, contentDescription = stringResource(AppR.string.search_title))
+                        }
+                    }
+                    if (onToc != null) {
+                        IconButton(onClick = onToc) {
+                            Icon(Icons.Default.Toc, contentDescription = stringResource(AppR.string.player_toc))
+                        }
+                    }
                     IconButton(onClick = onCharactersClick) {
                         Icon(Icons.Default.People, contentDescription = stringResource(AppR.string.characters_title))
                     }
@@ -289,7 +316,8 @@ fun PlaybackScreen(
                                     fraction = if (p in curParas) currentFraction else -1f,
                                     onLayout = { layouts[p] = it },
                                     onTap = { i -> playFrom(i) },
-                                    onLongPress = { i -> onSentenceLongClick(i) }
+                                    onLongPress = { i -> onSentenceLongClick(i) },
+                                    onWord = onWordDoubleTap
                                 )
                             }
                         }
@@ -332,6 +360,13 @@ fun PlaybackScreen(
                         val fraction = if (n > 1) index.toFloat() / (n - 1) else 0f
                         val shown = (seeking?.let { Math.round(it * (n - 1)) } ?: index)
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // ‹ › around the line: the chapter before / after, as in Moon+
+                            if (onPrevChapter != null) {
+                                IconButton(onClick = onPrevChapter, modifier = Modifier.size(36.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                        contentDescription = stringResource(AppR.string.player_prev_chapter))
+                                }
+                            }
                             Text(
                                 "-" + formatTime(remainingSeconds),
                                 style = MaterialTheme.typography.labelMedium,
@@ -352,6 +387,12 @@ fun PlaybackScreen(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (onNextChapter != null) {
+                                IconButton(onClick = onNextChapter, modifier = Modifier.size(36.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = stringResource(AppR.string.player_next_chapter))
+                                }
+                            }
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -389,6 +430,7 @@ fun PlaybackScreen(
                                 onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
                                 onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
                             )
+                            SleepButton(sleepLeft, onSleepTimer)
                             IconButton(onClick = { showList = !showList }) {
                                 Icon(
                                     if (showList) Icons.Default.Subject else Icons.AutoMirrored.Filled.List,
@@ -468,6 +510,19 @@ fun PlaybackScreen(
     }
 }
 
+/** The word around [i] in [s] ("кто-то" whole), without stress marks and soft hyphens; null if none. */
+internal fun wordAt(s: String, i: Int): String? {
+    if (s.isEmpty()) return null
+    fun isW(c: Char) = c.isLetter() || c == '\u0301' || c == '\u00AD' || c == '+'
+    var a = i.coerceIn(0, s.length - 1)
+    if (!isW(s[a])) { if (a > 0 && isW(s[a - 1])) a-- else return null }
+    var st = a
+    while (st > 0 && (isW(s[st - 1]) || (s[st - 1] == '-' && st > 1 && s[st - 2].isLetter()))) st--
+    var en = a + 1
+    while (en < s.length && (isW(s[en]) || (s[en] == '-' && en + 1 < s.length && s[en + 1].isLetter()))) en++
+    return s.substring(st, en).filter { it.isLetter() || it == '-' }.takeIf { w -> w.any { it.isLetter() } }
+}
+
 /** One paragraph of the book page; the phrase being read is shaded, the sentence heard — darker. */
 @Composable
 private fun BookParagraph(
@@ -478,7 +533,8 @@ private fun BookParagraph(
     fraction: Float,
     onLayout: (TextLayoutResult) -> Unit,
     onTap: (Int) -> Unit,
-    onLongPress: (Int) -> Unit
+    onLongPress: (Int) -> Unit,
+    onWord: (String) -> Unit = {}
 ) {
     val pr = book.paragraphs[p]
     val shade = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -504,6 +560,7 @@ private fun BookParagraph(
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val tap by rememberUpdatedState(onTap)
     val long by rememberUpdatedState(onLongPress)
+    val word by rememberUpdatedState(onWord)
     Text(
         ann,
         style = MaterialTheme.typography.bodyLarge.copy(
@@ -518,10 +575,46 @@ private fun BookParagraph(
             .pointerInput(book, p) {
                 detectTapGestures(
                     onTap = { pos -> layout?.let { tap(book.chunkAt(pr.first + it.getOffsetForPosition(pos))) } },
-                    onLongPress = { pos -> layout?.let { long(book.chunkAt(pr.first + it.getOffsetForPosition(pos))) } }
+                    onLongPress = { pos -> layout?.let { long(book.chunkAt(pr.first + it.getOffsetForPosition(pos))) } },
+                    // the word under the finger → "where is the stress?"
+                    onDoubleTap = { pos ->
+                        layout?.let { l ->
+                            val para = book.text.substring(pr.first, pr.last + 1)
+                            wordAt(para, l.getOffsetForPosition(pos))?.let { w -> word(w) }
+                        }
+                    }
                 )
             }
     )
+}
+
+/** Sleep timer: a clock (or the minutes left); tap — 15…60 minutes, to the end of the chapter, off. */
+@Composable
+private fun SleepButton(left: Int?, onSet: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val chapterEnd = com.brahmadeo.supertonic.tts.utils.SleepTimer.CHAPTER_END
+    Box {
+        IconButton(onClick = { open = true }) {
+            when {
+                left == null -> Icon(Icons.Default.Timer, contentDescription = stringResource(AppR.string.sleep_title))
+                left == chapterEnd -> Text(stringResource(AppR.string.sleep_chapter_short), style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
+                else -> Text("$left′", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (m in listOf(15, 30, 45, 60)) {
+                DropdownMenuItem(text = { Text(stringResource(AppR.string.sleep_minutes_fmt, m)) },
+                    onClick = { open = false; onSet(m) })
+            }
+            DropdownMenuItem(text = { Text(stringResource(AppR.string.sleep_chapter)) },
+                onClick = { open = false; onSet(chapterEnd) })
+            if (left != null) {
+                DropdownMenuItem(text = { Text(stringResource(AppR.string.sleep_off)) },
+                    onClick = { open = false; onSet(0) })
+            }
+        }
+    }
 }
 
 /** Speed: a small "1.0×" button; tap — a slider and quick values. */
@@ -569,7 +662,7 @@ private fun SkipButton(
 ) {
     Box(
         modifier = Modifier
-            .size(52.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center

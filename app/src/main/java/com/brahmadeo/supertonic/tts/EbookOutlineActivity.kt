@@ -164,7 +164,10 @@ class EbookOutlineActivity : ComponentActivity() {
                     isPdf = true
                 }
 
-                val title = publication?.metadata?.title ?: ebookFile.nameWithoutExtension
+                // the book's own title; for a book without one — the name its file had on the phone
+                val title = publication?.metadata?.title?.takeIf { it.isNotBlank() && !it.startsWith("book_") }
+                    ?: EbookManager.originalName(this@EbookOutlineActivity, ebookFile.absolutePath)
+                    ?: ebookFile.nameWithoutExtension
                 EbookManager.addBook(this@EbookOutlineActivity, title, ebookFile.absolutePath)
                 if (isPdf) selectedTabIndex = 1 // Default to Pages for PDF
                 // opened from the library: straight to the place where the book was left

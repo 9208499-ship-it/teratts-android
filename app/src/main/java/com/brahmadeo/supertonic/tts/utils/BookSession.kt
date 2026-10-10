@@ -104,6 +104,69 @@ object BookSession {
         return ok
     }
 
+    /**
+     * The chapter before ([dir] = -1) or after (+1) the current one, with real text; the session
+     * moves to it. null at either end — unlike [nextChapter], the session is kept.
+     */
+    suspend fun stepChapter(context: Context, dir: Int): String? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val path = p.getString(KEY_PATH, null) ?: return null
+        val index = p.getInt(KEY_INDEX, -1)
+        if (index < 0) return null
+        val file = File(path)
+        if (!file.exists()) return null
+        val parser = EbookParser(context)
+        val publication = parser.openPublication(file).getOrNull() ?: return null
+        val order = publication.readingOrder
+        var i = index + dir
+        while (i in order.indices) {
+            val text = parser.extractText(publication, order[i]).getOrNull()?.trim()
+            if (text != null && text.length >= MIN_CHAPTER_CHARS) {
+                p.edit().putInt(KEY_INDEX, i).putString(KEY_PREFIX, prefixOf(text)).apply()
+                rememberChapter(context, prefixOf(text), i)
+                log(context, "step $dir: chapter $i")
+                return text
+            }
+            i += dir
+        }
+        return null
+    }
+
+    /** Chapter [i] (reading order) of the current book; the session moves to it. null if it has no text. */
+    suspend fun chapterAt(context: Context, i: Int): String? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val path = p.getString(KEY_PATH, null) ?: return null
+        val file = File(path)
+        if (!file.exists()) return null
+        val parser = EbookParser(context)
+        val publication = parser.openPublication(file).getOrNull() ?: return null
+        val link = publication.readingOrder.getOrNull(i) ?: return null
+        val text = parser.extractText(publication, link).getOrNull()?.trim() ?: return null
+        if (text.length < MIN_CHAPTER_CHARS) return null
+        p.edit().putInt(KEY_INDEX, i).putString(KEY_PREFIX, prefixOf(text)).apply()
+        rememberChapter(context, prefixOf(text), i)
+        log(context, "search: chapter $i")
+        return text
+    }
+
+    /**
+     * Every chapter of the current book with real text, in order, for the search:
+     * [block] gets (index, count, text) and returns false to stop. The session is not moved.
+     */
+    suspend fun forEachChapter(context: Context, block: suspend (Int, Int, String) -> Boolean) {
+        val path = currentPath(context) ?: return
+        val file = File(path)
+        if (!file.exists()) return
+        val parser = EbookParser(context)
+        val publication = parser.openPublication(file).getOrNull() ?: return
+        val order = publication.readingOrder
+        for (i in order.indices) {
+            val text = parser.extractText(publication, order[i]).getOrNull()?.trim() ?: continue
+            if (text.length < MIN_CHAPTER_CHARS) continue
+            if (!block(i, order.size, text)) return
+        }
+    }
+
     /** Text of the next chapter with real text (the session moves on to it), or null at the end. */
     suspend fun nextChapter(context: Context): String? {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

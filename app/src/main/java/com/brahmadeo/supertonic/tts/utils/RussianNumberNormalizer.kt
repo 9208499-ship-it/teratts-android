@@ -49,6 +49,11 @@ class RussianNumberNormalizer {
     private val numberDashRegex = Regex("(?<=\\d)[‐‑‒–—―](?=[а-яёА-ЯЁ])")
     // Ordinal with a case ending: "896-й", "в 1990-м", "90-е", "в 90-х", "1-го", "5-я".
     // Longer endings first so the alternation never stops at a shorter prefix.
+    // A range of ordinals with one ending: "1-5-й уровень", "3–4-го класса", "1-5-х классах".
+    private val ordinalRangeRegex = Regex(
+        "(?<![\\p{L}\\d])(\\d{1,12})\\s?[-‐‑‒–—―]\\s?(\\d{1,12})\\s?-\\s?" +
+        "(ыми|ими|ого|его|ому|ему|ый|ий|ой|го|му|ым|им|ом|ем|ая|яя|ую|юю|ое|ее|ых|их|ми|ей|й|м|я|ю|е|х)" +
+        "(?![\\p{L}\\d])(\\s+\\p{L}+)?")
     private val ordinalRegex = Regex(
         "(?<![\\p{L}\\d])(\\d{1,12})\\s?-\\s?" +
         "(ыми|ими|ого|его|ому|ему|ый|ий|ой|го|му|ым|им|ом|ем|ая|яя|ую|юю|ое|ее|ых|их|ми|мя|ти|ей|й|м|я|ю|е|х)" +
@@ -583,6 +588,26 @@ class RussianNumberNormalizer {
             }
             val phrase = spellOrdinal(n) ?: return@replace m.value
             (if (prep.isNotEmpty()) "$prep " else "") + "${declineOrdinal(phrase, ending, n)} $noun"
+        }
+
+        // "1-5-й уровень" → "первый — пятый уровень" (was "один-пятый")
+        t = ordinalRangeRegex.replace(t) { m ->
+            val a = m.groupValues[1].toLongOrNull() ?: return@replace m.value
+            val b = m.groupValues[2].toLongOrNull() ?: return@replace m.value
+            if (a >= b) return@replace m.value
+            val ending = m.groupValues[3]
+            val next = m.groupValues[4]
+            val nextWord = next.trim().lowercase()
+            val effective = when {
+                ending == "х" -> "ых"
+                ending == "ми" -> "ыми"
+                ending == "й" && nextWord.length > 2 &&
+                    (nextWord.endsWith("е") || nextWord.endsWith("и") || nextWord.endsWith("ой") || nextWord.endsWith("ей")) -> "ей"
+                else -> ending
+            }
+            val pa = spellOrdinal(a) ?: return@replace m.value
+            val pb = spellOrdinal(b) ?: return@replace m.value
+            declineOrdinal(pa, effective, a) + " — " + declineOrdinal(pb, effective, b) + next
         }
 
         t = ordinalRegex.replace(t) { m ->

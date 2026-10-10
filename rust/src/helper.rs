@@ -1009,11 +1009,12 @@ pub fn load_and_mix_voice_styles(path1: &str, path2: &str, alpha: f32) -> Result
     Ok(Style { ttl, dp })
 }
 
-/// Create an ONNX session with the specified execution providers
-fn create_session(model_path: &str, use_xnnpack: bool, ort_threads: usize, _xnn_threads: usize) -> Result<Session> {
+/// Session options shared by every model (threads, no spinning, XNNPACK if asked).
+fn session_builder(level: GraphOptimizationLevel, use_xnnpack: bool, ort_threads: usize, _xnn_threads: usize)
+    -> Result<ort::session::builder::SessionBuilder> {
     #[allow(unused_mut)]
     let mut builder = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
+        .with_optimization_level(level)?
         // OPTIMIZATION: Disable spinning to save battery and reduce heat on Android.
         // This ensures that when one thread pool is idle (e.g., ORT pool while XNNPACK is working),
         // it doesn't consume any CPU cycles.
@@ -1041,8 +1042,84 @@ fn create_session(model_path: &str, use_xnnpack: bool, ort_threads: usize, _xnn_
             }
         }
     }
+    Ok(builder)
+}
 
-    builder.commit_from_file(model_path).context(format!("Failed to load model: {}", model_path))
+/// The model with its graph already optimised for this phone, saved at the first start
+/// ("x.onnx" → "x.onnx.opt2", its weights — already packed for this processor's int8 /
+/// float kernels — in "x.onnx.opt2.data"): later starts load both as they are, without
+/// optimising the graph or packing the weights again. That work was most of a cold start
+/// (the int8 sampler: 11 s on a Huawei). Re-made when the model changes.
+fn optimized_copy(model_path: &str) -> String {
+    format!("{}.opt2", model_path)
+}
+
+fn optimized_data_name(cache: &str) -> String {
+    let name = Path::new(cache).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    format!("{}.data", name)
+}
+
+fn cache_is_fresh(cache: &str, model_path: &str) -> bool {
+    let data = Path::new(cache).with_file_name(optimized_data_name(cache));
+    let (Ok(c), Ok(m)) = (std::fs::metadata(cache), std::fs::metadata(model_path)) else { return false };
+    if !data.exists() {
+        return false;
+    }
+    match (c.modified(), m.modified()) {
+        (Ok(ct), Ok(mt)) => c.len() > 0 && ct >= mt,
+        _ => false,
+    }
+}
+
+fn remove_cache(cache: &str) {
+    let _ = std::fs::remove_file(cache);
+    let _ = std::fs::remove_file(Path::new(cache).with_file_name(optimized_data_name(cache)));
+}
+
+/// Create an ONNX session with the specified execution providers
+fn create_session(model_path: &str, use_xnnpack: bool, ort_threads: usize, _xnn_threads: usize) -> Result<Session> {
+    let cache = optimized_copy(model_path);
+    // the first kind of copy (graph only, weights not packed) is replaced by this one
+    let _ = std::fs::remove_file(format!("{}.opt", model_path));
+    // the XNNPACK provider takes over parts of the graph at load time: not cached
+    if !use_xnnpack && cache_is_fresh(&cache, model_path) {
+        match session_builder(GraphOptimizationLevel::Level1, use_xnnpack, ort_threads, _xnn_threads)
+            .and_then(|b| Ok(b.commit_from_file(&cache)?))
+        {
+            Ok(s) => return Ok(s),
+            Err(e) => {
+                log::warn!("optimised copy unusable, using the model itself: {cache}: {e:?}");
+                remove_cache(&cache);
+            }
+        }
+    }
+    if !use_xnnpack {
+        // optimise and save the result for the next start (into a temporary name, renamed when
+        // complete — a start killed half-way leaves no broken copy behind)
+        let part = format!("{}.part", cache);
+        let data_name = optimized_data_name(&cache);
+        let saved = session_builder(GraphOptimizationLevel::Level3, use_xnnpack, ort_threads, _xnn_threads)
+            .and_then(|b| Ok(b.with_optimized_model_path(&part)?))
+            .and_then(|b| Ok(b.with_config_entry("session.optimized_model_external_initializers_file_name", &data_name)?))
+            .and_then(|b| Ok(b.with_config_entry("session.optimized_model_external_initializers_min_size_in_bytes", "1024")?))
+            .and_then(|b| Ok(b.with_config_entry("session.save_external_prepacked_constant_initializers", "1")?))
+            .and_then(|b| Ok(b.commit_from_file(model_path)?));
+        match saved {
+            Ok(s) => {
+                if std::fs::rename(&part, &cache).is_err() {
+                    let _ = std::fs::remove_file(&part);
+                }
+                return Ok(s);
+            }
+            Err(e) => {
+                log::warn!("could not save the optimised model ({e:?}); loading without saving");
+                let _ = std::fs::remove_file(&part);
+                remove_cache(&cache);
+            }
+        }
+    }
+    session_builder(GraphOptimizationLevel::Level3, use_xnnpack, ort_threads, _xnn_threads)?
+        .commit_from_file(model_path).context(format!("Failed to load model: {}", model_path))
 }
 
 /// Load TTS components
@@ -1062,30 +1139,55 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
     let sampler_path = format!("{}/{}", onnx_dir, tera::SAMPLER_FILE);
     let vocoder_path = format!("{}/vocoder.onnx", onnx_dir);
 
-    let dp_ort = create_session(&dp_path, use_xnnpack, ort_threads, xnn_threads)?;
-    let text_enc_ort = create_session(&text_enc_path, use_xnnpack, ort_threads, xnn_threads)?;
-    let sampler_ort = create_session(&sampler_path, use_xnnpack, ort_threads, xnn_threads)?;
-    let vocoder_ort = create_session(&vocoder_path, use_xnnpack, ort_threads, xnn_threads)?;
+    // The four models and the homograph resolver load side by side: each load (reading the
+    // file, optimising the graph) is mostly one core's work, and the phone has several —
+    // one after another they made the cold start several seconds long.
+    let started = std::time::Instant::now();
+    let homo_dir = Path::new(onnx_dir).join("homo");
+    let load = |name: &'static str, path: String| {
+        move || {
+            let t = std::time::Instant::now();
+            let r = create_session(&path, use_xnnpack, ort_threads, xnn_threads);
+            log::info!("load {}: {} ms", name, t.elapsed().as_millis());
+            r
+        }
+    };
+    let (dp_r, te_r, sm_r, vc_r, homo) = std::thread::scope(|s| {
+        let dp = s.spawn(load("duration_predictor", dp_path.clone()));
+        let te = s.spawn(load("text_encoder", text_enc_path.clone()));
+        let sm = s.spawn(load("sampler", sampler_path.clone()));
+        let vc = s.spawn(load("vocoder", vocoder_path.clone()));
+        let hd = homo_dir.clone();
+        let ho = s.spawn(move || {
+            if !hd.join("homo_encoder.onnx").exists() {
+                log::info!("No homograph resolver at {}", hd.display());
+                return None;
+            }
+            let t = std::time::Instant::now();
+            match HomoRuntime::load(&hd, 1) {
+                Ok(h) => {
+                    log::info!("Homograph resolver loaded: {} ms", t.elapsed().as_millis());
+                    Some(h)
+                }
+                Err(e) => {
+                    log::warn!("Homograph resolver unavailable: {e:?}");
+                    None
+                }
+            }
+        });
+        (dp.join(), te.join(), sm.join(), vc.join(), ho.join().ok().flatten())
+    });
+    let joined = |r: std::thread::Result<Result<Session>>| -> Result<Session> {
+        r.map_err(|_| anyhow::anyhow!("model loading thread panicked"))?
+    };
+    let dp_ort = joined(dp_r)?;
+    let text_enc_ort = joined(te_r)?;
+    let sampler_ort = joined(sm_r)?;
+    let vocoder_ort = joined(vc_r)?;
+    log::info!("engine models loaded in {} ms", started.elapsed().as_millis());
 
     let unicode_indexer_path = format!("{}/unicode_indexer.json", onnx_dir);
     let text_processor = UnicodeProcessor::new(&unicode_indexer_path)?;
-
-    let homo_dir = Path::new(onnx_dir).join("homo");
-    let homo = if homo_dir.join("homo_encoder.onnx").exists() {
-        match HomoRuntime::load(&homo_dir, 1) {
-            Ok(h) => {
-                log::info!("Homograph resolver loaded");
-                Some(h)
-            }
-            Err(e) => {
-                log::warn!("Homograph resolver unavailable: {e:?}");
-                None
-            }
-        }
-    } else {
-        log::info!("No homograph resolver at {}", homo_dir.display());
-        None
-    };
 
     Ok(TextToSpeech::new(
         homo,
@@ -1096,3 +1198,5 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
         vocoder_ort,
     ))
 }
+
+

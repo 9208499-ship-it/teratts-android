@@ -132,28 +132,51 @@ object LexiconManager {
      * means the rule was malformed (user typed an invalid regex); the apply
      * loop quietly skips those instead of failing the whole batch.
      *
-     * UNICODE_CHARACTER_CLASS is critical for non-Latin scripts: without it
-     * Java's `\b` and `\w` only match ASCII word characters, so a whole-word
-     * rule like `\bзамок\b` would silently fail inside Cyrillic text.
+     * Android's regex engine is ICU: \b and \w are Unicode-aware there by default, and
+     * Pattern.UNICODE_CHARACTER_CLASS is NOT supported — Pattern.compile throws
+     * "Unsupported flags" for it. With that flag every rule failed to compile and the
+     * user's dictionary silently did nothing (the "test" button worked: it says the
+     * replacement itself). So: the flag only where it is accepted (the desktop JVM, for
+     * tests), and whole words found by explicit letter boundaries instead of \b.
      */
     private fun compileRule(item: LexiconItem): Pair<java.util.regex.Pattern, String>? {
         if (item.term.isBlank()) return null
-        var flags = Pattern.UNICODE_CHARACTER_CLASS
+        var flags = 0
         if (item.ignoreCase) {
             flags = flags or Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
         }
-        return try {
-            val pattern = if (item.isRegex) {
-                Pattern.compile(item.term, flags)
-            } else {
-                Pattern.compile("\\b${Pattern.quote(item.term)}\\b", flags)
+        val regex = if (item.isRegex) item.term
+                    else "(?<![\\p{L}\\p{N}_])" + Pattern.quote(item.term) + "(?![\\p{L}\\p{N}_])"
+        val replacement = Matcher.quoteReplacement(item.replacement)
+        for (extra in intArrayOf(Pattern.UNICODE_CHARACTER_CLASS, 0)) {
+            try {
+                return Pattern.compile(regex, flags or extra) to replacement
+            } catch (e: Exception) {
+                if (extra == 0) android.util.Log.w("TeraLexicon", "rule not compiled: ${item.term}: ${e.message}")
             }
-            val replacement = Matcher.quoteReplacement(item.replacement)
-            pattern to replacement
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
         }
+        return null
+    }
+
+    /**
+     * Where the user's dictionary puts the stress in [word] (index of the vowel in the word),
+     * or -1 if it has no plain rule for it. "гот+ов" → 3.
+     */
+    fun stressOf(context: Context, word: String): Int {
+        val item = load(context).firstOrNull { !it.isRegex && it.term.equals(word, ignoreCase = true) } ?: return -1
+        val r = item.replacement
+        val plus = r.indexOf('+')
+        if (plus >= 0 && r.replace("+", "").equals(word, ignoreCase = true)) return plus
+        val acute = r.indexOf('\u0301')
+        if (acute > 0 && r.replace("\u0301", "").equals(word, ignoreCase = true)) return acute - 1
+        return -1
+    }
+
+    /** The word's stress from the player ("гот+ов"): one rule per word, the old one replaced. */
+    fun putStress(context: Context, word: String, stressed: String) {
+        val items = load(context).filterNot { !it.isRegex && it.term.equals(word, ignoreCase = true) }.toMutableList()
+        items.add(LexiconItem(term = word.lowercase(), replacement = stressed, ignoreCase = true, isRegex = false))
+        save(context, items)
     }
 
     // Force reload (useful when returning from LexiconActivity)

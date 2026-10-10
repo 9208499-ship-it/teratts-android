@@ -85,6 +85,9 @@
             android:parentActivityName=".MainActivity"
             android:label="Pronunciation Dictionary" />
 
+        <activity android:name=".BookSearchActivity"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity android:name=".EbookOutlineActivity"
             android:parentActivityName=".MainActivity"
             android:label="Ebook Chapters" />

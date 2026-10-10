@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -77,17 +78,21 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
     val scope = remember(text) { BookSession.scopeFor(context, text) }
     var version by remember { mutableIntStateOf(0) }          // bumped after a merge → re-analyse
     var characters by remember { mutableStateOf<List<DialogueAnalyzer2.Character>?>(null) }
+    // a line of each character from the text — what "Listen" says
+    var samples by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var aliases by remember { mutableStateOf(CharacterVoices.aliases(context, scope)) }
     val voices = remember { RolePrefs.availableVoices(context) }
 
     LaunchedEffect(version) {
         aliases = CharacterVoices.aliases(context, scope)
-        characters = withContext(Dispatchers.Default) {
-            if (text.isBlank()) emptyList()
+        val result = withContext(Dispatchers.Default) {
+            if (text.isBlank()) null
             else DialogueAnalyzer2.applyAliases(DialogueAnalyzer2.analyze(text, DialogueAnalyzer2.Prior(
                 com.brahmadeo.supertonic.tts.utils.BookRoster.cached(context, scope)?.genders ?: emptyMap(),
-                com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(context, scope))), aliases).characters
+                com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(context, scope))), aliases)
         }
+        samples = result?.let { r -> sampleLines(text, r) } ?: emptyMap()
+        characters = result?.characters ?: emptyList()
     }
 
     Scaffold(
@@ -130,7 +135,7 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
                     )
                 }
                 items(list, key = { it.name }) { c ->
-                    CharacterCard(c, list, voices, scope, onMerged = { version++ })
+                    CharacterCard(c, list, voices, scope, samples[c.name], onMerged = { version++ })
                 }
                 item {
                     OutlinedButton(
@@ -172,6 +177,7 @@ private fun CharacterCard(
     all: List<DialogueAnalyzer2.Character>,
     voices: List<String>,
     scope: String,
+    sample: String?,
     onMerged: () -> Unit
 ) {
     val context = LocalContext.current
@@ -215,6 +221,10 @@ private fun CharacterCard(
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(AppR.string.characters_voice), modifier = Modifier.weight(1f))
+                val fallback = stringResource(AppR.string.characters_sample)
+                IconButton(onClick = { preview(context, c, voice, sample ?: fallback, speed) }) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = stringResource(AppR.string.characters_listen))
+                }
                 Box {
                     TextButton(onClick = { voiceMenu = true }) { Text(voice?.removeSuffix(".json") ?: defaultLabel) }
                     DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
@@ -249,4 +259,35 @@ private fun CharacterCard(
             }
         }
     }
+}
+
+/** The longest line (up to ~200 letters) each character says in [text]: their voice is heard on it. */
+private fun sampleLines(text: String, r: DialogueAnalyzer2.Result): Map<String, String> {
+    val best = HashMap<String, String>()
+    for (s in r.spans) {
+        val who = s.speaker ?: continue
+        if (s.role == DialogueAnalyzer2.Role.NARRATOR) continue
+        val line = text.substring(s.start, s.end).trim().trim('—', '–', '-', '«', '»', '"', ' ', ',').trim()
+        if (line.count { it.isLetter() } < 12 || line.length > 220) continue
+        val cur = best[who]
+        if (cur == null || (line.length > cur.length && cur.length < 120)) best[who] = line
+    }
+    return best
+}
+
+/** Say [line] the way reading would voice [c]: its own voice, or the narrator's / the gender's one. */
+private fun preview(context: android.content.Context, c: DialogueAnalyzer2.Character, chosen: String?, line: String, speed: Float) {
+    val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+    val main = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
+    val file = chosen ?: when {
+        c.name == DialogueAnalyzer2.HERO -> RolePrefs.narratorVoice(context).ifEmpty { main }
+        c.role == DialogueAnalyzer2.Role.FEMALE -> RolePrefs.femaleVoice(context)
+        c.role == DialogueAnalyzer2.Role.MALE -> RolePrefs.maleVoice(context)
+        else -> RolePrefs.unknownVoice(context).ifEmpty { RolePrefs.maleVoice(context) }
+    }
+    val path = RolePrefs.pathOf(context, file) ?: RolePrefs.pathOf(context, main) ?: return
+    val base = prefs.getFloat("last_speed", 1f)
+    context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
+        .setAction(com.brahmadeo.supertonic.tts.service.PlaybackService.ACTION_PREVIEW)
+        .putExtra("text", line).putExtra("voice", path).putExtra("speed", base * speed))
 }

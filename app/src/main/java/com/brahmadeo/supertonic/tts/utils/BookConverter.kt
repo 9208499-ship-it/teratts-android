@@ -43,12 +43,31 @@ object BookConverter {
         }
     }
 
-    /** Convert [source] into [target] (.epub). Throws on failure. */
-    fun convert(source: File, format: String, target: File) {
-        val book = when (format) {
+    /**
+     * A ZIP whose file names may be in CP866 (fb2.zip from Russian libraries, made on
+     * Windows): Java reads names as UTF-8 and fails on such an archive.
+     */
+    fun openZip(file: File): ZipFile {
+        try {
+            val z = ZipFile(file)
+            try { z.entries().asSequence().forEach { it.name }; return z } catch (e: Exception) { z.close(); throw e }
+        } catch (e: Exception) {
+            return ZipFile(file, Charset.forName("CP866"))
+        }
+    }
+
+    /** Names of the files in a ZIP (any name encoding). */
+    fun zipEntryNames(file: File): List<String> = openZip(file).use { z -> z.entries().asSequence().map { it.name }.toList() }
+
+    /**
+     * Convert [source] into [target] (.epub). [title]: the book's own file name, for a book
+     * that does not name itself (TXT, an FB2 without <book-title>). Throws on failure.
+     */
+    fun convert(source: File, format: String, target: File, title: String? = null) {
+        val parsed = when (format) {
             "fb2" -> parseFb2(source.readBytes(), source.nameWithoutExtension)
             "fb2zip" -> {
-                ZipFile(source).use { zip ->
+                openZip(source).use { zip ->
                     val entry = zip.entries().asSequence().firstOrNull { it.name.lowercase().endsWith(".fb2") }
                         ?: throw IllegalArgumentException("no .fb2 inside the archive")
                     parseFb2(zip.getInputStream(entry).readBytes(), File(entry.name).nameWithoutExtension)
@@ -58,6 +77,9 @@ object BookConverter {
             "txt" -> parseTxt(source)
             else -> throw IllegalArgumentException("unsupported format $format")
         }
+        // the imported copy is called book_<hash>: that is no title for the library
+        val unnamed = parsed.title.isBlank() || parsed.title == source.nameWithoutExtension || parsed.title.startsWith("book_")
+        val book = if (unnamed && !title.isNullOrBlank()) Book(title, parsed.author, parsed.chapters) else parsed
         writeEpub(postprocess(book), target)
     }
 
@@ -186,7 +208,7 @@ object BookConverter {
     // ------------------------------------------------------------------ FB3
 
     fun parseFb3(file: File): Book {
-        ZipFile(file).use { zip ->
+        openZip(file).use { zip ->
             val bodyEntry = zip.entries().asSequence().firstOrNull { it.name.lowercase().endsWith("body.xml") }
                 ?: throw IllegalArgumentException("FB3 without body.xml")
             val descEntry = zip.entries().asSequence().firstOrNull { it.name.lowercase().endsWith("description.xml") }

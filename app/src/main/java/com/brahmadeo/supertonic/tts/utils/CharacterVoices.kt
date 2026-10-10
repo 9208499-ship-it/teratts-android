@@ -7,7 +7,7 @@ import android.content.Context
  * name, see BookSession.scopeFor; "" = text not from a book). A voice is assigned
  * once and remembered, so Пётр sounds the same in every chapter — and a Пётр in
  * another book gets his own. Main characters (most lines) pick first; Russian
- * voices before Supertonic ones, English-recorded voices last (accent); whispers
+ * voices, then TeraTTS's multilingual English ones, then Supertonic's; whispers
  * and the narrator's voice are not handed out automatically.
  */
 object CharacterVoices {
@@ -25,10 +25,13 @@ object CharacterVoices {
 
     private fun isMale(v: String) = Regex("""(^|_)m\d""").containsMatchIn(v) || v.startsWith("st3_M")
     private fun isFemale(v: String) = Regex("""(^|_)f\d""").containsMatchIn(v) || v.startsWith("st3_F")
+    // Russian voices first, then TeraTTS's English ones (multilingual: they read Russian
+    // without an accent), then Supertonic's; own voices (no m/f in the name) are not handed out
     private fun rank(v: String) = when {
         v.startsWith("ru_") -> 0
-        v.startsWith("st3_") -> 1
-        else -> 2
+        v.startsWith("eng_") -> 1
+        v.startsWith("st3_") -> 2
+        else -> 3
     }
 
     /** Voice file for [name] (assigning a free one the first time), or null if the gender is unknown. */

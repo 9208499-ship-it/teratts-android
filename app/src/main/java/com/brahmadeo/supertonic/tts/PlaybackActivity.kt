@@ -34,6 +34,115 @@ class PlaybackActivity : ComponentActivity() {
     // Reactive State
     private var sentencesState = mutableStateOf<List<String>>(emptyList())
     private var textState = mutableStateOf("")   // the chapter as it is, for the book page
+    private var isBookState = mutableStateOf(false)  // the text is a chapter of the open book
+    private var sleepLeftState = mutableStateOf<Int?>(null)  // sleep timer, see SleepTimer.left
+
+    /** The book's contents opened from the player: the chosen chapter is read here. */
+    private val tocLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val text = result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT) ?: return@registerForActivityResult
+        // "continue where I stopped" in the contents: its place; a chapter: its beginning
+        openChapter(text, atPlace = result.data?.getBooleanExtra("open_player", false) == true)
+    }
+
+    /** Search across the book: the chosen place is opened (and read from, if it was reading). */
+    private val searchLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val chapter = result.data?.getIntExtra(BookSearchActivity.EXTRA_CHAPTER, -1) ?: -1
+        val offset = result.data?.getIntExtra(BookSearchActivity.EXTRA_OFFSET, 0) ?: 0
+        if (chapter < 0) return@registerForActivityResult
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { com.brahmadeo.supertonic.tts.utils.BookSession.chapterAt(this@PlaybackActivity, chapter) } catch (e: Exception) { null }
+            }
+            if (text != null) openChapterAt(text, offset)
+        }
+    }
+
+    private fun openSearch() {
+        com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
+        if (com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) == null) {
+            Toast.makeText(this, getString(R.string.search_no_book), Toast.LENGTH_SHORT).show(); return
+        }
+        searchLauncher.launch(Intent(this, BookSearchActivity::class.java))
+    }
+
+    /** A chapter shown at a found place ([offset] in its text): that phrase lit, read from it if it was reading. */
+    private fun openChapterAt(raw: String, offset: Int) {
+        val wasPlaying = isPlayingState.value
+        val t = raw.trim()
+        val prepared = if (currentLang.lowercase().startsWith("ko") || t.endsWith(" .")) t else "$t ."
+        currentText = prepared
+        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
+            .putString("last_text", prepared)
+            .putLong("last_text_time", System.currentTimeMillis().also { textLoadedAt = it }).apply()
+        setupList(prepared)
+        val ranges = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(prepared, sentencesState.value)
+        val idx = ranges.indexOfLast { it != null && it.first <= offset }.coerceAtLeast(0)
+        currentIndexState.intValue = idx
+        if (wasPlaying) playFromIndex(idx)
+        else try { if (playbackService?.isServiceActive == true) playbackService?.stop() } catch (_: Exception) {}
+    }
+
+    // ---- a word's stress, from a double tap on the book page ----
+    private val stressWordState = mutableStateOf<String?>(null)
+    private var stressPaused = false     // reading was paused for the dialog: go on after it
+
+    private fun askStress(word: String) {
+        stressPaused = isPlayingState.value
+        if (stressPaused) try { playbackService?.pause() } catch (_: Exception) {}
+        stressWordState.value = word
+    }
+
+    private fun stressDone(saved: Boolean) {
+        stressWordState.value = null
+        if (!stressPaused) return
+        stressPaused = false
+        try {
+            // saved: the phrase is made again, now with the new stress; the "listen" button
+            // stopped the reading — start from the phrase too; otherwise just go on
+            if (!saved && playbackService?.isServiceActive == true) playbackService?.play()
+            else playFromIndex(currentIndexState.intValue.coerceAtLeast(0))
+        } catch (_: Exception) {}
+    }
+
+    private fun openToc() {
+        val path = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) ?: return
+        tocLauncher.launch(Intent(this, EbookOutlineActivity::class.java).putExtra(EbookOutlineActivity.EXTRA_URI, path))
+    }
+
+    /** Show [raw] (a chapter of the book) in the player; keep reading if it was reading. */
+    private fun openChapter(raw: String, atPlace: Boolean) {
+        val wasPlaying = isPlayingState.value
+        val t = raw.trim()
+        val prepared = if (currentLang.lowercase().startsWith("ko") || t.endsWith(" .")) t else "$t ."
+        currentText = prepared
+        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
+            .putString("last_text", prepared)
+            .putLong("last_text_time", System.currentTimeMillis().also { textLoadedAt = it }).apply()
+        setupList(prepared)
+        currentIndexState.intValue = if (atPlace) {
+            PlaybackService.resumeIndex(this, prepared, sentencesState.value, currentSpeed) ?: 0
+        } else 0
+        if (wasPlaying || atPlace) playFromIndex(currentIndexState.intValue)
+        else try { if (playbackService?.isServiceActive == true) playbackService?.stop() } catch (_: Exception) {}
+    }
+
+    /** The chapter before ([dir] = -1) or after (+1) the one on screen. */
+    private fun stepChapter(dir: Int) {
+        com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { com.brahmadeo.supertonic.tts.utils.BookSession.stepChapter(this@PlaybackActivity, dir) } catch (e: Exception) { null }
+            }
+            if (text == null) Toast.makeText(this@PlaybackActivity, getString(R.string.player_no_chapter), Toast.LENGTH_SHORT).show()
+            else openChapter(text, atPlace = false)
+        }
+    }
     private var currentIndexState = mutableIntStateOf(-1)
     private var isPlayingState = mutableStateOf(false)
     private var isServiceActiveState = mutableStateOf(false)
@@ -183,6 +292,14 @@ class PlaybackActivity : ComponentActivity() {
         }
 
         setupList(currentText)
+        // a book opened at its place: it is now "the text in the player" (the app's next
+        // launch and the lock-screen Play continue it, not what was read before)
+        if (intent.getBooleanExtra("fresh", false) && currentText.isNotEmpty()) {
+            getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
+                .putString("last_text", currentText).putLong("last_text_time", textLoadedAt)
+                .putString("last_voice_path", currentVoicePath).putFloat("last_speed", currentSpeed)
+                .putInt("last_steps", currentSteps).putString("last_lang", currentLang).apply()
+        }
         if (intent.getBooleanExtra("is_resume", false)) {
             // the place reached by the voice in this text, a minute back — shown and lit before "Play"
             com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
@@ -192,6 +309,13 @@ class PlaybackActivity : ComponentActivity() {
         }
 
         setContent {
+            // the sleep timer's minutes left, refreshed while the screen is shown
+            LaunchedEffect(Unit) {
+                while (true) {
+                    sleepLeftState.value = com.brahmadeo.supertonic.tts.utils.SleepTimer.left(this@PlaybackActivity)
+                    kotlinx.coroutines.delay(5000)
+                }
+            }
             SupertonicTheme(voiceFile = currentVoicePath) {
                 PlaybackScreen(
                     sentences = sentencesState.value,
@@ -217,6 +341,16 @@ class PlaybackActivity : ComponentActivity() {
                     },
                     onSentenceLongClick = { i -> showSpeakerDialog(i) },
                     currentFraction = if (isPlayingState.value) spokenFractionState.floatValue else -1f,
+                    onToc = if (isBookState.value) ({ openToc() }) else null,
+                    onPrevChapter = if (isBookState.value) ({ stepChapter(-1) }) else null,
+                    onNextChapter = if (isBookState.value) ({ stepChapter(1) }) else null,
+                    sleepLeft = sleepLeftState.value,
+                    onWordDoubleTap = { w -> askStress(w) },
+                    onSearch = if (isBookState.value) ({ openSearch() }) else null,
+                    onSleepTimer = { m ->
+                        com.brahmadeo.supertonic.tts.utils.SleepTimer.set(this@PlaybackActivity, m)
+                        sleepLeftState.value = com.brahmadeo.supertonic.tts.utils.SleepTimer.left(this@PlaybackActivity)
+                    },
                     onCharactersClick = {
                         saveState()
                         startActivity(android.content.Intent(this@PlaybackActivity, CharactersActivity::class.java))
@@ -233,6 +367,26 @@ class PlaybackActivity : ComponentActivity() {
                         }
                     }
                 )
+                stressWordState.value?.let { w ->
+                    com.brahmadeo.supertonic.tts.ui.StressDialog(
+                        word = w,
+                        initial = remember(w) {
+                            com.brahmadeo.supertonic.tts.utils.LexiconManager.stressOf(this@PlaybackActivity, w).takeIf { it >= 0 }
+                                ?: w.lowercase().indexOf('ё')
+                        },
+                        onListen = { stressed ->
+                            startService(Intent(this@PlaybackActivity, PlaybackService::class.java)
+                                .setAction(PlaybackService.ACTION_PREVIEW)
+                                .putExtra("text", stressed).putExtra("voice", currentVoicePath).putExtra("speed", currentSpeed))
+                        },
+                        onSave = { stressed ->
+                            com.brahmadeo.supertonic.tts.utils.LexiconManager.putStress(this@PlaybackActivity, w, stressed)
+                            Toast.makeText(this@PlaybackActivity, getString(R.string.stress_saved, stressed.replace(Regex("\\+(.)"), "$1\u0301")), Toast.LENGTH_SHORT).show()
+                            stressDone(saved = true)
+                        },
+                        onDismiss = { stressDone(saved = false) }
+                    )
+                }
             }
         }
 
@@ -245,7 +399,9 @@ class PlaybackActivity : ComponentActivity() {
         val prefs0 = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
         // the service moved on (the next chapter) while this screen was in the background
         val newer = prefs0.getLong("last_text_time", 0L) > textLoadedAt
-        if (intent.getBooleanExtra("is_resume", false) || newer) {
+        // only when the service really moved on (a newer text): a book just opened from the
+        // library ("is_resume" + its own text) used to be replaced here by the old last_text
+        if (newer) {
             val prefs = prefs0
             val newText = prefs.getString("last_text", "") ?: ""
             if (newText != currentText) {
@@ -282,15 +438,19 @@ class PlaybackActivity : ComponentActivity() {
         val normalizer = TextNormalizer()
         val sentences = normalizer.splitIntoSentences(text, currentLang)
         textState.value = text
+        // a chapter of the open book (seen before): contents and chapter arrows are offered
+        com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, text)
+        isBookState.value = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this, text).isNotEmpty()
         sentencesState.value = sentences
     }
 
     private fun handlePlayPause() {
         try {
             if (isPlayingState.value) {
-                playbackService?.stop() // Or pause if implemented
+                // a real pause: the sound stops at once and goes on from the same word
+                playbackService?.pause()
             } else if (isServiceActiveState.value) {
-                playFromIndex(currentIndexState.intValue)
+                playbackService?.play()
             } else {
                 if (currentIndexState.intValue >= 0) {
                     playFromIndex(currentIndexState.intValue)
