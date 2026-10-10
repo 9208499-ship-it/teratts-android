@@ -311,4 +311,7 @@
     <string name="search_no_book">Open a book from the library to search in it</string>
     <string name="roles_loudness_title">Even out voice loudness</string>
     <string name="roles_loudness_desc">All voices sound equally loud: as loud as the main voice, or louder if the main voice itself is quiet. Each voice is measured on its first lines</string>
+    <string name="menu_download_silero">Download the accent dictionary (Silero)…</string>
+    <string name="dict_switch_title">Switch to the Silero dictionary?</string>
+    <string name="dict_switch_msg">The installed dictionary is «%1$s». It fixes one stress for words like за́мок/замо́к, so the engine can no longer choose by context. Silero leaves such words to the engine (%2$d MB, once).</string>
 </resources>

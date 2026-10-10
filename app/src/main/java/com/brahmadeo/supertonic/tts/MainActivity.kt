@@ -428,14 +428,22 @@ class MainActivity : ComponentActivity() {
      */
     private fun offerAccentDictionary() {
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-        if (prefs.getBoolean("dict_offer_shown", false)) return
         if (!com.brahmadeo.supertonic.tts.utils.AssetManager.isReady(this)) return
-        if (com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.isInstalled(this)) return
-        prefs.edit().putBoolean("dict_offer_shown", true).apply()
+        val adm = com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager
+        // another dictionary (Full, Standard…) left from before: offer silero once instead
+        val other = adm.isInstalled(this) && !adm.isSilero(this)
+        if (other) {
+            if (prefs.getBoolean("dict_switch_offer_shown", false)) return
+            prefs.edit().putBoolean("dict_switch_offer_shown", true).apply()
+        } else {
+            if (prefs.getBoolean("dict_offer_shown", false)) return
+            if (adm.isInstalled(this)) return
+            prefs.edit().putBoolean("dict_offer_shown", true).apply()
+        }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.dict_offer_title)
-            .setMessage(getString(R.string.dict_offer_msg,
-                com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.SILERO_DICT_SIZE_MB))
+            .setTitle(if (other) R.string.dict_switch_title else R.string.dict_offer_title)
+            .setMessage(if (other) getString(R.string.dict_switch_msg, adm.getMetadata(this)?.source ?: "", adm.SILERO_DICT_SIZE_MB)
+                else getString(R.string.dict_offer_msg, adm.SILERO_DICT_SIZE_MB))
             .setPositiveButton(R.string.dict_offer_download) { _, _ ->
                 startActivity(Intent(this, LexiconActivity::class.java)
                     .putExtra(LexiconActivity.EXTRA_AUTO_DOWNLOAD_URL,

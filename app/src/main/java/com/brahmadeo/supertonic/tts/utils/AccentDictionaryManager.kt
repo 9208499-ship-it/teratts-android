@@ -78,6 +78,10 @@ object AccentDictionaryManager {
     const val SILERO_DICT_NAME = "Silero (рекомендуется)"
     const val SILERO_DICT_SIZE_MB = 172
 
+    /** The installed dictionary is the silero one (the only one offered now). */
+    fun isSilero(context: Context): Boolean =
+        getMetadata(context)?.source?.contains("Silero", ignoreCase = true) == true
+
     /** True if some accent dictionary is installed. */
     fun isInstalled(context: Context): Boolean =
         File(context.filesDir, "accent_dictionary.sacc").exists() ||

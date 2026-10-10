@@ -268,7 +268,8 @@ class LexiconActivity : ComponentActivity() {
                         chooserFormat = AccentDictionaryManager.DictFormat.TEXT
                     },
                     onDownloadAccentDictBinaryClick = {
-                        chooserFormat = AccentDictionaryManager.DictFormat.BINARY
+                        // the only dictionary offered: silero, straight away (no size / format chooser)
+                        startDownload(AccentDictionaryManager.SILERO_DICT_URL, AccentDictionaryManager.SILERO_DICT_NAME)
                     },
                     onClearAccentDictClick = { clearAccentDict() },
                     onSyncLoadToggle = { enabled ->

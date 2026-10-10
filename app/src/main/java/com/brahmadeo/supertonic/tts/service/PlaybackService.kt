@@ -188,12 +188,24 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             // versus the old design that woke up 50 times per second to
             // poll. ClosedSendChannelException is the normal cancellation
             // path — caller invokes channel.close() in its finally block.
+            //
+            // But never wait forever: with the reading paused the queue fills up and this
+            // thread waits here; if the reading is then stopped (another phrase, "listen",
+            // a new chapter) nobody empties the queue any more, and a plain send() waited
+            // for ever — holding the engine, so nothing was read again until the app was
+            // killed. So: wait in short steps and give up as soon as the reading is cancelled.
             try {
-                runBlocking { ch.send(data) }
+                runBlocking {
+                    while (!SupertonicTTS.isCancelled() && !ch.isClosedForSend) {
+                        if (kotlinx.coroutines.withTimeoutOrNull(200) { ch.send(data) } != null) break
+                    }
+                }
             } catch (_: ClosedSendChannelException) {
                 // Producer closed the channel — synthesis cancelled, fine.
             } catch (_: InterruptedException) {
                 // Rust side interrupted; let it return cleanly.
+            } catch (_: Exception) {
+                // never let an exception fly back into the engine's thread
             }
         }
     }
@@ -1207,6 +1219,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // Stable means "head hasn't moved for ~150ms" — playback caught up.
         while (currentCoroutineContext().isActive && isSynthesizing) {
             if (SupertonicTTS.isCancelled()) return
+            // paused near the end of a chapter: a still head is the pause, not the end —
+            // wait, or the next chapter started by itself in the middle of the pause
+            if (!isPlaying) { stableTicks = 0; delay(100); continue }
             val head = try { t.playbackHeadPosition } catch (_: Exception) { return }
             if (head == lastHead) {
                 stableTicks++

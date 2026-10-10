@@ -98,18 +98,13 @@ fun LexiconScreen(
                         )
                         HorizontalDivider()
                         if (canDownloadAccentDict) {
+                            // one dictionary: silero (Full & co. fixed homographs' stress and
+                            // overrode the engine, which picks it by context)
                             DropdownMenuItem(
-                                text = { Text(stringResource(AppR.string.menu_download_binary)) },
+                                text = { Text(stringResource(AppR.string.menu_download_silero)) },
                                 onClick = {
                                     showMenu = false
                                     onDownloadAccentDictBinaryClick()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(AppR.string.menu_download_text)) },
-                                onClick = {
-                                    showMenu = false
-                                    onDownloadAccentDictTextClick()
                                 }
                             )
                         }

@@ -311,4 +311,7 @@
     <string name="search_no_book">Чтобы искать, откройте книгу из библиотеки</string>
     <string name="roles_loudness_title">Выравнивать громкость голосов</string>
     <string name="roles_loudness_desc">Все голоса звучат одинаково громко: по основному голосу, а если он сам тихий, — громче него. Каждый голос измеряется по первым репликам</string>
+    <string name="menu_download_silero">Скачать словарь ударений (Silero)…</string>
+    <string name="dict_switch_title">Перейти на словарь Silero?</string>
+    <string name="dict_switch_msg">Сейчас стоит словарь «%1$s». В нём у слов вроде за́мок/замо́к ударение одно на все случаи, и движок не может выбрать его по смыслу. Silero оставляет такие слова движку (%2$d МБ, один раз).</string>
 </resources>
