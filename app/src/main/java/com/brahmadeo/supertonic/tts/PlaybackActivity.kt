@@ -334,10 +334,19 @@ class PlaybackActivity : ComponentActivity() {
                     onExportClick = { startExport() },
                     speed = currentSpeed,
                     onSpeedChange = { v ->
+                        val changed = Math.abs(v - currentSpeed) > 0.001f
                         currentSpeed = v
                         try { playbackService?.setSpeed(v) } catch (e: Exception) { }
                         getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
                             .putFloat("last_speed", v).putFloat("speed", v).apply()
+                        // what is already made (up to a minute ahead) was made at the old pace: while
+                        // reading, the phrase being heard is made again at the new one, so the change
+                        // is heard at once; paused — the next "play" starts afresh at the new pace
+                        if (changed) try {
+                            val i = currentIndexState.intValue
+                            if (isPlayingState.value && i >= 0) playFromIndex(i)
+                            else if (isServiceActiveState.value) playbackService?.stop()
+                        } catch (_: Exception) { }
                     },
                     onSentenceLongClick = { i -> showSpeakerDialog(i) },
                     currentFraction = if (isPlayingState.value) spokenFractionState.floatValue else -1f,

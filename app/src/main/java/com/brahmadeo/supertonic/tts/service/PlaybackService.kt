@@ -310,6 +310,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // TeraTTS outputs full-scale speech; the 2.5× boost tuned for Supertonic clipped it
         const val VOLUME_BOOST_FACTOR = 1.0f
         const val AUDIO_WRITE_CHUNK_SIZE = 8192
+        /** How long a pause keeps the reading (and the engine) ready to go on from the very word. */
+        const val PAUSE_HOLD_MS = 5_000L
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -1239,6 +1241,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     fun play() {
         resumeOnFocusGain = false
+        pauseSeq++
         if (!isPlaying) {
             if (requestAudioFocus()) {
                 isPlaying = true
@@ -1273,8 +1276,21 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             notifyListenerState(false)
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
             updateNotification(getString(R.string.notif_paused))
+            // While paused, the engine is held by the phrase it was making (it waits for room in
+            // the audio queue). A short pause keeps that — "play" goes on from the very word. A
+            // longer one lets the engine go, so a reader app (Moon+) asking for speech is not left
+            // in silence; "play" then starts again from the phrase being heard.
+            val tok = ++pauseSeq
+            serviceScope.launch {
+                delay(PAUSE_HOLD_MS)
+                if (tok == pauseSeq && !isPlaying && isSynthesizing) {
+                    Log.i(TAG, "paused for ${PAUSE_HOLD_MS / 1000} s: letting the engine go")
+                    stopServicePlayback(keepCard = true)
+                }
+            }
         }
     }
+    @Volatile private var pauseSeq = 0
 
     fun stopPlayback(removeNotification: Boolean = true) {
         synchronized(this) {
@@ -1301,7 +1317,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
-    fun stopServicePlayback() {
+    /** [keepCard]: a long pause — the reading ends, but the player card stays, paused. */
+    fun stopServicePlayback(keepCard: Boolean = false) {
         playGen.incrementAndGet()
         starting = false
         isPlaying = false
@@ -1315,7 +1332,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             SupertonicTTS.setCancelled(true)
             isSynthesizing = false
             synthesisJob?.cancelAndJoin()
-            stopPlayback()
+            stopPlayback(removeNotification = !keepCard)
+            if (keepCard) {
+                try {
+                    updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
+                    updateNotification(getString(R.string.notif_paused))
+                } catch (_: Exception) {}
+            }
         }
     }
 

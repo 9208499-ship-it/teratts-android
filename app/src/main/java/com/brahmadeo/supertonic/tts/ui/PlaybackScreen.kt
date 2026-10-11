@@ -206,27 +206,42 @@ fun PlaybackScreen(
     var followVoice by remember(text) { mutableStateOf(true) }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragged) { if (dragged) followVoice = false }
-    LaunchedEffect(currentIndex, showList, followVoice, book) {
+    // what is being heard right now: the sentence inside the phrase (a phrase may be long and run
+    // over several short paragraphs — following only its start let the voice go on below the
+    // control panel, out of sight)
+    val heard: IntRange? = if (book != null && index in sentences.indices) {
+        val r = book.ranges.getOrNull(index)
+        if (r == null) null
+        else if (currentFraction < 0f) r
+        else com.brahmadeo.supertonic.tts.utils.SpokenProgress.sentenceAt(sentences[index], currentFraction)
+            ?.let { mapSub(book.text, r, sentences[index], it) } ?: r
+    } else null
+    val heardKey = heard?.first ?: -1
+    LaunchedEffect(currentIndex, heardKey, showList, followVoice, book) {
         if (!showList || !followVoice || currentIndex !in sentences.indices) return@LaunchedEffect
         if (book == null) { listState.animateScrollToItem(currentIndex); return@LaunchedEffect }
-        // turn the page only when the phrase leaves the screen, as a reader does
-        val p = book.paraOfChunk[currentIndex]
-        val pr = book.paragraphs[p]
-        val r = book.ranges[currentIndex]
-        val lay = layouts[p]
-        var top = 0f
-        var bottom = 0f
-        if (r != null && lay != null) {
+        val target = heard ?: return@LaunchedEffect
+        val p1 = book.paraAt(target.first)
+        val p2 = book.paraAt(target.last)
+        fun lineY(p: Int, abs: Int, bottom: Boolean): Float? {
+            val lay = layouts[p] ?: return null
             val len = lay.layoutInput.text.length
-            top = lay.getLineTop(lay.getLineForOffset((r.first - pr.first).coerceIn(0, (len - 1).coerceAtLeast(0))))
-            bottom = lay.getLineBottom(lay.getLineForOffset((r.last - pr.first).coerceIn(0, (len - 1).coerceAtLeast(0))))
+            val line = lay.getLineForOffset((abs - book.paragraphs[p].first).coerceIn(0, (len - 1).coerceAtLeast(0)))
+            return if (bottom) lay.getLineBottom(line) else lay.getLineTop(line)
         }
         val info = listState.layoutInfo
-        val item = info.visibleItemsInfo.firstOrNull { it.index == p }
-        if (item != null && lay != null && item.offset + top >= info.viewportStartOffset &&
-            item.offset + bottom <= info.viewportEndOffset - 24) return@LaunchedEffect
-        val pad = (info.viewportEndOffset - info.viewportStartOffset) / 8
-        listState.animateScrollToItem(p, (top.toInt() - pad).coerceAtLeast(0))
+        val view = info.viewportEndOffset - info.viewportStartOffset
+        val item1 = info.visibleItemsInfo.firstOrNull { it.index == p1 }
+        val item2 = info.visibleItemsInfo.firstOrNull { it.index == p2 }
+        val top = lineY(p1, target.first, false)
+        val bottom = lineY(p2, target.last, true)
+        // turn the page only when what is heard leaves the screen (or comes close to its lower
+        // edge — a few lines are kept free above the panel), as a reader does
+        if (item1 != null && item2 != null && top != null && bottom != null &&
+            item1.offset + top >= info.viewportStartOffset &&
+            item2.offset + bottom <= info.viewportEndOffset - view / 8) return@LaunchedEffect
+        val pad = view / 8
+        listState.animateScrollToItem(p1, ((top ?: 0f).toInt() - pad).coerceAtLeast(0))
     }
     val playFrom: (Int) -> Unit = { i -> followVoice = true; onItemClick(i) }
     // the phrase at the top of the screen (after scrolling by hand)
