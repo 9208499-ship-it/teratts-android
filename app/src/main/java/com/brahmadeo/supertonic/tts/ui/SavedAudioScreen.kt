@@ -39,9 +39,11 @@ fun SavedAudioScreen(
         val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
         val appDir = File(musicDir, "Supertonic Audio")
         if (appDir.exists()) {
-            files = appDir.listFiles { _, name -> name.endsWith(".wav") }
-                ?.sortedByDescending { it.lastModified() }
-                ?.toList() ?: emptyList()
+            // a saved book is a folder of chapters: those too
+            files = appDir.walkTopDown().maxDepth(2)
+                .filter { it.isFile && (it.name.endsWith(".wav") || it.name.endsWith(".m4a")) }
+                .sortedWith(compareByDescending<File> { it.parentFile?.lastModified() ?: 0L }.thenBy { it.name })
+                .toList()
         } else {
             files = emptyList()
         }

@@ -88,6 +88,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             this@PlaybackService.exportAudio(text, lang, stylePath, speed, steps, File(outputPath))
         }
 
+        override fun exportBook(lang: String, stylePath: String, speed: Float, steps: Int, outputDir: String, onlyChapter: Int) {
+            this@PlaybackService.exportBook(lang, stylePath, speed, steps, File(outputDir), onlyChapter)
+        }
+
         override fun setSpeed(speed: Float) {
             this@PlaybackService.liveSpeed = speed.coerceIn(0.5f, 2.5f)
         }
@@ -1473,71 +1477,141 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
-    fun exportAudio(text: String, lang: String, stylePath: String, speed: Float, steps: Int, outputFile: File) {
+    /**
+     * One text into one audio file, phrase by phrase, straight to disk (the whole chapter in
+     * memory ran out of it near the end — "export failed" at 86–88 %). The file is made in the
+     * app's cache and handed to Music/[relDir] only when complete (AudioPublisher: MediaStore
+     * from Android 10 on), so a file with the right name there is always whole. Returns the
+     * saved file's path to show ("Music/…/name.m4a"), or null if nothing was saved.
+     */
+    private suspend fun exportText(text: String, lang: String, stylePath: String, speed: Float, steps: Int,
+                                   relDir: String, baseName: String, progress: suspend (Int, Int) -> Unit): String? {
+        val sentences = textNormalizer.splitIntoSentences(text, lang)
+        if (sentences.isEmpty()) { Log.w(TAG, "Export: No sentences found"); return null }
+        val tmpDir = File(cacheDir, "export").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+        val (writer, made) = com.brahmadeo.supertonic.tts.utils.AudioFileWriter.open(File(tmpDir, "chapter.m4a"), SupertonicTTS.getAudioSampleRate())
+        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
+        // a quiet voice as loud as in the player
+        val gain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this, stylePath, stylePath)
+        var complete = false
+        try {
+            for ((index, sentence) in sentences.withIndex()) {
+                if (!currentCoroutineContext().isActive || SupertonicTTS.isCancelled()) break
+                progress(index + 1, sentences.size)
+                val normalizedText = textNormalizer.normalize(sentence, lang, isAdvancedEnabled)
+                val audioData = SupertonicTTS.generateAudio(normalizedText, lang, stylePath, speed, 0.0f, steps, gain, null)
+                if (audioData != null && audioData.isNotEmpty()) writer.write(audioData)
+                else if (SupertonicTTS.isCancelled()) break
+            }
+            complete = currentCoroutineContext().isActive && !SupertonicTTS.isCancelled()
+        } finally {
+            if (!complete) { writer.abort(); made.delete() }
+        }
+        try {
+            if (!writer.finish()) return null
+            return com.brahmadeo.supertonic.tts.utils.AudioPublisher.publish(this, made, relDir, baseName + "." + made.extension)
+        } finally {
+            made.delete()
+        }
+    }
+
+    /** Stops whatever is going on and takes the engine for saving; [body] runs in the background. */
+    private fun runExport(body: suspend kotlinx.coroutines.CoroutineScope.() -> Pair<Boolean, String>) {
         serviceScope.launch {
             if (synthesisJob?.isActive == true) {
                 SupertonicTTS.setCancelled(true)
                 synthesisJob?.cancelAndJoin()
             }
-            
             stopPlayback(removeNotification = false)
             SupertonicTTS.setCancelled(false)
             isSynthesizing = true
             notifyListenerState(false)
             startForegroundService(getString(R.string.notif_exporting), false)
-            
             synthesisJob = launch(Dispatchers.IO) {
-                var exportSuccess = false
+                var result = false to ""
                 try {
-                    val sentences = textNormalizer.splitIntoSentences(text, lang)
-                    if (sentences.isEmpty()) {
-                        Log.w(TAG, "Export: No sentences found")
-                        return@launch
-                    }
-
-                    // straight to the file, phrase by phrase: the whole chapter in memory (and then a
-                    // second copy of it for saving) ran out of memory near the end — "export failed"
-                    // at 86–88 % on phones with less memory
-                    var written = 0L
-                    val outputStream = java.io.BufferedOutputStream(java.io.FileOutputStream(outputFile), 1 shl 16)
-                    outputStream.write(ByteArray(44))   // the WAV header, filled in at the end
-                    for ((index, sentence) in sentences.withIndex()) {
-                        if (!isActive || SupertonicTTS.isCancelled()) break
-                        
-                        withContext(Dispatchers.Main) {
-                            notifyListenerProgress(index + 1, sentences.size)
-                        }
-
-                        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
-                        val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
-                        val normalizedText = textNormalizer.normalize(sentence, lang, isAdvancedEnabled)
-
-                        val audioData = SupertonicTTS.generateAudio(normalizedText, lang, stylePath, speed, 0.0f, steps, VOLUME_BOOST_FACTOR, null)
-                        if (audioData != null && audioData.isNotEmpty()) {
-                            outputStream.write(audioData)
-                            written += audioData.size
-                        } else if (SupertonicTTS.isCancelled()) {
-                            break
-                        }
-                    }
-                    
-                    outputStream.close()
-                    if (isActive && !SupertonicTTS.isCancelled() && written > 0) {
-                        WavUtils.writeHeader(outputFile, written, SupertonicTTS.getAudioSampleRate())
-                        exportSuccess = true
-                    }
+                    result = body()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Throwable) {
                     Log.e(TAG, "Export failed", e)
                 } finally {
-                    if (!exportSuccess) try { outputFile.delete() } catch (_: Exception) {}
-                    withContext(Dispatchers.Main) {
+                    try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
+                    withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
                         isSynthesizing = false
                         stopForeground(STOP_FOREGROUND_REMOVE)
-                        notifyListenerExportComplete(exportSuccess, outputFile.absolutePath)
+                        notifyListenerExportComplete(result.first, result.second)
                         notifyListenerState(false)
                     }
                 }
             }
+        }
+    }
+
+    fun exportAudio(text: String, lang: String, stylePath: String, speed: Float, steps: Int, outputFile: File) {
+        runExport {
+            wakeLock?.acquire(3 * 60 * 60 * 1000L)
+            val relDir = com.brahmadeo.supertonic.tts.utils.AudioPublisher.relDirOf(outputFile.parentFile ?: outputFile)
+            val shown = exportText(text, lang, stylePath, speed, steps, relDir, outputFile.nameWithoutExtension) { i, n ->
+                withContext(Dispatchers.Main) { notifyListenerProgress(i, n) }
+            }
+            (shown != null) to (shown ?: outputFile.absolutePath)
+        }
+    }
+
+    /**
+     * The book being read into its own folder ([outputDir] = Music/Supertonic Audio/<book>), a file
+     * per chapter: "01 - <chapter title>.m4a" (the title from the book's contents; "Глава 5" if it
+     * has none) — the number first, so players and file managers keep the order.
+     * [onlyChapter] (an index in the reading order) >= 0: just that chapter, under the same name
+     * (saved again — replaced). Otherwise the whole book; chapters already saved there are
+     * skipped, so a stopped saving goes on where it stopped (progress: chapter x 1000 + the part
+     * of it done, out of chapters x 1000).
+     */
+    fun exportBook(lang: String, stylePath: String, speed: Float, steps: Int, outputDir: File, onlyChapter: Int) {
+        runExport {
+            val publisher = com.brahmadeo.supertonic.tts.utils.AudioPublisher
+            val relDir = publisher.relDirOf(outputDir)
+            val shownDir = "${android.os.Environment.DIRECTORY_MUSIC}/$relDir"
+            val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this@PlaybackService)
+            if (chapters.isEmpty()) return@runExport false to shownDir
+            val digits = maxOf(2, chapters.size.toString().length)
+            fun fileName(k: Int): String {
+                val c = chapters[k]
+                val title = c.title?.let { publisher.safeName(it, 60) }?.takeIf { it.isNotEmpty() }
+                    ?: getString(R.string.outline_chapter_n, k + 1)
+                return (k + 1).toString().padStart(digits, '0') + " - " + title
+            }
+            if (onlyChapter >= 0) {
+                val k = chapters.indexOfFirst { it.index == onlyChapter }
+                if (k < 0) return@runExport false to shownDir
+                val name = fileName(k)
+                publisher.delete(this@PlaybackService, relDir, "$name.m4a")
+                publisher.delete(this@PlaybackService, relDir, "$name.wav")
+                wakeLock?.acquire(3 * 60 * 60 * 1000L)
+                val shown = exportText(chapters[k].text, lang, stylePath, speed, steps, relDir, name) { s, n ->
+                    withContext(Dispatchers.Main) { notifyListenerProgress(s, n) }
+                }
+                return@runExport (shown != null) to (shown ?: shownDir)
+            }
+            var saved = 0
+            var all = true
+            for ((k, c) in chapters.withIndex()) {
+                if (!isActive || SupertonicTTS.isCancelled()) { all = false; break }
+                val name = fileName(k)
+                if (publisher.exists(this@PlaybackService, relDir, "$name.m4a") ||
+                    publisher.exists(this@PlaybackService, relDir, "$name.wav")) {
+                    saved++
+                    continue
+                }
+                wakeLock?.acquire(3 * 60 * 60 * 1000L)
+                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name) { s, n ->
+                    withContext(Dispatchers.Main) { notifyListenerProgress(k * 1000 + s * 1000 / maxOf(n, 1), chapters.size * 1000) }
+                }
+                if (shown != null) saved++ else { all = false; if (!isActive || SupertonicTTS.isCancelled()) break }
+            }
+            (all && saved > 0) to shownDir
         }
     }
 

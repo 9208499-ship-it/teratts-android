@@ -223,6 +223,22 @@ object AccentDictionaryManager {
      */
     fun load(context: Context) {
         if (isLoaded) return
+        // Only the Silero dictionary is used now. An old one (Full, Standard…) left from earlier
+        // versions put wrong stresses ("х+олста" for "холст+а") and one stress for both meanings
+        // of homographs; the offer to switch was shown once, and "later" kept it for good. It is
+        // left unused (not deleted) until Silero is downloaded in its place.
+        if (isInstalled(context) && !isSilero(context)) {
+            synchronized(loadLock) {
+                ++loadGeneration
+                binaryDict?.close()
+                binaryDict = null
+                entries = emptyMap()
+                isLoading = false
+                isLoaded = true
+            }
+            Log.i(TAG, "dictionary '${getMetadata(context)?.source}' is not used: only Silero")
+            return
+        }
         val prefs = context.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE)
         syncLoadEnabled = prefs.getBoolean(SYNC_LOAD_PREFS_KEY, false)
 

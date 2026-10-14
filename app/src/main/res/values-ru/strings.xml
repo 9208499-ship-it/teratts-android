@@ -313,11 +313,18 @@
     <string name="roles_loudness_desc">Все голоса звучат одинаково громко: по основному голосу, а если он сам тихий, — громче него. Каждый голос измеряется по первым репликам</string>
     <string name="menu_download_silero">Скачать словарь ударений (Silero)…</string>
     <string name="dict_switch_title">Перейти на словарь Silero?</string>
-    <string name="dict_switch_msg">Сейчас стоит словарь «%1$s». В нём у слов вроде за́мок/замо́к ударение одно на все случаи, и движок не может выбрать его по смыслу. Silero оставляет такие слова движку (%2$d МБ, один раз).</string>
+    <string name="dict_switch_msg">Старый словарь «%1$s» больше не используется: в нём встречаются неверные ударения, а у слов вроде за́мок/замо́к ударение одно на все случаи. Скачайте Silero (%2$d МБ, один раз) — без него ударения ставит сам движок, и ошибок больше.</string>
     <string name="stress_hint_yo">Нажмите на ударную гласную; на «е» ещё раз — станет «ё». Добавьте соседнее слово, чтобы ударение было только в этом сочетании</string>
     <string name="library_untitled">Без названия (удерживайте, чтобы переименовать)</string>
     <string name="library_rename">Переименовать</string>
     <string name="library_actions">Действия с книгой</string>
     <string name="library_delete_title">Убрать книгу?</string>
     <string name="library_delete_message">«%1$s» будет убрана из библиотеки вместе с местом чтения. Сам файл книги в папках телефона останется.</string>
+    <string name="export_choose_title">Сохранить в аудиофайл</string>
+    <string name="export_choose_message">Файл M4A в папке книги (Музыка/Supertonic Audio/&lt;книга&gt;), по главам: «01 - Название главы». Вся книга — по файлу на главу; на телефоне это занимает примерно столько же, сколько звучит книга. Уже сохранённые главы пропускаются, так что прерванное сохранение можно продолжить.</string>
+    <string name="export_this_chapter">Эту главу</string>
+    <string name="export_whole_book">Всю книгу</string>
+    <string name="export_book_progress">Глава %1$d из %2$d</string>
+    <string name="export_book_default_name">Книга</string>
+    <string name="export_need_permission">Чтобы сохранять аудиофайлы, разрешите программе доступ к памяти</string>
 </resources>

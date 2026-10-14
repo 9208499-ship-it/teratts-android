@@ -20,6 +20,9 @@ import com.brahmadeo.supertonic.tts.ui.PlaybackScreen
 import com.brahmadeo.supertonic.tts.ui.theme.SupertonicTheme
 import com.brahmadeo.supertonic.tts.utils.TextNormalizer
 import java.io.File
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -151,6 +154,10 @@ class PlaybackActivity : ComponentActivity() {
     private var isExportingState = mutableStateOf(false)
     private var exportCurrentState = mutableIntStateOf(0)
     private var exportTotalState = mutableIntStateOf(0)
+    // saving the whole book (a file per chapter): progress is chapter × 1000 + the part of it
+    private var exportBookState = mutableStateOf(false)
+    // "this chapter or the whole book?" is being asked
+    private var exportAskState = mutableStateOf(false)
 
     // State persistence
     private var currentText = ""
@@ -327,6 +334,9 @@ class PlaybackActivity : ComponentActivity() {
                     isExporting = isExportingState.value,
                     exportCurrent = exportCurrentState.intValue,
                     exportTotal = exportTotalState.intValue,
+                    exportNote = if (exportBookState.value && exportTotalState.intValue >= 1000)
+                        getString(R.string.export_book_progress, exportCurrentState.intValue / 1000 + 1, exportTotalState.intValue / 1000)
+                        else null,
                     onBackClick = { finish() },
                     onItemClick = { index -> playFromIndex(index) },
                     onPlayPauseClick = { handlePlayPause() },
@@ -376,6 +386,32 @@ class PlaybackActivity : ComponentActivity() {
                         }
                     }
                 )
+                if (exportAskState.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { exportAskState.value = false },
+                        title = { androidx.compose.material3.Text(getString(R.string.export_choose_title)) },
+                        text = {
+                            androidx.compose.foundation.layout.Column {
+                                androidx.compose.material3.Text(getString(R.string.export_choose_message))
+                                androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = { exportAskState.value = false; exportChapter() },
+                                    modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                                ) { androidx.compose.material3.Text(getString(R.string.export_this_chapter)) }
+                                androidx.compose.material3.OutlinedButton(
+                                    onClick = { exportAskState.value = false; exportWholeBook() },
+                                    modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                                ) { androidx.compose.material3.Text(getString(R.string.export_whole_book)) }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { exportAskState.value = false }) {
+                                androidx.compose.material3.Text(getString(R.string.cancel_action))
+                            }
+                        }
+                    )
+                }
                 stressWordState.value?.let { (before, w, after) ->
                     com.brahmadeo.supertonic.tts.ui.StressDialog(
                         word = w, before = before, after = after,
@@ -581,25 +617,90 @@ class PlaybackActivity : ComponentActivity() {
         } catch (e: RemoteException) { }
     }
 
+    // Android 7–9: saving to Music needs the storage permission (asked once, at the first saving)
+    private var afterWritePermission: (() -> Unit)? = null
+    private val writePermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val next = afterWritePermission
+        afterWritePermission = null
+        if (granted) next?.invoke()
+        else Toast.makeText(this, getString(R.string.export_need_permission), Toast.LENGTH_LONG).show()
+    }
+
+    /** A chapter of a book: "this chapter or the whole book?"; any other text is saved at once. */
     private fun startExport() {
         if (currentText.isEmpty()) {
             Toast.makeText(this, "No text to save", Toast.LENGTH_SHORT).show()
             return
         }
+        val go: () -> Unit = {
+            val inBook = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) != null &&
+                com.brahmadeo.supertonic.tts.utils.BookSession.matches(this, currentText)
+            if (inBook) exportAskState.value = true else exportChapter()
+        }
+        val perm = android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q &&
+            androidx.core.content.ContextCompat.checkSelfPermission(this, perm) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            afterWritePermission = go
+            writePermissionLauncher.launch(perm)
+        } else go()
+    }
 
+    /** Music/Supertonic Audio: only a name here — the service saves into it through MediaStore. */
+    private fun audioDir(): File =
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Supertonic Audio")
+
+    /** The book's name, fit for a folder name; null if no book is being read. */
+    private fun bookFileName(): String? {
+        val path = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) ?: return null
+        val utils = com.brahmadeo.supertonic.tts.utils.EbookManager
+        val title = utils.getRecentBooks(this).firstOrNull { it.path == path }?.let { utils.displayTitle(this, it) }
+            ?: utils.readableTitle(utils.originalName(this, path)) ?: getString(R.string.export_book_default_name)
+        return com.brahmadeo.supertonic.tts.utils.AudioPublisher.safeName(title)
+            .ifEmpty { getString(R.string.export_book_default_name) }
+    }
+
+    /**
+     * The text on screen to an audio file. A chapter of a book goes to the book's folder as
+     * "05 - <chapter title>.m4a" (as when the whole book is saved); any other text — to
+     * Music/Supertonic Audio/TeraTTS_<date>.m4a.
+     */
+    private fun exportChapter() {
+        exportBookState.value = false
         exportCurrentState.intValue = 0
-        exportTotalState.intValue = sentencesState.value.size
+        exportTotalState.intValue = 0
         isExportingState.value = true
 
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val filename = "Supertonic_TTS_$timestamp.wav"
-        val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        val appDir = File(musicDir, "Supertonic Audio")
-        if (!appDir.exists()) appDir.mkdirs()
-        val file = File(appDir, filename)
-
+        val chapter = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this)
+        val book = if (chapter >= 0 && com.brahmadeo.supertonic.tts.utils.BookSession.matches(this, currentText)) bookFileName() else null
         try {
-            playbackService?.exportAudio(currentText, currentLang, currentVoicePath, currentSpeed, currentSteps, file.absolutePath)
+            if (book != null) {
+                playbackService?.exportBook(currentLang, currentVoicePath, currentSpeed, currentSteps,
+                    File(audioDir(), book).absolutePath, chapter)
+            } else {
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val file = File(audioDir(), "TeraTTS_$timestamp.m4a")
+                exportTotalState.intValue = sentencesState.value.size
+                playbackService?.exportAudio(currentText, currentLang, currentVoicePath, currentSpeed, currentSteps, file.absolutePath)
+            }
+        } catch (e: RemoteException) {
+            e.printStackTrace()
+            isExportingState.value = false
+            Toast.makeText(this, getString(R.string.export_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Every chapter to its own file in a folder named after the book; saved chapters are skipped. */
+    private fun exportWholeBook() {
+        val name = bookFileName() ?: return exportChapter()
+        exportBookState.value = true
+        exportCurrentState.intValue = 0
+        exportTotalState.intValue = 0
+        isExportingState.value = true
+        val dir = File(audioDir(), name)
+        try {
+            playbackService?.exportBook(currentLang, currentVoicePath, currentSpeed, currentSteps, dir.absolutePath, -1)
         } catch (e: RemoteException) {
             e.printStackTrace()
             isExportingState.value = false

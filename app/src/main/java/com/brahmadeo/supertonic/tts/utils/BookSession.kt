@@ -167,6 +167,45 @@ object BookSession {
         }
     }
 
+    /** A chapter with real text: its place in the reading order, its title in the book's contents (if any), its text. */
+    class TitledChapter(val index: Int, val title: String?, val text: String)
+
+    /**
+     * Every chapter of the current book with real text and its title from the table of contents
+     * (the first entry pointing to that file), for saving the book to audio files. The session is not moved.
+     */
+    suspend fun chaptersWithTitles(context: Context): List<TitledChapter> {
+        val path = currentPath(context) ?: return emptyList()
+        val file = File(path)
+        if (!file.exists()) return emptyList()
+        val parser = EbookParser(context)
+        val publication = parser.openPublication(file).getOrNull() ?: return emptyList()
+        val order = publication.readingOrder
+        // the contents and the reading order may spell one file differently (as in the outline)
+        fun same(a: String, b: String) = a == b || a.endsWith("/$b") || b.endsWith("/$a") ||
+            a.substringAfterLast('/') == b.substringAfterLast('/')
+        val titles = HashMap<Int, String>()
+        fun walk(links: List<org.readium.r2.shared.publication.Link>) {
+            for (l in links) {
+                val t = l.title?.replace(Regex("\\s+"), " ")?.trim()
+                if (!t.isNullOrEmpty()) {
+                    val p = l.url().toString().substringBefore('#')
+                    val i = order.indexOfFirst { same(it.url().toString().substringBefore('#'), p) }
+                    if (i >= 0 && i !in titles) titles[i] = t
+                }
+                walk(l.children)
+            }
+        }
+        try { walk(publication.tableOfContents) } catch (e: Exception) { }
+        val out = ArrayList<TitledChapter>()
+        for (i in order.indices) {
+            val text = parser.extractText(publication, order[i]).getOrNull()?.trim() ?: continue
+            if (text.length < MIN_CHAPTER_CHARS) continue
+            out.add(TitledChapter(i, titles[i] ?: order[i].title?.trim()?.takeIf { it.isNotEmpty() }, text))
+        }
+        return out
+    }
+
     /** Text of the next chapter with real text (the session moves on to it), or null at the end. */
     suspend fun nextChapter(context: Context): String? {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

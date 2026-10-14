@@ -165,6 +165,7 @@ fun PlaybackScreen(
     isExporting: Boolean,
     exportCurrent: Int,
     exportTotal: Int,
+    exportNote: String? = null,
     onBackClick: () -> Unit,
     onItemClick: (Int) -> Unit,
     onPlayPauseClick: () -> Unit,
@@ -499,7 +500,7 @@ fun PlaybackScreen(
                                     }
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
-                                        text = "$exportCurrent / $exportTotal chunks",
+                                        text = exportNote ?: "$exportCurrent / $exportTotal",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

@@ -14,4 +14,5 @@ interface IPlaybackService {
     oneway void exportAudio(String text, String lang, String stylePath, float speed, int steps, String outputPath);
     int getCurrentIndex();
     oneway void setSpeed(float speed);
+    oneway void exportBook(String lang, String stylePath, float speed, int steps, String outputDir, int onlyChapter);
 }
