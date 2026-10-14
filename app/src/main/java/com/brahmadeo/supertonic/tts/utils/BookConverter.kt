@@ -237,6 +237,9 @@ object BookConverter {
     private val txtHeading = Regex("^(глава|часть|книга|пролог|эпилог|chapter|part|prologue|epilogue)\\b.{0,70}$", RegexOption.IGNORE_CASE)
 
     fun decodeText(bytes: ByteArray): String {
+        // UTF-16 (Windows Notepad "Unicode"): by its byte-order mark
+        if (bytes.size >= 2 && ((bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) || (bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte())))
+            return String(bytes, Charsets.UTF_16).removePrefix("\uFEFF")
         for (name in listOf("UTF-8", "windows-1251")) {
             try {
                 val dec = Charset.forName(name).newDecoder()

@@ -165,7 +165,10 @@ class EbookOutlineActivity : ComponentActivity() {
                 }
 
                 // the book's own title; for a book without one — the name its file had on the phone
-                val title = publication?.metadata?.title?.takeIf { it.isNotBlank() && !it.startsWith("book_") }
+                // (the name the reader gave it first; a title in a broken encoding is fixed or skipped)
+                val title = EbookManager.customName(this@EbookOutlineActivity, ebookFile.absolutePath)
+                    ?: EbookManager.readableTitle(publication?.metadata?.title?.takeIf { !it.startsWith("book_") })
+                    ?: EbookManager.readableTitle(EbookManager.originalName(this@EbookOutlineActivity, ebookFile.absolutePath))
                     ?: EbookManager.originalName(this@EbookOutlineActivity, ebookFile.absolutePath)
                     ?: ebookFile.nameWithoutExtension
                 EbookManager.addBook(this@EbookOutlineActivity, title, ebookFile.absolutePath)
@@ -192,7 +195,10 @@ class EbookOutlineActivity : ComponentActivity() {
             topBar = {
                 Column {
                     TopAppBar(
-                        title = { Text(publication?.metadata?.title ?: "Ebook Details") },
+                        title = { Text(EbookManager.customName(this@EbookOutlineActivity, ebookFile.absolutePath)
+                            ?: EbookManager.readableTitle(publication?.metadata?.title)
+                            ?: EbookManager.originalName(this@EbookOutlineActivity, ebookFile.absolutePath)
+                            ?: "Ebook Details", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                         navigationIcon = {
                             IconButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

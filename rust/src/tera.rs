@@ -574,6 +574,14 @@ pub fn latin_caps_to_russian(s: &str) -> String {
         if let Some((_, w)) = WORD_ACRONYMS.iter().find(|(a, _)| *a == tok) {
             return w.to_string();
         }
+        // "MMs", "CDs", "DVDs" — a plural of an acronym: "эм-эмс", "си-дис" (it went to the
+        // English voice as a word and came out as noise)
+        if tok.len() >= 3 && tok.len() <= 7 && tok.ends_with('s')
+            && tok[..tok.len() - 1].bytes().all(|b| b.is_ascii_uppercase()) {
+            let mut sp = spell_acronym(&tok[..tok.len() - 1]);
+            sp.push('с');
+            return sp;
+        }
         let all_caps = tok.bytes().all(|b| b.is_ascii_uppercase());
         if !all_caps || tok.len() > 6 {
             return tok.to_string();
@@ -932,6 +940,7 @@ mod tests {
         assert_eq!(f("Глава IV. В XIX веке Пётр I"), "Глава 4. В 19 веке Пётр 1");
         assert_eq!(f("купил CD диск, витамин C"), "купил си-д+и диск, витамин C");
         assert_eq!(f("в NATO и OK"), "в н+ато и ок+ей");
+        assert_eq!(f("купил MMs и два CDs"), "купил эм-+эмс и два си-д+ис");
         assert_eq!(f("открыл iPhone и Windows"), "открыл iPhone и Windows");
         assert_eq!(f("He said: my IQ is high"), "He said: my IQ is high");
         assert_eq!(roman_value("IIII"), None);

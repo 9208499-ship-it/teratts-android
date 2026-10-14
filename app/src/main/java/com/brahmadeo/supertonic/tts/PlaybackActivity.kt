@@ -89,13 +89,13 @@ class PlaybackActivity : ComponentActivity() {
     }
 
     // ---- a word's stress, from a double tap on the book page ----
-    private val stressWordState = mutableStateOf<String?>(null)
+    private val stressWordState = mutableStateOf<Triple<String?, String, String?>?>(null)
     private var stressPaused = false     // reading was paused for the dialog: go on after it
 
-    private fun askStress(word: String) {
+    private fun askStress(word: String, before: String?, after: String?) {
         stressPaused = isPlayingState.value
         if (stressPaused) try { playbackService?.pause() } catch (_: Exception) {}
-        stressWordState.value = word
+        stressWordState.value = Triple(before, word, after)
     }
 
     private fun stressDone(saved: Boolean) {
@@ -354,7 +354,7 @@ class PlaybackActivity : ComponentActivity() {
                     onPrevChapter = if (isBookState.value) ({ stepChapter(-1) }) else null,
                     onNextChapter = if (isBookState.value) ({ stepChapter(1) }) else null,
                     sleepLeft = sleepLeftState.value,
-                    onWordDoubleTap = { w -> askStress(w) },
+                    onWordDoubleTap = { w, b, a -> askStress(w, b, a) },
                     onSearch = if (isBookState.value) ({ openSearch() }) else null,
                     onSleepTimer = { m ->
                         com.brahmadeo.supertonic.tts.utils.SleepTimer.set(this@PlaybackActivity, m)
@@ -376,9 +376,9 @@ class PlaybackActivity : ComponentActivity() {
                         }
                     }
                 )
-                stressWordState.value?.let { w ->
+                stressWordState.value?.let { (before, w, after) ->
                     com.brahmadeo.supertonic.tts.ui.StressDialog(
-                        word = w,
+                        word = w, before = before, after = after,
                         initial = remember(w) {
                             com.brahmadeo.supertonic.tts.utils.LexiconManager.stressOf(this@PlaybackActivity, w).takeIf { it >= 0 }
                                 ?: w.lowercase().indexOf('ё')
@@ -388,8 +388,8 @@ class PlaybackActivity : ComponentActivity() {
                                 .setAction(PlaybackService.ACTION_PREVIEW)
                                 .putExtra("text", stressed).putExtra("voice", currentVoicePath).putExtra("speed", currentSpeed))
                         },
-                        onSave = { stressed ->
-                            com.brahmadeo.supertonic.tts.utils.LexiconManager.putStress(this@PlaybackActivity, w, stressed)
+                        onSave = { term, stressed ->
+                            com.brahmadeo.supertonic.tts.utils.LexiconManager.putStress(this@PlaybackActivity, term, stressed)
                             Toast.makeText(this@PlaybackActivity, getString(R.string.stress_saved, stressed.replace(Regex("\\+(.)"), "$1\u0301")), Toast.LENGTH_SHORT).show()
                             stressDone(saved = true)
                         },

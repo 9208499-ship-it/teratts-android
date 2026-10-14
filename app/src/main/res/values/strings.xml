@@ -314,4 +314,10 @@
     <string name="menu_download_silero">Download the accent dictionary (Silero)…</string>
     <string name="dict_switch_title">Switch to the Silero dictionary?</string>
     <string name="dict_switch_msg">The installed dictionary is «%1$s». It fixes one stress for words like за́мок/замо́к, so the engine can no longer choose by context. Silero leaves such words to the engine (%2$d MB, once).</string>
+    <string name="stress_hint_yo">Tap the stressed vowel; tap «е» again to make it «ё». Add a word next to it to set the stress for that phrase only</string>
+    <string name="library_untitled">Untitled (hold to rename)</string>
+    <string name="library_rename">Rename</string>
+    <string name="library_actions">Book actions</string>
+    <string name="library_delete_title">Remove the book?</string>
+    <string name="library_delete_message">«%1$s» will be removed from the library together with its reading place. The book file in your phone\'s folders stays.</string>
 </resources>

@@ -314,4 +314,10 @@
     <string name="menu_download_silero">Скачать словарь ударений (Silero)…</string>
     <string name="dict_switch_title">Перейти на словарь Silero?</string>
     <string name="dict_switch_msg">Сейчас стоит словарь «%1$s». В нём у слов вроде за́мок/замо́к ударение одно на все случаи, и движок не может выбрать его по смыслу. Silero оставляет такие слова движку (%2$d МБ, один раз).</string>
+    <string name="stress_hint_yo">Нажмите на ударную гласную; на «е» ещё раз — станет «ё». Добавьте соседнее слово, чтобы ударение было только в этом сочетании</string>
+    <string name="library_untitled">Без названия (удерживайте, чтобы переименовать)</string>
+    <string name="library_rename">Переименовать</string>
+    <string name="library_actions">Действия с книгой</string>
+    <string name="library_delete_title">Убрать книгу?</string>
+    <string name="library_delete_message">«%1$s» будет убрана из библиотеки вместе с местом чтения. Сам файл книги в папках телефона останется.</string>
 </resources>

@@ -63,6 +63,74 @@ object EbookManager {
 
     private const val NAMES = "EbookNames"
 
+    private fun saveList(context: Context, books: List<RecentBook>) {
+        val jsonArray = JSONArray()
+        books.forEach { jsonArray.put(JSONObject().put("title", it.title).put("path", it.path)) }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit { putString(KEY_RECENT_BOOKS, jsonArray.toString()) }
+    }
+
+    /** The name the reader gave the book in the library (kept when the book is opened again). */
+    fun customName(context: Context, path: String): String? =
+        context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).getString("title:$path", null)
+
+    fun renameBook(context: Context, path: String, title: String) {
+        val t = title.trim()
+        context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).edit {
+            if (t.isEmpty()) remove("title:$path") else putString("title:$path", t)
+        }
+        if (t.isNotEmpty()) saveList(context, getRecentBooks(context).map { if (it.path == path) RecentBook(t, it.path) else it })
+    }
+
+    /**
+     * Out of the library: the entry, the app's copy of the book (only that — never a file of the
+     * reader's own), its place, its characters; the player's book session if it was this book.
+     */
+    fun removeBook(context: Context, path: String) {
+        saveList(context, getRecentBooks(context).filterNot { it.path == path })
+        val file = File(path)
+        try {
+            val dir = File(context.filesDir, "ebooks").canonicalPath
+            if (file.canonicalPath.startsWith(dir + File.separator)) file.delete()
+        } catch (e: Exception) { }
+        context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).edit { remove(path); remove("title:$path") }
+        context.getSharedPreferences("TeraBookPositions", Context.MODE_PRIVATE).edit { remove(file.name) }
+        try { BookRoster.clear(context, file.name) } catch (e: Exception) { }
+        if (BookSession.currentPath(context) == path) BookSession.clear(context)
+    }
+
+    /**
+     * A title as it should be shown, or null if it is unreadable. Titles from PDF and EPUB
+     * metadata or from file names often come in a wrong encoding: "Ãëàâà" (windows-1251 read
+     * as Latin-1) and "Ð“Ð»Ð°Ð²Ð°" (UTF-8 read as Latin-1) are decoded again; "����" (the
+     * letters already lost) cannot be, and is no title.
+     */
+    fun readableTitle(raw: String?): String? {
+        val s = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (s.count { it == '\uFFFD' } > 0) return null
+        val high = s.count { it.code in 0xC0..0xFF }
+        if (s.all { it.code <= 0xFF } && high >= 2 && high * 3 >= s.count { it.isLetter() }) {
+            val bytes = s.toByteArray(Charsets.ISO_8859_1)
+            for (cs in listOf("UTF-8", "windows-1251")) {
+                try {
+                    val dec = java.nio.charset.Charset.forName(cs).newDecoder()
+                        .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                        .decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                    if (dec.count { it in 'А'..'я' || it == 'ё' || it == 'Ё' } * 2 >= dec.count { it.isLetter() }) return dec.trim()
+                } catch (e: Exception) { }
+            }
+        }
+        // mostly not letters or digits ("_-_�"): no title
+        if (s.count { it.isLetterOrDigit() } * 2 < s.count { !it.isWhitespace() }) return null
+        return s
+    }
+
+    /** What the library calls the book: the reader's name for it, its own title, its file's name. */
+    fun displayTitle(context: Context, book: RecentBook): String? =
+        customName(context, book.path)
+            ?: readableTitle(book.title.takeUnless { it.startsWith("book_") })
+            ?: readableTitle(originalName(context, book.path))
+
     /** "Мастер и Маргарита.fb2.zip" → "Мастер и Маргарита". */
     private fun cleanName(name: String?): String? =
         name?.replace(Regex("""(?i)(\.(fb2|fb3|epub|pdf|txt))?(\.zip)?$"""), "")?.trim()?.takeIf { it.isNotEmpty() }

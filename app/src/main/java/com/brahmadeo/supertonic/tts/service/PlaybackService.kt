@@ -1495,7 +1495,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         return@launch
                     }
 
-                    val outputStream = ByteArrayOutputStream()
+                    // straight to the file, phrase by phrase: the whole chapter in memory (and then a
+                    // second copy of it for saving) ran out of memory near the end — "export failed"
+                    // at 86–88 % on phones with less memory
+                    var written = 0L
+                    val outputStream = java.io.BufferedOutputStream(java.io.FileOutputStream(outputFile), 1 shl 16)
+                    outputStream.write(ByteArray(44))   // the WAV header, filled in at the end
                     for ((index, sentence) in sentences.withIndex()) {
                         if (!isActive || SupertonicTTS.isCancelled()) break
                         
@@ -1510,18 +1515,21 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         val audioData = SupertonicTTS.generateAudio(normalizedText, lang, stylePath, speed, 0.0f, steps, VOLUME_BOOST_FACTOR, null)
                         if (audioData != null && audioData.isNotEmpty()) {
                             outputStream.write(audioData)
+                            written += audioData.size
                         } else if (SupertonicTTS.isCancelled()) {
                             break
                         }
                     }
                     
-                    if (isActive && !SupertonicTTS.isCancelled() && outputStream.size() > 0) {
-                        WavUtils.saveWav(outputFile, outputStream.toByteArray(), SupertonicTTS.getAudioSampleRate())
+                    outputStream.close()
+                    if (isActive && !SupertonicTTS.isCancelled() && written > 0) {
+                        WavUtils.writeHeader(outputFile, written, SupertonicTTS.getAudioSampleRate())
                         exportSuccess = true
                     }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     Log.e(TAG, "Export failed", e)
                 } finally {
+                    if (!exportSuccess) try { outputFile.delete() } catch (_: Exception) {}
                     withContext(Dispatchers.Main) {
                         isSynthesizing = false
                         stopForeground(STOP_FOREGROUND_REMOVE)

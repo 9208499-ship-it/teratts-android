@@ -6,6 +6,18 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object WavUtils {
+    /** The 44-byte header of a file whose PCM ([dataSize] bytes) was written after a blank one. */
+    fun writeHeader(file: File, dataSize: Long, sampleRate: Int = 44100, channels: Int = 1, bitsPerSample: Int = 16) {
+        val size = dataSize.coerceAtMost(0xFFFFFFFFL - 36)
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+        header.put("RIFF".toByteArray()).putInt((36 + size).toInt()).put("WAVE".toByteArray())
+        header.put("fmt ".toByteArray()).putInt(16).putShort(1.toShort()).putShort(channels.toShort())
+            .putInt(sampleRate).putInt(sampleRate * channels * bitsPerSample / 8)
+            .putShort((channels * bitsPerSample / 8).toShort()).putShort(bitsPerSample.toShort())
+        header.put("data".toByteArray()).putInt(size.toInt())
+        java.io.RandomAccessFile(file, "rw").use { it.seek(0); it.write(header.array()) }
+    }
+
     fun saveWav(file: File, pcmData: ByteArray, sampleRate: Int = 44100, channels: Int = 1, bitsPerSample: Int = 16) {
         val dataSize = pcmData.size
         val byteRate = sampleRate * channels * bitsPerSample / 8

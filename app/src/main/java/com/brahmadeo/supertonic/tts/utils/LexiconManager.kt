@@ -78,14 +78,14 @@ object LexiconManager {
             e.printStackTrace()
         }
         cachedRules = items
-        compiledRules = items.map { compileRule(it) }
+        compiledRules = phrasesFirst(items).map { compileRule(it) }
         isLoaded = true
         return items
     }
 
     fun save(context: Context, items: List<LexiconItem>) {
         cachedRules = items.toList() // Update cache immediately
-        compiledRules = cachedRules.map { compileRule(it) }
+        compiledRules = phrasesFirst(cachedRules).map { compileRule(it) }
         isLoaded = true
         
         try {
@@ -139,6 +139,13 @@ object LexiconManager {
      * replacement itself). So: the flag only where it is accepted (the desktop JVM, for
      * tests), and whole words found by explicit letter boundaries instead of \b.
      */
+    /**
+     * Phrases ("у ворот") before single words: a word rule ("ворота" → "вор+ота") applied first
+     * would change the text, and the phrase would no longer be found in it.
+     */
+    private fun phrasesFirst(items: List<LexiconItem>): List<LexiconItem> =
+        items.sortedBy { if (!it.isRegex && it.term.trim().contains(' ')) 0 else 1 }
+
     private fun compileRule(item: LexiconItem): Pair<java.util.regex.Pattern, String>? {
         if (item.term.isBlank()) return null
         var flags = 0
@@ -146,7 +153,8 @@ object LexiconManager {
             flags = flags or Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
         }
         val regex = if (item.isRegex) item.term
-                    else "(?<![\\p{L}\\p{N}_])" + Pattern.quote(item.term) + "(?![\\p{L}\\p{N}_])"
+                    // a phrase matches with any spaces between its words (a line break, a non-breaking space)
+                    else "(?<![\\p{L}\\p{N}_])" + item.term.trim().split(Regex("\\s+")).joinToString("[\\s\\u00A0]+") { Pattern.quote(it) } + "(?![\\p{L}\\p{N}_])"
         val replacement = Matcher.quoteReplacement(item.replacement)
         for (extra in intArrayOf(Pattern.UNICODE_CHARACTER_CLASS, 0)) {
             try {
@@ -165,17 +173,23 @@ object LexiconManager {
     fun stressOf(context: Context, word: String): Int {
         val item = load(context).firstOrNull { !it.isRegex && it.term.equals(word, ignoreCase = true) } ?: return -1
         val r = item.replacement
+        // "все" → "вс+ё": the same word, only with «ё»
+        fun same(a: String) = a.replace('ё', 'е').replace('Ё', 'Е').equals(word.replace('ё', 'е').replace('Ё', 'Е'), ignoreCase = true)
         val plus = r.indexOf('+')
-        if (plus >= 0 && r.replace("+", "").equals(word, ignoreCase = true)) return plus
+        if (plus >= 0 && same(r.replace("+", ""))) return plus
         val acute = r.indexOf('\u0301')
-        if (acute > 0 && r.replace("\u0301", "").equals(word, ignoreCase = true)) return acute - 1
+        if (acute > 0 && same(r.replace("\u0301", ""))) return acute - 1
         return -1
     }
 
-    /** The word's stress from the player ("гот+ов"): one rule per word, the old one replaced. */
+    /**
+     * The stress from the player ("гот+ов", or a phrase "у в+орот", or «ё» "вс+ё"):
+     * one rule per word or phrase, the old one replaced.
+     */
     fun putStress(context: Context, word: String, stressed: String) {
-        val items = load(context).filterNot { !it.isRegex && it.term.equals(word, ignoreCase = true) }.toMutableList()
-        items.add(LexiconItem(term = word.lowercase(), replacement = stressed, ignoreCase = true, isRegex = false))
+        val term = word.trim().replace(Regex("\\s+"), " ")
+        val items = load(context).filterNot { !it.isRegex && it.term.trim().replace(Regex("\\s+"), " ").equals(term, ignoreCase = true) }.toMutableList()
+        items.add(LexiconItem(term = term.lowercase(), replacement = stressed, ignoreCase = true, isRegex = false))
         save(context, items)
     }
 

@@ -188,7 +188,7 @@ fun PlaybackScreen(
     sleepLeft: Int? = null,
     onSleepTimer: (Int) -> Unit = {},
     // a double tap on a word of the book page: its stress, for the user's dictionary
-    onWordDoubleTap: (String) -> Unit = {},
+    onWordDoubleTap: (String, String?, String?) -> Unit = { _, _, _ -> },
     // search the whole book (null — not a book)
     onSearch: (() -> Unit)? = null
 ) {
@@ -538,6 +538,23 @@ internal fun wordAt(s: String, i: Int): String? {
     return s.substring(st, en).filter { it.isLetter() || it == '-' }.takeIf { w -> w.any { it.isLetter() } }
 }
 
+/** The word at [i] and the words right before and after it (only across spaces, not punctuation). */
+internal fun wordsAround(s: String, i: Int): Triple<String?, String, String?>? {
+    val w = wordAt(s, i) ?: return null
+    fun isW(c: Char) = c.isLetter() || c == '\u0301' || c == '\u00AD' || c == '+' || c == '-'
+    var a = i.coerceIn(0, s.length - 1)
+    if (!isW(s[a]) && a > 0) a--
+    var st = a; while (st > 0 && isW(s[st - 1])) st--
+    var en = a + 1; while (en < s.length && isW(s[en])) en++
+    var j = st - 1
+    while (j >= 0 && (s[j] == ' ' || s[j] == '\u00A0')) j--
+    val before = if (j in 0 until st - 1 && isW(s[j])) wordAt(s, j) else null
+    var k = en
+    while (k < s.length && (s[k] == ' ' || s[k] == '\u00A0')) k++
+    val after = if (k > en && k < s.length && isW(s[k])) wordAt(s, k) else null
+    return Triple(before, w, after)
+}
+
 /** One paragraph of the book page; the phrase being read is shaded, the sentence heard — darker. */
 @Composable
 private fun BookParagraph(
@@ -549,7 +566,7 @@ private fun BookParagraph(
     onLayout: (TextLayoutResult) -> Unit,
     onTap: (Int) -> Unit,
     onLongPress: (Int) -> Unit,
-    onWord: (String) -> Unit = {}
+    onWord: (String, String?, String?) -> Unit = { _, _, _ -> }
 ) {
     val pr = book.paragraphs[p]
     val shade = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -595,7 +612,7 @@ private fun BookParagraph(
                     onDoubleTap = { pos ->
                         layout?.let { l ->
                             val para = book.text.substring(pr.first, pr.last + 1)
-                            wordAt(para, l.getOffsetForPosition(pos))?.let { w -> word(w) }
+                            wordsAround(para, l.getOffsetForPosition(pos))?.let { (b, w, a) -> word(w, b, a) }
                         }
                     }
                 )
