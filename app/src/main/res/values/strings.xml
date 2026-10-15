@@ -327,4 +327,9 @@
     <string name="export_book_progress">Chapter %1$d of %2$d</string>
     <string name="export_book_default_name">Book</string>
     <string name="export_need_permission">To save audio files, allow the app access to storage</string>
+    <string name="crash_title">TeraTTS closed with an error</string>
+    <string name="crash_msg">Last time the app or the voice engine (also when another reader used it) ended with an error. Send the report to the developer? It holds only the error, the phone model and the Android version.</string>
+    <string name="crash_send">Send report</string>
+    <string name="english_ru_title">English words in Russian letters</string>
+    <string name="english_ru_desc">In Russian text an English word is read the Russian way («Windows» → «Уиндоуз»), so the phrase does not switch language halfway. A sentence wholly in English is still read in English. Abbreviations (NASA, CDs) are spelled.</string>
 </resources>

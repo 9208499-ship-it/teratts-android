@@ -16,7 +16,7 @@ object RolePrefs {
 
     /** Only this many main characters (most lines in the book) get their own voices. */
     fun mainCount(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAIN_COUNT, 6)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAIN_COUNT, 10)
 
     fun setMainCount(context: Context, n: Int) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_MAIN_COUNT, n.coerceIn(1, 16)).apply()

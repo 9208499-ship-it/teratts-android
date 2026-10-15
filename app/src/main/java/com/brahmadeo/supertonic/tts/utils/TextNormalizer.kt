@@ -347,6 +347,9 @@ class TextNormalizer {
         var processedText = if (lowerLang != "ko") {
             var t = LexiconManager.apply(inputText)
             if (lowerLang.startsWith("ru")) {
+                // English words inside Russian text → Russian letters (after the user's rules,
+                // so a rule for "Windows" still wins)
+                t = EnglishTranscriber.apply(t)
                 // Russian words in CAPITALS are read as words (after the user's rules,
                 // so a rule for "МВД" still wins)
                 t = RussianCaps.fix(t) { AccentDictionaryManager.has(it) }

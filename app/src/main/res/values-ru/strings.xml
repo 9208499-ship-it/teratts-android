@@ -327,4 +327,9 @@
     <string name="export_book_progress">Глава %1$d из %2$d</string>
     <string name="export_book_default_name">Книга</string>
     <string name="export_need_permission">Чтобы сохранять аудиофайлы, разрешите программе доступ к памяти</string>
+    <string name="crash_title">TeraTTS завершился с ошибкой</string>
+    <string name="crash_msg">В прошлый раз программа или голосовой движок (в том числе в другой читалке) завершились с ошибкой. Отправить отчёт разработчику? В нём только сама ошибка, модель телефона и версия Android.</string>
+    <string name="crash_send">Отправить отчёт</string>
+    <string name="english_ru_title">Английские слова — русскими буквами</string>
+    <string name="english_ru_desc">В русском тексте английское слово читается по-русски («Windows» → «Уиндоуз»), и фраза не перескакивает на другой язык посередине. Предложение целиком на английском по-прежнему читается по-английски. Сокращения (NASA, CDs) читаются по буквам.</string>
 </resources>

@@ -44,7 +44,9 @@ object CharacterVoices {
             // an automatic voice of the wrong gender (the gender became known later) is reassigned
             val wrongGender = (role == DialogueAnalyzer2.Role.FEMALE && isMale(stored)) ||
                 (role == DialogueAnalyzer2.Role.MALE && isFemale(stored))
-            if (stored in available && (!wrongGender || isManual(context, name, scope))) return stored
+            // an automatic voice that turned out to be the narrator's (the main voice) is reassigned too
+            val manual = isManual(context, name, scope)
+            if (stored in available && ((!wrongGender && stored != narrator) || manual)) return stored
             p.edit().remove(name).apply()
         }
         val pool = available.filter {
@@ -61,6 +63,15 @@ object CharacterVoices {
         p.edit().putString(name, pick).apply()
         return pick
     }
+
+    fun isFemaleVoice(v: String) = isFemale(v)
+
+    /** Another voice of the gender (Russian first), not [avoid]; null if there is none. */
+    fun alternative(context: Context, avoid: String, female: Boolean): String? =
+        RolePrefs.availableVoices(context)
+            .filter { (if (female) isFemale(it) else isMale(it)) && !it.contains("whisper") && it != avoid }
+            .sortedWith(compareBy({ rank(it) }, { it }))
+            .firstOrNull()
 
     /** The voice set for [name] (by hand or assigned earlier), or null for "automatic". */
     fun explicit(context: Context, name: String, scope: String = GLOBAL): String? =

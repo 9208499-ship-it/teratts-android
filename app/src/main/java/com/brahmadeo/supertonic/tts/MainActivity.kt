@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         PDFBoxResourceLoader.init(this)
 
         loadPreferences()
@@ -419,7 +420,21 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkResumeState()
         startKeepAlive()
-        offerAccentDictionary()
+        if (!offerCrashReport()) offerAccentDictionary()
+    }
+
+    /** After a crash (here or while another reader used the engine): offer to send the report. */
+    private fun offerCrashReport(): Boolean {
+        val report = com.brahmadeo.supertonic.tts.utils.CrashReport.pending(this) ?: return false
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.crash_title)
+            .setMessage(R.string.crash_msg)
+            .setPositiveButton(R.string.crash_send) { _, _ ->
+                com.brahmadeo.supertonic.tts.utils.CrashReport.share(this, report)
+            }
+            .setNegativeButton(R.string.dict_offer_later, null)
+            .show()
+        return true
     }
 
     /**

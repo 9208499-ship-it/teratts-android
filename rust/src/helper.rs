@@ -728,7 +728,8 @@ impl TextToSpeech {
         }
 
         // 4. Sampler: N(0,1) noise → latent in one call
-        let frames = tera::latent_len(duration);
+        // a little more room than predicted: the end of the phrase is not squeezed or cut
+        let frames = tera::latent_len(duration + tera::TAIL_ROOM_S);
         let normal = Normal::new(0.0f32, 1.0f32).unwrap();
         let mut rng = rand::thread_rng();
         let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
@@ -750,15 +751,19 @@ impl TextToSpeech {
             lat_data.to_vec(),
         )?;
 
-        // 5. Vocoder, trimmed to the predicted duration
+        // 5. Vocoder, cut where the speech really ends (not before the predicted duration)
         let latent_value = Value::from_array(latent)?;
         let vocoder_outputs = self.vocoder_ort.run(ort::inputs!{
             "latent" => &latent_value
         })?;
         let wav_all = vocoder_outputs["output"].try_extract_tensor::<f32>()?.1;
-        let keep = ((duration * tera::SAMPLE_RATE as f32).round() as usize).min(wav_all.len());
+        let predicted = (duration * tera::SAMPLE_RATE as f32).round() as usize;
+        let keep = tera::speech_end(wav_all, predicted);
+        let mut wav = wav_all[..keep].to_vec();
+        tera::fade_out(&mut wav);
+        let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
 
-        Ok((wav_all[..keep].to_vec(), vec![duration]))
+        Ok((wav, vec![kept]))
     }
 
     pub fn call<F>(
@@ -855,9 +860,8 @@ impl TextToSpeech {
                 tera::note_first_chunk_latency(started.elapsed().as_secs_f32());
             }
 
-            // Truncate audio based on predicted duration to remove trailing silence
-            let sample_count = ((duration[0] * sr) as usize).min(wav.len());
-            wav.truncate(sample_count);
+            // _infer has already cut the audio where the speech ends
+            let _ = duration;
             if (stretch_rate - 1.0).abs() > 0.01 {
                 wav = crate::stretch::time_stretch(&wav, stretch_rate, self.sample_rate as u32);
             }

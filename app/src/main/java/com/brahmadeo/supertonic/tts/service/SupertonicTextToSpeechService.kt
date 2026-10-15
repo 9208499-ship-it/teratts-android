@@ -64,10 +64,12 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
 
     override fun onCreate() {
         super.onCreate()
+        com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         Log.i("SupertonicTTS", "Service created")
         com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)
         com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.load(this)
+        com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.load(this)
         com.brahmadeo.supertonic.tts.utils.PlaybackPrefs.load(this)
 
         initJob = serviceScope.launch(Dispatchers.IO) {

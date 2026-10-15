@@ -279,11 +279,16 @@ private fun sampleLines(text: String, r: DialogueAnalyzer2.Result): Map<String, 
 private fun preview(context: android.content.Context, c: DialogueAnalyzer2.Character, chosen: String?, line: String, speed: Float) {
     val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
     val main = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
+    val narrator = RolePrefs.narratorVoice(context).ifEmpty { main }
+    // as reading does: nobody but the narrator and the hero speaks in the narrator's voice
+    fun notNarrator(v: String, female: Boolean) =
+        if (v != narrator) v else CharacterVoices.alternative(context, narrator, female) ?: v
     val file = chosen ?: when {
-        c.name == DialogueAnalyzer2.HERO -> RolePrefs.narratorVoice(context).ifEmpty { main }
-        c.role == DialogueAnalyzer2.Role.FEMALE -> RolePrefs.femaleVoice(context)
-        c.role == DialogueAnalyzer2.Role.MALE -> RolePrefs.maleVoice(context)
+        c.name == DialogueAnalyzer2.HERO -> narrator
+        c.role == DialogueAnalyzer2.Role.FEMALE -> notNarrator(RolePrefs.femaleVoice(context), true)
+        c.role == DialogueAnalyzer2.Role.MALE -> notNarrator(RolePrefs.maleVoice(context), false)
         else -> RolePrefs.unknownVoice(context).ifEmpty { RolePrefs.maleVoice(context) }
+            .let { notNarrator(it, CharacterVoices.isFemaleVoice(it)) }
     }
     val path = RolePrefs.pathOf(context, file) ?: RolePrefs.pathOf(context, main) ?: return
     val base = prefs.getFloat("last_speed", 1f)

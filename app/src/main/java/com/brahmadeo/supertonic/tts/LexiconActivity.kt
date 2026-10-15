@@ -342,6 +342,7 @@ class LexiconActivity : ComponentActivity() {
         syncLoadState.value = AccentDictionaryManager.isSyncLoadEnabled()
         lexiconEnabledState.value = LexiconManager.isEnabled()
         com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.load(this)
+        com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.load(this)
         tightQuestionState.value = com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.tightQuestionExclamation
         doubleMarksState.value = com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.strengthenIntonation
         tightEllipsisState.value = com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.tightEllipsis

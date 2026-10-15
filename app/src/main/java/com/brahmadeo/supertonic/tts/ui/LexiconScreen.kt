@@ -290,6 +290,7 @@ fun LexiconScreen(
                 )
             }
 
+            item { EnglishWordsRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
             item { RolesSection() }
@@ -563,6 +564,21 @@ private fun FastCoresRow() {
                       else stringResource(AppR.string.fast_cores_desc, fast.size, cores.total()),
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
+    )
+}
+
+@Composable
+private fun EnglishWordsRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var on by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.let { it.load(context); it.enabled }) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.english_ru_title),
+        description = stringResource(AppR.string.english_ru_desc),
+        checked = on,
+        onToggle = { v ->
+            on = v
+            com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.setEnabled(context, v)
+        }
     )
 }
 

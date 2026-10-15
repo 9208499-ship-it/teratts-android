@@ -801,6 +801,46 @@ pub fn latent_len(duration_s: f32) -> usize {
     ((duration_s * SAMPLE_RATE as f32 / SAMPLES_PER_FRAME as f32).ceil() as usize).max(1)
 }
 
+/// Extra room given to the model after the predicted duration, seconds. The audio
+/// used to be cut exactly at the predicted duration, and when the model spoke a
+/// little longer than predicted (often at the end of a sentence) the last sound
+/// was cut off: "конец фразы перед точкой обрезается". Now the model gets this
+/// much more, and [`speech_end`] decides where the speech really ends.
+pub const TAIL_ROOM_S: f32 = 0.10;
+
+/// Where to cut the vocoder output `wav`: after the last audible 10 ms window plus
+/// a short tail, never before the predicted duration (`predicted` samples) — so
+/// nothing is ever cut that was kept before, only a cut-off ending is kept now.
+/// The last few ms are faded out by [`fade_out`] so a cut inside sound does not click.
+pub fn speech_end(wav: &[f32], predicted: usize) -> usize {
+    const WIN: usize = 441; // 10 ms at 44.1 kHz
+    const TAIL: usize = 2_205; // 50 ms after the last audible window
+    let n = wav.len();
+    if n == 0 {
+        return 0;
+    }
+    let rms = |w: &[f32]| (w.iter().map(|x| x * x).sum::<f32>() / w.len().max(1) as f32).sqrt();
+    let windows: Vec<f32> = wav.chunks(WIN).map(rms).collect();
+    let peak = windows.iter().cloned().fold(0.0f32, f32::max);
+    // ~30 dB under the loudest part: quiet final consonants (с, ш, ф) still count
+    let thr = (peak * 0.03).max(0.002);
+    let last = windows.iter().rposition(|&r| r > thr);
+    let end = match last {
+        Some(k) => ((k + 1) * WIN + TAIL).min(n),
+        None => 0,
+    };
+    end.max(predicted.min(n))
+}
+
+/// Linear fade over the last 5 ms.
+pub fn fade_out(wav: &mut [f32]) {
+    let n = wav.len().min(220);
+    let len = wav.len();
+    for i in 0..n {
+        wav[len - n + i] *= (n - i) as f32 / n as f32;
+    }
+}
+
 pub fn token_ids(text: &str, table: &[i64]) -> Result<Vec<i64>> {
     text.chars()
         .map(|c| {
@@ -872,6 +912,24 @@ pub fn read_npy_f32(bytes: &[u8]) -> Result<(Vec<usize>, Vec<f32>)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn speech_end_keeps_a_tail_past_the_prediction() {
+        // 1 s of "speech" then 0.2 s of silence; predicted 0.9 s: the end of the speech is kept
+        let mut w: Vec<f32> = (0..44_100).map(|i| 0.3 * ((i as f32) * 0.05).sin()).collect();
+        w.extend(std::iter::repeat(0.0).take(8_820));
+        let end = super::speech_end(&w, 39_690);
+        assert!(end >= 44_100 && end <= 44_100 + 2_205 + 441, "end {end}");
+        // predicted later than the speech: nothing that was kept before is dropped
+        assert_eq!(super::speech_end(&w, 50_000), 50_000);
+        // silence only: the prediction
+        assert_eq!(super::speech_end(&vec![0.0; 1000], 500), 500);
+        // a quiet final consonant (-25 dB) still counts as speech
+        let mut q = w[..44_100].to_vec();
+        q.extend((0..4_410).map(|i| 0.017 * ((i as f32) * 1.3).sin()));
+        q.extend(std::iter::repeat(0.0).take(4_410));
+        assert!(super::speech_end(&q, 39_690) >= 48_510);
+    }
+
     use super::*;
 
     #[test]

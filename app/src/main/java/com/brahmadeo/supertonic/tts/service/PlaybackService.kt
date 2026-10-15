@@ -324,10 +324,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     override fun onCreate() {
         super.onCreate()
+        com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         createNotificationChannel()
         com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)
         com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.load(this)
+        com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.load(this)
         com.brahmadeo.supertonic.tts.utils.PlaybackPrefs.load(this)
         QueueManager.initialize(this)
 
@@ -701,9 +703,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val roleSpans = roleResult?.spans ?: emptyList()
                 // where each spoken chunk lies in the text (robust to the splitter's spacing and gluing)
                 val roleRanges = if (roleResult != null) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
-                val maleStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
+                val maleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
                     com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)) ?: stylePath
-                val femaleStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
+                val femaleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
                     com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService)) ?: stylePath
                 // narrator: its own voice if chosen, otherwise the main voice
                 val narratorStyle = if (rolesOn) {
@@ -712,9 +714,21 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: stylePath
                 } else stylePath
                 // a line whose speaker is unknown is still a line: never the narrator's voice
+                // The narrator's voice (by default the main voice — often the same as the male
+                // lines' one, ru_m5) belongs to the narrator and the hero. Other characters
+                // used to get it too: a man without his own voice ("Ньютон", the 7th by lines in
+                // «Неучтённый») spoke exactly like the hero. Now they get another voice of their gender.
+                val narratorFile = java.io.File(narratorStyle).name
+                fun notNarrator(style: String, female: Boolean): String =
+                    if (!rolesOn || java.io.File(style).name != narratorFile) style
+                    else com.brahmadeo.supertonic.tts.utils.CharacterVoices.alternative(this@PlaybackService, narratorFile, female)
+                        ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: style
+                val maleStyle = notNarrator(maleStyle0, false)
+                val femaleStyle = notNarrator(femaleStyle0, true)
                 val unknownStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService)
                     .takeIf { it.isNotEmpty() }
-                    ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: maleStyle
+                    ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
+                    ?.let { notNarrator(it, com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(java.io.File(it).name)) } ?: maleStyle
 
                 // Every character: their own voice (remembered across chapters) and speed
                 val charVoice = HashMap<String, String>()
@@ -722,7 +736,6 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 if (roleResult != null) {
                     val perCharacter = com.brahmadeo.supertonic.tts.utils.RolePrefs.charactersEnabled(this@PlaybackService)
                     val available = com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(this@PlaybackService)
-                    val narratorFile = com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService)
                     // own voices only for the main characters of the book; the rest — by gender
                     val ranking = roster?.ranking ?: roleResult.characters.map { it.name }
                     val mainSet = ranking.filter { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO }
