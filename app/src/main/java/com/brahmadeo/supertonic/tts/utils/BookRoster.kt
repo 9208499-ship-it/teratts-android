@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import kotlinx.coroutines.launch
 
 /**
  * Characters of the WHOLE book, worked out once in the background and cached:
@@ -19,6 +20,26 @@ object BookRoster {
 
     private val building = java.util.Collections.synchronizedSet(HashSet<String>())
 
+    /** Bumped when the analysis changes: an older roster is built again (1.6.7: one name per person). */
+    private const val VERSION = 2
+
+    /**
+     * The roster of the book, built now if there is none (or waited for if it is being built):
+     * the first chapter is read with the whole book's characters too. Null after [timeoutMs].
+     */
+    suspend fun await(context: Context, scope: String, timeoutMs: Long): Roster? {
+        cached(context, scope)?.let { return it }
+        val started = System.currentTimeMillis()
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { build(context, scope) }
+        while (System.currentTimeMillis() - started < timeoutMs) {
+            cached(context, scope)?.let { return it }
+            if (job.isCompleted && scope !in building) return cached(context, scope)
+            kotlinx.coroutines.delay(200)
+        }
+        BookSession.log(context, "roster: not ready after ${timeoutMs} ms, reading the chapter on its own")
+        return null
+    }
+
     /** Forget the book's roster: it is built again the next time the book is read. */
     fun clear(context: Context, scope: String) {
         if (scope.isNotEmpty()) file(context, scope).delete()
@@ -31,6 +52,7 @@ object BookRoster {
         if (!f.exists()) return null
         return try {
             val o = JSONObject(f.readText())
+            if (o.optInt("v", 1) < VERSION) return null
             val g = o.getJSONObject("genders")
             val genders = HashMap<String, DialogueAnalyzer2.Role>()
             for (k in g.keys()) genders[k] = if (g.getString(k) == "F") DialogueAnalyzer2.Role.FEMALE else DialogueAnalyzer2.Role.MALE
@@ -62,7 +84,7 @@ object BookRoster {
             result.characters.forEach { ranking.put(it.name) }
             val f = file(context, scope)
             f.parentFile?.mkdirs()
-            f.writeText(JSONObject().put("genders", genders).put("ranking", ranking).toString())
+            f.writeText(JSONObject().put("v", VERSION).put("genders", genders).put("ranking", ranking).toString())
             BookSession.log(context, "roster: ${result.characters.size} characters: " +
                 result.characters.take(8).joinToString { "${it.name}(${it.lines})" })
         } catch (e: Exception) {

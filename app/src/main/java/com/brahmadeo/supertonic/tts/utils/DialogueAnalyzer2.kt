@@ -255,8 +255,10 @@ object DialogueAnalyzer2 {
         for ((n, c) in nameVotes) {
             if (c[0] > c[1] * 2) nameGender[n] = G.M else if (c[1] > c[0] * 2) nameGender[n] = G.F
         }
+        // the whole book's genders win over this chapter's: one chapter may have a single
+        // "сказала" by mistake, the book has all of them (a man must not turn into a woman for a chapter)
         prior?.genders?.forEach { (n, r) ->
-            if (n !in nameGender) when (r) { Role.MALE -> nameGender[n] = G.M; Role.FEMALE -> nameGender[n] = G.F; else -> {} }
+            when (r) { Role.MALE -> nameGender[n] = G.M; Role.FEMALE -> nameGender[n] = G.F; else -> {} }
         }
         // every case form of every known name → the name ("Петра", "Петру" → "Пётр")
         val nameOf = HashMap<String, String>()
@@ -608,6 +610,64 @@ object DialogueAnalyzer2 {
                 val a = mannerCount.remove(from)
                 if (a != null) { val b = mannerCount.getOrPut(to) { IntArray(a.size) }; for (k in a.indices) b[k] += a[k] }
                 if (nameGender[to] == null) speakerNouns[from]?.let { nameGender[to] = it }
+            }
+        }
+
+        // One person, one name: the case forms the attribution picked up ("помоги Нике" →
+        // "Нике", "голос Леиты", "словах Магика") join the name they are forms of — as separate
+        // "characters" they got a voice of the wrong gender. Capitalised ordinary words that
+        // are never capitalised inside a sentence ("Пока", "Нужно", "Задав", "Великими") are no
+        // one at all: their lines become lines of an unknown speaker.
+        run {
+            val speakers = lineCount.keys.filter { it != HERO && it != SYSTEM && it.first().isUpperCase() }
+            if (speakers.isEmpty()) return@run
+            val wanted = speakers.map { it.lowercase().replace('ё', 'е') }.toHashSet()
+            val lower = HashMap<String, Int>()
+            val midCaps = HashMap<String, Int>()
+            for (m in Regex("""[А-ЯЁа-яё][а-яё]+""").findAll(text)) {
+                val key = m.value.lowercase().replace('ё', 'е')
+                if (key !in wanted) continue
+                if (m.value[0].isLowerCase()) { lower[key] = (lower[key] ?: 0) + 1; continue }
+                var k = m.range.first - 1
+                while (k >= 0 && text[k] == ' ') k--
+                val prev = if (k >= 0) text[k] else '\n'
+                if (prev.isLetterOrDigit() || prev in ",;:)") midCaps[key] = (midCaps[key] ?: 0) + 1
+            }
+            val formOf = HashMap<String, String>()
+            for (n in speakers.sortedByDescending { lineCount[it] ?: 0 }) {
+                val own = n.lowercase().replace('ё', 'е')
+                for (f in nameForms(n, genderOf(n) == G.F)) if (f != own) formOf.putIfAbsent(f, n)
+            }
+            val rename = HashMap<String, String?>()
+            for (n in speakers) {
+                val key = n.lowercase().replace('ё', 'е')
+                val base = formOf[key]
+                if (base != null && base != n && (lineCount[base] ?: 0) >= (lineCount[n] ?: 0) && base !in rename) {
+                    rename[n] = base; continue
+                }
+                if (n.first().isDigit() || NameGender.known(n)) continue
+                // an adjective in an oblique case is never someone's name ("Великими", "Перспективную")
+                if (Regex("(ими|ыми|ую|юю|ого|ому|ему)$").containsMatchIn(key)) { rename[n] = null; continue }
+                if ((midCaps[key] ?: 0) > 0) continue
+                val adjective = key.endsWith("ый")
+                val gerund = Regex("(ав|яв|ив|ыв|вши)$").containsMatchIn(key)
+                if ((lower[key] ?: 0) > 0 || adjective || gerund) rename[n] = null
+            }
+            if (rename.isEmpty()) return@run
+            for (i in out.indices) {
+                val sp = out[i].speaker ?: continue
+                if (sp !in rename) continue
+                val to = rename[sp]
+                out[i] = if (to == null) out[i].copy(speaker = null, role = Role.SPEECH)
+                    else out[i].copy(speaker = to, role = when (genderOf(to)) { G.M -> Role.MALE; G.F -> Role.FEMALE; null -> out[i].role })
+            }
+            for ((from, to) in rename) {
+                val n = lineCount.remove(from) ?: 0
+                val a = mannerCount.remove(from)
+                if (to != null) {
+                    lineCount[to] = (lineCount[to] ?: 0) + n
+                    if (a != null) { val b = mannerCount.getOrPut(to) { IntArray(a.size) }; for (k in a.indices) b[k] += a[k] }
+                }
             }
         }
 

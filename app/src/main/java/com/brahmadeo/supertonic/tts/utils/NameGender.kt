@@ -40,6 +40,13 @@ object NameGender {
     /** Feminine names ending in a soft sign. */
     private val femaleSoft = set("любовь адель нинель изабель ассоль рахиль юдифь")
 
+    /** A first name from the lists (not guessed by its ending). */
+    fun known(name: String): Boolean {
+        val w = name.lowercase().replace('ё', 'е')
+        return w in male || w.replace('е', 'ё') in male || w in female || w.replace('е', 'ё') in female ||
+            w in unisex || w in femaleSoft
+    }
+
     /** M / F for a person's name, or null if it cannot be told. */
     fun guess(name: String): G? {
         val w = name.lowercase().replace('ё', 'е')

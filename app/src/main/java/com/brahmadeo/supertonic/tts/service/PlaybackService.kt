@@ -685,10 +685,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // character settings are kept per book (the book of this text, "" if none)
                 val charScope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text)
                 // the whole book's characters (built once in the background) and the user's corrections
-                val roster = if (rolesOn) com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this@PlaybackService, charScope) else null
-                if (rolesOn && charScope.isNotEmpty() && roster == null) {
-                    serviceScope.launch(Dispatchers.IO) { com.brahmadeo.supertonic.tts.utils.BookRoster.build(this@PlaybackService, charScope) }
-                }
+                // The first chapter used to be read before the book's roster was ready: its characters,
+                // genders and voices came from that chapter alone, and changed from the next one on.
+                // Now the roster is waited for (once per book, a few seconds; at most half a minute).
+                val roster = if (rolesOn && charScope.isNotEmpty())
+                    com.brahmadeo.supertonic.tts.utils.BookRoster.await(this@PlaybackService, charScope, 30_000L) else null
                 val rolePrior = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(
                     roster?.genders ?: emptyMap(),
                     if (rolesOn) com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(this@PlaybackService, charScope) else emptyMap())
@@ -750,10 +751,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 ?.let { charVoice[c.name] = it }
                             continue
                         }
-                        if (c.name !in mainSet && !com.brahmadeo.supertonic.tts.utils.CharacterVoices.isManual(this@PlaybackService, c.name, charScope)) continue
-                        val default = if (c.role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE)
+                        // a voice once given stays to the end of the book, even if the character is not
+                        // among the main ones by the whole book's count (it used to fall back to the
+                        // common male/female voice from the next chapter on)
+                        if (c.name !in mainSet && !com.brahmadeo.supertonic.tts.utils.CharacterVoices.isManual(this@PlaybackService, c.name, charScope) &&
+                            com.brahmadeo.supertonic.tts.utils.CharacterVoices.explicit(this@PlaybackService, c.name, charScope) == null) continue
+                        // the gender of the whole book, not of this chapter
+                        val bookRole = roster?.genders?.get(c.name) ?: c.role
+                        val default = if (bookRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE)
                             com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService) else com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)
-                        com.brahmadeo.supertonic.tts.utils.CharacterVoices.voiceFor(this@PlaybackService, c.name, c.role, available, default, narratorFile, charScope)
+                        com.brahmadeo.supertonic.tts.utils.CharacterVoices.voiceFor(this@PlaybackService, c.name, bookRole, available, default, narratorFile, charScope)
                             ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
                             ?.let { charVoice[c.name] = it }
                     }
