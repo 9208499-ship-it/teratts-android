@@ -262,6 +262,11 @@ class PlaybackActivity : ComponentActivity() {
                     }
                     // opened at app launch: show the book at its place and wait for "Play"
                     restoreState()
+                } else if (recreated) {
+                    // the window was made anew (rotation, theme, language): what the service is doing
+                    // goes on — before, the text started again and a saving to a file was stopped
+                    val serviceIndex = playbackService?.getCurrentIndex() ?: -1
+                    if (serviceIndex != -1) currentIndexState.intValue = serviceIndex
                 } else {
                     startPlaybackFromIntent()
                 }
@@ -276,9 +281,13 @@ class PlaybackActivity : ComponentActivity() {
         }
     }
 
+    /** Made anew by the system (not opened by the user): don't start the text again. */
+    private var recreated = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        recreated = savedInstanceState != null
 
         currentText = intent.getStringExtra(EXTRA_TEXT) ?: ""
         currentVoicePath = intent.getStringExtra(EXTRA_VOICE_PATH) ?: ""

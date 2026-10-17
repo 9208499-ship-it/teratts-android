@@ -76,12 +76,15 @@ object CrashReport {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun exitInfo(context: Context): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val seen = prefs.getLong(KEY_SEEN, -1L)
+        // the first run with this check: crashes since this version was installed count (a crash in
+        // a reader before the app was ever opened after the update used to be taken as "old news")
+        val seen = prefs.getLong(KEY_SEEN, -1L).takeIf { it >= 0 } ?: try {
+            context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+        } catch (_: Exception) { 0L }
         val am = context.getSystemService(ActivityManager::class.java) ?: return null
         val all = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
         val newest = all.maxOfOrNull { it.timestamp } ?: return null
-        prefs.edit().putLong(KEY_SEEN, newest).apply()
-        if (seen < 0) return null // the first run with this check: old exits are not news
+        prefs.edit().putLong(KEY_SEEN, maxOf(newest, seen)).apply()
         val bad = all.filter {
             it.timestamp > seen && it.reason in setOf(
                 ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE,
@@ -93,13 +96,19 @@ object CrashReport {
                     it.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE)
         }.sortedByDescending { it.timestamp }
         if (bad.isEmpty()) return null
-        return bad.take(3).joinToString("\n\n") { e ->
+        return bad.take(3).joinToString("\n\n") { describe(it) }
+    }
+
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun describe(e: ApplicationExitInfo): String {
+        run {
             val reason = when (e.reason) {
                 ApplicationExitInfo.REASON_CRASH -> "сбой (Java)"
                 ApplicationExitInfo.REASON_CRASH_NATIVE -> "сбой движка (native)"
                 ApplicationExitInfo.REASON_ANR -> "не отвечает (ANR)"
                 ApplicationExitInfo.REASON_LOW_MEMORY -> "закрыт системой: мало памяти"
-                else -> "ошибка запуска"
+                ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> "ошибка запуска"
+                else -> "завершён (причина ${e.reason}, ${e.status})"
             }
             val sb = StringBuilder()
             sb.append("Время: ").append(stamp(e.timestamp)).append(" · ").append(reason)
@@ -127,8 +136,44 @@ object CrashReport {
                     }
                 } catch (_: Exception) { }
             }
-            sb.toString()
+            return sb.toString()
         }
+    }
+
+    /**
+     * Everything for the developer, asked for by hand (Settings → "Отправить журнал"): why the
+     * app's processes ended lately (any reason) and the app's own system log — logcat keeps the
+     * lines of earlier runs too, so a fall inside Moon+ Reader a minute ago is in it even if
+     * nothing "crashed" on our side (an app may read its own log without any permission).
+     */
+    fun shareLog(context: Context) {
+        val sb = StringBuilder(header(context)).append("\n\n")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val am = context.getSystemService(ActivityManager::class.java)
+                am?.getHistoricalProcessExitReasons(context.packageName, 0, 8)?.forEach {
+                    sb.append(describe(it).take(6_000)).append("\n\n")
+                }
+            } catch (e: Exception) { sb.append("exit info: ${e.message}\n") }
+        }
+        val crash = File(context.filesDir, FILE)
+        if (crash.exists()) try { sb.append(crash.readText()).append("\n\n") } catch (_: Exception) { }
+        sb.append("----- logcat -----\n")
+        try {
+            val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "4000"))
+            val log = p.inputStream.bufferedReader().readText()
+            sb.append(if (log.length > 400_000) log.takeLast(400_000) else log)
+        } catch (e: Exception) { sb.append("logcat: ${e.message}") }
+        val dir = File(context.cacheDir, "tts_output").apply { mkdirs() }
+        val f = File(dir, "teratts_log.txt")
+        f.writeText(sb.toString())
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".fileprovider", f)
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "TeraTTS: журнал")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        context.startActivity(Intent.createChooser(send, "TeraTTS: журнал").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     /** Share the report as text (to the forum, a messenger, mail). */

@@ -71,9 +71,25 @@ object EnglishTranscriber {
     private val LATIN = Regex("""(?<![\p{L}\p{N}])[A-Za-z][A-Za-z']*[A-Za-z](?![\p{L}\p{N}])""")
     private val CYR = Regex("[А-Яа-яЁё]")
 
+    // "M&Ms", "M&M's", "AT&T", "R&D" — letters around "&" (also "&amp;" left from a book's markup)
+    private val AMP = Regex("""(?<![\p{L}\p{N}])([A-Za-z]{1,4})\s?&(?:amp;)?\s?([A-Za-z]{1,4}?)('?s)?(?![\p{L}\p{N}])""")
+    private val LETTERS = mapOf('a' to "эй", 'b' to "би", 'c' to "си", 'd' to "ди", 'e' to "и", 'f' to "эф",
+        'g' to "джи", 'h' to "эйч", 'i' to "ай", 'j' to "джей", 'k' to "кей", 'l' to "эл", 'm' to "эм",
+        'n' to "эн", 'o' to "оу", 'p' to "пи", 'q' to "кью", 'r' to "ар", 's' to "эс", 't' to "ти",
+        'u' to "ю", 'v' to "ви", 'w' to "дабл-ю", 'x' to "экс", 'y' to "уай", 'z' to "зи")
+
+    private fun spell(s: String) = s.lowercase().mapNotNull { LETTERS[it] }.joinToString("-")
+
     fun apply(text: String): String {
-        if (!enabled || !CYR.containsMatchIn(text) || !LATIN.containsMatchIn(text)) return text
-        return LATIN.replace(text) { m ->
+        if (!enabled || !CYR.containsMatchIn(text)) return text
+        // the "&" pairs go first: as two words they were read as English and threw the phrase off
+        val t0 = if (text.indexOf('&') < 0) text else AMP.replace(text) { m ->
+            val (a, b, s) = m.destructured
+            val side = { w: String -> if (w.length <= 3 || w.all { it.isUpperCase() }) spell(w) else (transcribe(w.lowercase()) ?: spell(w)) }
+            side(a) + "-энд-" + side(b) + (if (s.isNotEmpty()) "с" else "")
+        }
+        if (!LATIN.containsMatchIn(t0)) return t0
+        return LATIN.replace(t0) { m ->
             val tok = m.value
             val caps = tok.all { it.isUpperCase() || it == '\'' }
             // NASA, CDs, MMs: the engine spells abbreviations

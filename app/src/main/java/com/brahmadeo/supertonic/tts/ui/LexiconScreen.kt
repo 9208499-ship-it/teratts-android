@@ -291,6 +291,7 @@ fun LexiconScreen(
             }
 
             item { EnglishWordsRow() }
+            item { SendLogRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
             item { RolesSection() }
@@ -565,6 +566,34 @@ private fun FastCoresRow() {
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
     )
+}
+
+/** Reading crashes in another reader: the log the developer needs, sent by hand. */
+@Composable
+private fun SendLogRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .clickable {
+                try { com.brahmadeo.supertonic.tts.utils.CrashReport.shareLog(context) }
+                catch (e: Exception) {
+                    android.widget.Toast.makeText(context, e.message ?: "?", android.widget.Toast.LENGTH_LONG).show()
+                }
+            },
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(text = stringResource(AppR.string.send_log_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = stringResource(AppR.string.send_log_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
