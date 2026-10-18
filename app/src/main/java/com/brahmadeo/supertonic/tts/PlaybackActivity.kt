@@ -45,7 +45,7 @@ class PlaybackActivity : ComponentActivity() {
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode != RESULT_OK) return@registerForActivityResult
-        val text = result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT) ?: return@registerForActivityResult
+        val text = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT)) ?: return@registerForActivityResult
         // "continue where I stopped" in the contents: its place; a chapter: its beginning
         openChapter(text, atPlace = result.data?.getBooleanExtra("open_player", false) == true)
     }
@@ -289,7 +289,7 @@ class PlaybackActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         recreated = savedInstanceState != null
 
-        currentText = intent.getStringExtra(EXTRA_TEXT) ?: ""
+        currentText = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, intent.getStringExtra(EXTRA_TEXT)) ?: ""
         currentVoicePath = intent.getStringExtra(EXTRA_VOICE_PATH) ?: ""
         currentSpeed = intent.getFloatExtra(EXTRA_SPEED, 1.0f)
         currentSteps = intent.getIntExtra(EXTRA_STEPS, 5)

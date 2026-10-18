@@ -334,4 +334,5 @@
     <string name="english_ru_desc">In Russian text an English word is read the Russian way («Windows» → «Уиндоуз»), so the phrase does not switch language halfway. A sentence wholly in English is still read in English. Abbreviations (NASA, CDs) are spelled.</string>
     <string name="send_log_title">Send log to the developer</string>
     <string name="send_log_desc">If reading crashes in another app (Moon+ Reader and others): reproduce the crash, then tap here and send the file. It holds only TeraTTS messages, the phone model and the Android version.</string>
+    <string name="outline_reading_now">Reading now</string>
 </resources>

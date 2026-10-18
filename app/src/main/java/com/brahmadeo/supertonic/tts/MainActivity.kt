@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         Log.d("MainActivity", "ebookOutlineLauncher result: ${result.resultCode}")
         if (result.resultCode == RESULT_OK) {
-            val text = result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT)
+            val text = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT))
             Log.d("MainActivity", "Received text length: ${text?.length ?: 0}")
             if (!text.isNullOrEmpty()) {
                 // Reset state before loading new ebook text
@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            val selectedText = result.data?.getStringExtra("selected_text")
+            val selectedText = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, result.data?.getStringExtra("selected_text"))
             if (!selectedText.isNullOrEmpty()) {
                 viewModel.inputText.value = selectedText
             }
@@ -709,7 +709,7 @@ class MainActivity : ComponentActivity() {
         val voiceDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
         val stylePath = File(voiceDir, viewModel.selectedVoiceFile.value).absolutePath
         startActivity(Intent(this, PlaybackActivity::class.java).apply {
-            putExtra(PlaybackActivity.EXTRA_TEXT, text)
+            putExtra(PlaybackActivity.EXTRA_TEXT, com.brahmadeo.supertonic.tts.utils.TextHandoff.wrap(this@MainActivity, text))
             putExtra(PlaybackActivity.EXTRA_VOICE_PATH, stylePath)
             putExtra(PlaybackActivity.EXTRA_SPEED, viewModel.currentSpeed.floatValue)
             putExtra(PlaybackActivity.EXTRA_STEPS, viewModel.currentSteps.intValue)
@@ -722,7 +722,7 @@ class MainActivity : ComponentActivity() {
 
     private fun launchPlaybackActivity(text: String, stylePath: String) {
         val intent = Intent(this, PlaybackActivity::class.java).apply {
-            putExtra(PlaybackActivity.EXTRA_TEXT, text)
+            putExtra(PlaybackActivity.EXTRA_TEXT, com.brahmadeo.supertonic.tts.utils.TextHandoff.wrap(this@MainActivity, text))
             putExtra(PlaybackActivity.EXTRA_VOICE_PATH, stylePath)
             putExtra(PlaybackActivity.EXTRA_SPEED, viewModel.currentSpeed.floatValue)
             putExtra(PlaybackActivity.EXTRA_STEPS, viewModel.currentSteps.intValue)

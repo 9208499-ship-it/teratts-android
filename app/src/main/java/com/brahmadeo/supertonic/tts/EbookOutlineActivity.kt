@@ -122,7 +122,7 @@ class EbookOutlineActivity : ComponentActivity() {
                             com.brahmadeo.supertonic.tts.utils.BookSession.clear(this)
                         }
                         val resultIntent = Intent()
-                        resultIntent.putExtra(EXTRA_TEXT, text)
+                        resultIntent.putExtra(EXTRA_TEXT, com.brahmadeo.supertonic.tts.utils.TextHandoff.wrap(this, text))
                         resultIntent.putExtra("auto_play", autoPlay)
                         resultIntent.putExtra("open_player", openPlayer)
                         setResult(RESULT_OK, resultIntent)
@@ -266,7 +266,32 @@ class EbookOutlineActivity : ComponentActivity() {
         // "Continue where I stopped": the book's saved place (chapter + quote), as reading apps offer
         val book = bookPath
         val saved = book?.let { com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookOutlineActivity, java.io.File(it).name) }
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // The chapter being read, marked in the list (and the list opens at it): after falling
+        // asleep one taps the chapter above it, without hunting for it
+        val order = publication.readingOrder
+        val reading = run {
+            val session = com.brahmadeo.supertonic.tts.utils.BookSession
+            if (book != null && session.currentPath(this@EbookOutlineActivity) == book) session.currentIndex(this@EbookOutlineActivity)
+            else saved?.chapter ?: -1
+        }
+        val current: Link? = remember(publication, reading) {
+            if (reading < 0) null else {
+                // the contents entry of that chapter; if it has none, the last entry before it
+                var best: Link? = null
+                var bestIdx = -1
+                for (l in links.flatMap { listOf(it) + it.children }) {
+                    val path = l.url().toString().substringBefore('#')
+                    val i = order.indexOfFirst { sameResource(it.url().toString().substringBefore('#'), path) }
+                    if (i in 0..reading && i > bestIdx) { best = l; bestIdx = i }
+                }
+                best
+            }
+        }
+        val topIndex = links.indexOfFirst { it === current || it.children.any { c -> c === current } }
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+            initialFirstVisibleItemIndex = if (topIndex < 0) 0
+                else (topIndex + (if (book != null && saved != null) 1 else 0) - 2).coerceAtLeast(0))
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             if (book != null && saved != null && saved.chapter in publication.readingOrder.indices) {
                 item {
                     val link = publication.readingOrder[saved.chapter]
@@ -293,13 +318,18 @@ class EbookOutlineActivity : ComponentActivity() {
                 }
             }
             items(links) { link ->
-                ChapterItem(link, publication, onTextExtracted, setExtracting)
+                ChapterItem(link, publication, onTextExtracted, setExtracting, current = link === current)
                 link.children.forEach { child ->
-                    ChapterItem(child, publication, onTextExtracted, setExtracting, level = 1)
+                    ChapterItem(child, publication, onTextExtracted, setExtracting, level = 1, current = child === current)
                 }
             }
         }
     }
+
+    /** The contents and the reading order may spell one file differently. */
+    private fun sameResource(a: String, b: String) =
+        a == b || a.endsWith("/$b") || b.endsWith("/$a") ||
+            a.substringAfterLast('/') == b.substringAfterLast('/')
 
     @Composable
     fun ChapterItem(
@@ -307,17 +337,29 @@ class EbookOutlineActivity : ComponentActivity() {
         publication: Publication,
         onTextExtracted: (String) -> Unit,
         setExtracting: (Boolean) -> Unit,
-        level: Int = 0
+        level: Int = 0,
+        current: Boolean = false
     ) {
+        val readingNow: (@Composable () -> Unit)? = if (current) {
+            {
+                Text(stringResource(R.string.outline_reading_now), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(start = (level * 16).dp))
+            }
+        } else null
         ListItem(
             headlineContent = { 
                 Text(
-                    text = link.title ?: link.href.toString(), 
+                    text = (if (current) "▶ " else "") + (link.title ?: link.href.toString()),
                     maxLines = 1, 
                     overflow = TextOverflow.Ellipsis,
+                    fontWeight = if (current) FontWeight.Bold else null,
+                    color = if (current) MaterialTheme.colorScheme.onPrimaryContainer else androidx.compose.ui.graphics.Color.Unspecified,
                     modifier = Modifier.padding(start = (level * 16).dp)
                 ) 
             },
+            supportingContent = readingNow,
+            colors = if (current) androidx.compose.material3.ListItemDefaults.colors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer) else androidx.compose.material3.ListItemDefaults.colors(),
             modifier = Modifier.clickable {
                 setExtracting(true)
                 CoroutineScope(Dispatchers.Main).launch {
