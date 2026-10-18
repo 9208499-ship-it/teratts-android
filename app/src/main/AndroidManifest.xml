@@ -117,8 +117,10 @@
         <service android:name=".service.SupertonicTextToSpeechService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="true"
-            android:label="TeraTTS"
-            android:permission="android.permission.BIND_TEXT_TO_SPEECH_SERVICE">
+            android:label="TeraTTS">
+            <!-- no android:permission here: readers bind to the engine themselves, and on
+                 Android 10 a permission they cannot hold made every bind fail
+                 ("Not allowed to bind to service" — Moon+ Reader and others crashed) -->
             <intent-filter android:priority="100">
                 <action android:name="android.intent.action.TTS_SERVICE" />
                 <category android:name="android.intent.category.DEFAULT" />
