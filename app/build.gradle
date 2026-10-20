@@ -107,7 +107,7 @@ android {
         applicationId "ru.tolyos.teratts"
         minSdk 24
         targetSdk 36
-        versionCode 121
+        versionCode 122
         versionName "1.6.10-tera"
 
         ndk {
