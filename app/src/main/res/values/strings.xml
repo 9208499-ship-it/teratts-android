@@ -72,14 +72,14 @@
     <string name="save_button">Save</string>
     <string name="enter_replacement_msg">Enter replacement to test</string>
     <string name="empty_fields_msg">Term and Replacement cannot be empty</string>
-    <string name="no_rules_export">No rules to export</string>
+    <string name="no_rules_export">Your dictionary has no rules yet — nothing to save</string>
     <string name="export_failed_fmt">Export failed: %1$s</string>
     <string name="import_error">Import error: Invalid JSON file</string>
     <string name="no_valid_rules">No valid rules found in file</string>
     <string name="import_complete_title">Import Complete</string>
     <string name="import_stats_fmt">%1$d new terms added.\n%2$d terms updated.</string>
     <string name="import_no_changes">All terms already exist and are up to date.</string>
-    <string name="export_chooser_title">Export Lexicon</string>
+    <string name="export_chooser_title">Save my dictionary</string>
 
     <!-- Menus -->
     <string name="action_reset">Reset</string>
@@ -90,7 +90,7 @@
     <string name="action_lexicon">Settings</string>
     <string name="action_tts_settings">System TTS Settings</string>
     <string name="tts_settings_unavailable">Could not open TTS settings on this device</string>
-    <string name="accent_dict_import_title">Accent Dictionary Imported</string>
+    <string name="accent_dict_import_title">General accent dictionary loaded</string>
     <string name="accent_dict_import_msg_fmt">%1$d entries loaded. They\'ll be applied automatically before each synthesis.</string>
     <string name="accent_dict_import_failed">Failed to import accent dictionary. Expected a JSON object: { \"word\": \"wórd\" }</string>
     <string name="accent_dict_empty">No valid entries found in the file</string>
@@ -98,8 +98,8 @@
     <string name="accent_dict_clear_msg">All imported pronunciation entries will be removed. Your hand-edited rules above are kept.</string>
     <string name="accent_dict_cleared">Accent dictionary cleared</string>
     <string name="action_delete_model">Delete TTS Models</string>
-    <string name="action_import">Import JSON</string>
-    <string name="action_export">Export JSON</string>
+    <string name="action_import">Load my dictionary from a file</string>
+    <string name="action_export">Save my dictionary to a file</string>
     
     <string name="synthesize_content_description">Synthesize and play speech</string>
     <string name="input_label">Input</string>
@@ -231,12 +231,12 @@
     <string name="custom_rules_header">Custom Rules</string>
 
     <!-- LexiconScreen menu items -->
-    <string name="menu_import_json">Import JSON</string>
-    <string name="menu_export_json">Export JSON</string>
+    <string name="menu_import_json">Load my dictionary from a file</string>
+    <string name="menu_export_json">Save my dictionary to a file</string>
     <string name="menu_download_binary">Download accent dictionary (binary)…</string>
     <string name="menu_download_text">Download accent dictionary (text)…</string>
-    <string name="menu_import_dict">Import accent dictionary from file…</string>
-    <string name="menu_clear_dict">Clear accent dictionary</string>
+    <string name="menu_import_dict">Load the general accent dictionary from a file…</string>
+    <string name="menu_clear_dict">Remove the general accent dictionary</string>
     <string name="more">More</string>
     <string name="back">Back</string>
 
@@ -311,7 +311,7 @@
     <string name="search_no_book">Open a book from the library to search in it</string>
     <string name="roles_loudness_title">Even out voice loudness</string>
     <string name="roles_loudness_desc">All voices sound equally loud: as loud as the main voice, or louder if the main voice itself is quiet. Each voice is measured on its first lines</string>
-    <string name="menu_download_silero">Download the accent dictionary (Silero)…</string>
+    <string name="menu_download_silero">Download the general accent dictionary (Silero)…</string>
     <string name="dict_switch_title">Switch to the Silero dictionary?</string>
     <string name="dict_switch_msg">The old dictionary «%1$s» is no longer used: it has wrong stresses in places, and one stress for both meanings of words like замок. Download Silero (%2$d MB, once) — without it the engine places stresses itself and makes more mistakes.</string>
     <string name="stress_hint_yo">Tap the stressed vowel; tap «е» again to make it «ё». Add a word next to it to set the stress for that phrase only</string>

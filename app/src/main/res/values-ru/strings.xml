@@ -72,14 +72,14 @@
     <string name="save_button">Сохранить</string>
     <string name="enter_replacement_msg">Введите замену, чтобы проверить</string>
     <string name="empty_fields_msg">Слово и замена не могут быть пустыми</string>
-    <string name="no_rules_export">Нет правил для экспорта</string>
+    <string name="no_rules_export">В личном словаре пока нет правил — сохранять нечего</string>
     <string name="export_failed_fmt">Не удалось экспортировать: %1$s</string>
     <string name="import_error">Ошибка импорта: некорректный JSON-файл</string>
     <string name="no_valid_rules">В файле не найдено валидных правил</string>
     <string name="import_complete_title">Импорт завершён</string>
     <string name="import_stats_fmt">Добавлено новых правил: %1$d.\nОбновлено правил: %2$d.</string>
     <string name="import_no_changes">Все правила уже есть и актуальны.</string>
-    <string name="export_chooser_title">Экспорт словаря</string>
+    <string name="export_chooser_title">Сохранить личный словарь</string>
 
     <!-- Menus -->
     <string name="action_reset">Сбросить</string>
@@ -90,7 +90,7 @@
     <string name="action_lexicon">Настройки</string>
     <string name="action_tts_settings">Системные настройки TTS</string>
     <string name="tts_settings_unavailable">Не удалось открыть настройки TTS на этом устройстве</string>
-    <string name="accent_dict_import_title">Словарь ударений импортирован</string>
+    <string name="accent_dict_import_title">Общий словарь ударений загружен</string>
     <string name="accent_dict_import_msg_fmt">Загружено записей: %1$d. Они будут применяться перед каждым синтезом.</string>
     <string name="accent_dict_import_failed">Не удалось импортировать словарь ударений. Ожидался JSON-объект формата: { \"слово\": \"сло́во\" }</string>
     <string name="accent_dict_empty">В файле не найдено валидных записей</string>
@@ -98,8 +98,8 @@
     <string name="accent_dict_clear_msg">Все импортированные записи произношения будут удалены. Ваши правила, заданные вручную, останутся.</string>
     <string name="accent_dict_cleared">Словарь ударений удалён</string>
     <string name="action_delete_model">Удалить TTS-модели</string>
-    <string name="action_import">Импорт JSON</string>
-    <string name="action_export">Экспорт JSON</string>
+    <string name="action_import">Загрузить личный словарь из файла</string>
+    <string name="action_export">Сохранить личный словарь в файл</string>
 
     <string name="synthesize_content_description">Озвучить и проиграть</string>
     <string name="input_label">Текст</string>
@@ -243,12 +243,12 @@
     <string name="custom_rules_header">Свои правила</string>
 
     <!-- LexiconScreen menu items -->
-    <string name="menu_import_json">Импорт JSON</string>
-    <string name="menu_export_json">Экспорт JSON</string>
+    <string name="menu_import_json">Загрузить личный словарь из файла</string>
+    <string name="menu_export_json">Сохранить личный словарь в файл</string>
     <string name="menu_download_binary">Скачать словарь ударений (бинарный)…</string>
     <string name="menu_download_text">Скачать словарь ударений (текстовый)…</string>
-    <string name="menu_import_dict">Импорт словаря ударений из файла…</string>
-    <string name="menu_clear_dict">Удалить словарь ударений</string>
+    <string name="menu_import_dict">Загрузить общий словарь ударений из файла…</string>
+    <string name="menu_clear_dict">Удалить общий словарь ударений</string>
     <string name="more">Ещё</string>
     <string name="back">Назад</string>
 
@@ -311,7 +311,7 @@
     <string name="search_no_book">Чтобы искать, откройте книгу из библиотеки</string>
     <string name="roles_loudness_title">Выравнивать громкость голосов</string>
     <string name="roles_loudness_desc">Все голоса звучат одинаково громко: по основному голосу, а если он сам тихий, — громче него. Каждый голос измеряется по первым репликам</string>
-    <string name="menu_download_silero">Скачать словарь ударений (Silero)…</string>
+    <string name="menu_download_silero">Скачать общий словарь ударений (Silero)…</string>
     <string name="dict_switch_title">Перейти на словарь Silero?</string>
     <string name="dict_switch_msg">Старый словарь «%1$s» больше не используется: в нём встречаются неверные ударения, а у слов вроде за́мок/замо́к ударение одно на все случаи. Скачайте Silero (%2$d МБ, один раз) — без него ударения ставит сам движок, и ошибок больше.</string>
     <string name="stress_hint_yo">Нажмите на ударную гласную; на «е» ещё раз — станет «ё». Добавьте соседнее слово, чтобы ударение было только в этом сочетании</string>
