@@ -335,4 +335,8 @@
     <string name="send_log_title">Отправить журнал разработчику</string>
     <string name="send_log_desc">Если чтение вылетает в другой читалке (Moon+ Reader и др.): повторите вылет, потом нажмите здесь и отправьте файл. В нём только сообщения TeraTTS, модель телефона и версия Android.</string>
     <string name="outline_reading_now">Читаете сейчас</string>
+    <string name="voice_import_title">Импорт голоса</string>
+    <string name="voice_import_desc">Свой тембр: файл голоса .json от Supertonic (подходит как есть) или два файла TeraTTS — style_ttl.npy и style_dp.npy, выбранные вместе. Появится в списке голосов как my_&lt;имя&gt;, его можно дать и персонажу.</string>
+    <string name="voice_import_done">Голос добавлен: %1$s</string>
+    <string name="voice_import_failed">Голос не добавлен: %1$s</string>
 </resources>

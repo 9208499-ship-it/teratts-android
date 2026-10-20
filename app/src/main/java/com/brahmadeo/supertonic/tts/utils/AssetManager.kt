@@ -128,10 +128,10 @@ object AssetManager {
         }
     }
 
-    private class Npy(val shape: IntArray, val data: FloatArray)
+    internal class Npy(val shape: IntArray, val data: FloatArray)
 
     /** Minimal .npy reader: little-endian float32/float64, C order. */
-    private fun readNpy(bytes: ByteArray): Npy {
+    internal fun readNpy(bytes: ByteArray): Npy {
         require(bytes.size > 10 && bytes[0] == 0x93.toByte() && String(bytes, 1, 5, Charsets.US_ASCII) == "NUMPY") { "not a .npy file" }
         val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         val major = bytes[6].toInt()
@@ -154,7 +154,7 @@ object AssetManager {
     }
 
     /** Same JSON layout as Supertonic voice styles: {style_ttl:{data,dims,type}, style_dp:{...}}. */
-    private fun writeStyleJson(ttl: Npy, dp: Npy, target: File) {
+    internal fun writeStyleJson(ttl: Npy, dp: Npy, target: File) {
         fun component(a: Npy): String {
             require(a.shape.size == 3) { "expected a 3-D style tensor" }
             val (d0, d1, d2) = Triple(a.shape[0], a.shape[1], a.shape[2])

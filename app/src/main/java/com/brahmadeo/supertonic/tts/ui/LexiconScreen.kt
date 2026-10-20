@@ -291,6 +291,7 @@ fun LexiconScreen(
             }
 
             item { EnglishWordsRow() }
+            item { ImportVoiceRow() }
             item { SendLogRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
@@ -566,6 +567,41 @@ private fun FastCoresRow() {
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
     )
+}
+
+/** Your own voice: a Supertonic .json or the two TeraTTS .npy files, added to the voice list. */
+@Composable
+private fun ImportVoiceRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        val msg = try {
+            val name = com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
+            context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))
+        } catch (e: Exception) {
+            context.getString(AppR.string.voice_import_failed, e.message ?: "?")
+        }
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .clickable { launcher.launch(arrayOf("*/*")) },
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(text = stringResource(AppR.string.voice_import_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = stringResource(AppR.string.voice_import_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 /** Reading crashes in another reader: the log the developer needs, sent by hand. */

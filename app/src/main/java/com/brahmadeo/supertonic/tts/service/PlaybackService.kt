@@ -1550,6 +1550,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             startForegroundService(getString(R.string.notif_exporting), false)
             synthesisJob = launch(Dispatchers.IO) {
                 var result = false to ""
+                // Huawei / Honor freeze an app that plays nothing once the screen is off
+                com.brahmadeo.supertonic.tts.utils.SilentKeepAlive.start()
                 try {
                     result = body()
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1557,6 +1559,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 } catch (e: Throwable) {
                     Log.e(TAG, "Export failed", e)
                 } finally {
+                    com.brahmadeo.supertonic.tts.utils.SilentKeepAlive.stop()
                     try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
                     withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
                         isSynthesizing = false

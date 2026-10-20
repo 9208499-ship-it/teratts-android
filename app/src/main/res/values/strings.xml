@@ -335,4 +335,8 @@
     <string name="send_log_title">Send log to the developer</string>
     <string name="send_log_desc">If reading crashes in another app (Moon+ Reader and others): reproduce the crash, then tap here and send the file. It holds only TeraTTS messages, the phone model and the Android version.</string>
     <string name="outline_reading_now">Reading now</string>
+    <string name="voice_import_title">Import a voice</string>
+    <string name="voice_import_desc">Your own timbre: a voice .json made for Supertonic (it fits as is) or the two TeraTTS files style_ttl.npy and style_dp.npy, chosen together. It appears in the voice list as my_&lt;name&gt; and can be given to a character.</string>
+    <string name="voice_import_done">Voice added: %1$s</string>
+    <string name="voice_import_failed">Voice not added: %1$s</string>
 </resources>

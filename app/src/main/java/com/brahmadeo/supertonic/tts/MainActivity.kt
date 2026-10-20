@@ -420,6 +420,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkResumeState()
         startKeepAlive()
+        // a voice imported in the settings shows up in the list at once
+        setupVoicesMap(viewModel.currentLang.value)
         if (!offerCrashReport()) offerAccentDictionary()
     }
 
