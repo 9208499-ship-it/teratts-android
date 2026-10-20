@@ -993,9 +993,38 @@ object DialogueAnalyzer2 {
      * Gender the speaker shows about themself in [speech]: "я" followed (within a couple
      * of small words, in the same clause) by a past-tense verb or a short adjective form.
      */
+    // "с таким защитником, как я", "такую, как я", "такой красавицы, как я" — the speaker
+    // compares someone to themself, and the word before "как я" shows their sex
+    private val LIKE_ME = Regex("""(?iu)(?<![а-яё])(таким|такому|такого|таком|такой|такую|такая|такие|такими)(?:\s+([а-яё]+))?\s*,?\s+как\s+я(?![а-яё])""")
+    // "я твой отец", "я ваша мама", "я же твоя сестра"
+    private val I_YOUR = Regex("""(?iu)(?<![а-яё])я(?:\s+(?:же|ведь|всё-таки|тоже|и))?\s+(твой|ваш|твоя|ваша)\s+[а-яё]+""")
+
+    private fun likeMe(speech: String): G? {
+        var m = false; var f = false
+        for (x in LIKE_ME.findAll(speech)) {
+            val adj = x.groupValues[1].lowercase()
+            val noun = x.groupValues[2].lowercase()
+            when (adj) {
+                "таким", "такому", "такого", "таком" -> m = true            // masculine (a person: not neuter)
+                "такую", "такая" -> f = true
+                "такой" -> when {
+                    // "такой защитник, как я" (he) / "с такой защитницей, как я" (she)
+                    noun.isEmpty() -> {}                                     // "такой, как я": either
+                    Regex("(ой|ей|ою|ею)$").containsMatchIn(noun) -> f = true
+                    Regex("[бвгджзйклмнпрстфхцчшщь]$").containsMatchIn(noun) -> m = true
+                }
+                // "таких, как я" / "такими" — plural, says nothing
+            }
+        }
+        for (x in I_YOUR.findAll(speech)) {
+            if (x.groupValues[1].lowercase() in setOf("твой", "ваш")) m = true else f = true
+        }
+        return if (m && !f) G.M else if (f && !m) G.F else null
+    }
+
     private fun selfGender(speech: String): G? {
-        var m: G? = null
-        var f: G? = null
+        var m: G? = likeMe(speech)?.takeIf { it == G.M }
+        var f: G? = likeMe(speech)?.takeIf { it == G.F }
         for (clause in speech.split(Regex("""[,.!?;:…—–«»"()]+"""))) {
             val ws = WORD.findAll(clause).map { it.value }.toList()
             for (i in ws.indices) {
