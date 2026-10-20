@@ -461,7 +461,9 @@ class LexiconActivity : ComponentActivity() {
             }
 
             val fileName = "supertonic_lexicon.json"
-            val file = File(cacheDir, fileName)
+            // inside cache/tts_output/: the only part of the cache the FileProvider shares
+            // (a file right in cache/ failed: "Failed to find configured root")
+            val file = File(File(cacheDir, "tts_output").apply { mkdirs() }, fileName)
             file.writeText(jsonArray.toString(2))
 
             val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
