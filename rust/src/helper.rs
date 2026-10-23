@@ -59,10 +59,30 @@ pub struct VoiceStyleData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StyleComponent {
-    pub data: Vec<Vec<Vec<f32>>>,
+    /// The numbers in order: nested [1][rows][cols] (Supertonic, TeraTTS) or one flat list
+    /// (TTS Runner's voices, voice cloners) — both are read.
+    #[serde(deserialize_with = "flat_floats")]
+    pub data: Vec<f32>,
     pub dims: Vec<usize>,
-    #[serde(rename = "type")]
+    /// "float32"; files from other tools often leave it out
+    #[serde(rename = "type", default)]
     pub dtype: String,
+}
+
+fn flat_floats<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Vec<f32>, D::Error> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<f32>) -> bool {
+        match v {
+            serde_json::Value::Number(n) => match n.as_f64() {
+                Some(x) => { out.push(x as f32); true }
+                None => false,
+            },
+            serde_json::Value::Array(a) => a.iter().all(|x| walk(x, out)),
+            _ => false,
+        }
+    }
+    let v = serde_json::Value::deserialize(d)?;
+    let mut out = Vec::new();
+    if walk(&v, &mut out) { Ok(out) } else { Err(serde::de::Error::custom("voice style: numbers expected in data")) }
 }
 
 // ============================================================================ 
@@ -963,29 +983,16 @@ pub fn load_voice_style(voice_style_paths: &[String], verbose: bool) -> Result<S
         let reader = BufReader::new(file);
         let data: VoiceStyleData = serde_json::from_reader(reader)?;
 
-        // Flatten TTL data
-        let ttl_offset = i * ttl_dim1 * ttl_dim2;
-        let mut idx = 0;
-        for batch in &data.style_ttl.data {
-            for row in batch {
-                for &val in row {
-                    ttl_flat[ttl_offset + idx] = val;
-                    idx += 1;
-                }
-            }
+        // the numbers in order (nested or flat in the file)
+        let (n_ttl, n_dp) = (ttl_dim1 * ttl_dim2, dp_dim1 * dp_dim2);
+        if data.style_ttl.data.len() != n_ttl || data.style_dp.data.len() != n_dp {
+            anyhow::bail!("voice style {}: {} + {} numbers, expected {} + {}", path,
+                data.style_ttl.data.len(), data.style_dp.data.len(), n_ttl, n_dp);
         }
-
-        // Flatten DP data
-        let dp_offset = i * dp_dim1 * dp_dim2;
-        idx = 0;
-        for batch in &data.style_dp.data {
-            for row in batch {
-                for &val in row {
-                    dp_flat[dp_offset + idx] = val;
-                    idx += 1;
-                }
-            }
-        }
+        let ttl_offset = i * n_ttl;
+        ttl_flat[ttl_offset..ttl_offset + n_ttl].copy_from_slice(&data.style_ttl.data);
+        let dp_offset = i * n_dp;
+        dp_flat[dp_offset..dp_offset + n_dp].copy_from_slice(&data.style_dp.data);
     }
 
     let ttl_style = Array3::from_shape_vec((bsz, ttl_dim1, ttl_dim2), ttl_flat)?;
@@ -1206,4 +1213,30 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
     ))
 }
 
+
+#[cfg(test)]
+mod style_json_tests {
+    use super::*;
+    #[test]
+    fn flat_and_nested_voice_files() {
+        let dir = std::env::temp_dir();
+        let nested = dir.join("tera_nested.json");
+        let flat = dir.join("tera_flat.json");
+        let ttl: Vec<f32> = (0..50 * 256).map(|i| i as f32 * 1e-4).collect();
+        let dp: Vec<f32> = (0..8 * 16).map(|i| i as f32 * 1e-3).collect();
+        let rows = |v: &[f32], c: usize| v.chunks(c).map(|r| r.to_vec()).collect::<Vec<_>>();
+        std::fs::write(&nested, serde_json::json!({
+            "style_ttl": {"data": [rows(&ttl, 256)], "dims": [1, 50, 256], "type": "float32"},
+            "style_dp": {"data": [rows(&dp, 16)], "dims": [1, 8, 16], "type": "float32"}}).to_string()).unwrap();
+        std::fs::write(&flat, serde_json::json!({
+            "style_ttl": {"dims": [1, 50, 256], "data": ttl},
+            "style_dp": {"dims": [1, 8, 16], "data": dp},
+            "metadata": {"name": "x"}}).to_string()).unwrap();
+        let a = load_voice_style(&[nested.to_string_lossy().to_string()], false).unwrap();
+        let b = load_voice_style(&[flat.to_string_lossy().to_string()], false).unwrap();
+        assert_eq!(a.ttl, b.ttl);
+        assert_eq!(a.dp, b.dp);
+        assert_eq!(a.ttl[[0, 49, 255]], ttl[50 * 256 - 1]);
+    }
+}
 
