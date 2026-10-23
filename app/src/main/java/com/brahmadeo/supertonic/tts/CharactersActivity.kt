@@ -89,7 +89,9 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
             if (text.isBlank()) null
             else DialogueAnalyzer2.applyAliases(DialogueAnalyzer2.analyze(text, DialogueAnalyzer2.Prior(
                 com.brahmadeo.supertonic.tts.utils.BookRoster.cached(context, scope)?.genders ?: emptyMap(),
-                com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(context, scope))), aliases)
+                com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(context, scope),
+                com.brahmadeo.supertonic.tts.utils.BookRoster.cached(context, scope)?.aliases ?: emptyMap())),
+                (com.brahmadeo.supertonic.tts.utils.BookRoster.cached(context, scope)?.aliases ?: emptyMap()) + aliases)
         }
         samples = result?.let { r -> sampleLines(text, r) } ?: emptyMap()
         characters = result?.characters ?: emptyList()

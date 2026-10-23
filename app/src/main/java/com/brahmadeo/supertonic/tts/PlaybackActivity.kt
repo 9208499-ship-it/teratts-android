@@ -561,8 +561,8 @@ class PlaybackActivity : ComponentActivity() {
                 val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text,
                         com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(roster?.genders ?: emptyMap(),
-                            com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(ctx, scope))),
-                    com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(ctx, scope))
+                            com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(ctx, scope), roster?.aliases ?: emptyMap())),
+                    (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(ctx, scope))
                 val rg = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)[index]
                 // the whole line (a span) this phrase belongs to
                 val span = if (rg == null) null else r.spans.firstOrNull { it.start <= rg.last && it.end > rg.first &&

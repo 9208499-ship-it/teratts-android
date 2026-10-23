@@ -37,7 +37,10 @@ object CharacterVoices {
     /** Voice file for [name] (assigning a free one the first time), or null if the gender is unknown. */
     fun voiceFor(
         context: Context, name: String, role: DialogueAnalyzer2.Role, available: List<String>,
-        genderDefault: String, narrator: String, scope: String = GLOBAL
+        genderDefault: String, narrator: String, scope: String = GLOBAL,
+        // the common voices for minor and unknown speakers: a named character must not have
+        // one of them, or a passer-by sounds exactly like him (and he like "anyone")
+        reserved: Set<String> = emptySet()
     ): String? {
         val p = prefs(context, PREFS, scope)
         p.getString(name, null)?.let { stored ->
@@ -46,7 +49,7 @@ object CharacterVoices {
                 (role == DialogueAnalyzer2.Role.MALE && isFemale(stored))
             // an automatic voice that turned out to be the narrator's (the main voice) is reassigned too
             val manual = isManual(context, name, scope)
-            if (stored in available && ((!wrongGender && stored != narrator) || manual)) return stored
+            if (stored in available && ((!wrongGender && stored != narrator && stored !in reserved) || manual)) return stored
             p.edit().remove(name).apply()
         }
         val pool = available.filter {
@@ -54,7 +57,7 @@ object CharacterVoices {
                 DialogueAnalyzer2.Role.MALE -> isMale(it)
                 DialogueAnalyzer2.Role.FEMALE -> isFemale(it)
                 else -> false
-            } && !it.contains("whisper") && it != narrator
+            } && !it.contains("whisper") && it != narrator && it !in reserved
         }.sortedWith(compareBy({ rank(it) }, { it }))
         if (pool.isEmpty()) return null
         val ordered = (listOf(genderDefault).filter { it in pool } + pool).distinct()
@@ -65,6 +68,7 @@ object CharacterVoices {
     }
 
     fun isFemaleVoice(v: String) = isFemale(v)
+    fun isMaleVoice(v: String) = isMale(v)
 
     /** Another voice of the gender (Russian first), not [avoid]; null if there is none. */
     fun alternative(context: Context, avoid: String, female: Boolean): String? =
