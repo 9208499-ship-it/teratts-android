@@ -296,6 +296,7 @@ fun LexiconScreen(
             item { SendLogRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
+            item { SpeedTestRow() }
             item { RolesSection() }
             item { NoiseScaleRow() }
             item { PauseScaleRow() }
@@ -561,7 +562,7 @@ private fun FastCoresRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val cores = com.brahmadeo.supertonic.tts.utils.CpuCores
     val fast = remember { cores.fast() }
-    var on by remember { mutableStateOf(cores.enabled(context)) }
+    var on by remember(com.brahmadeo.supertonic.tts.utils.SpeedTest.version.intValue) { mutableStateOf(cores.enabled(context)) }
     PunctuationToggleRow(
         title = stringResource(AppR.string.fast_cores_title),
         description = if (fast.isEmpty()) stringResource(AppR.string.fast_cores_same)
@@ -569,6 +570,63 @@ private fun FastCoresRow() {
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
     )
+}
+
+/** "Тест скорости": every way of running the engine is timed here, the fastest is kept. */
+@Composable
+private fun SpeedTestRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val test = com.brahmadeo.supertonic.tts.utils.SpeedTest
+    val v = test.version.intValue
+    val now = remember(v) { test.currentLabel(context) }
+    val last = remember(v) { test.lastResult(context) }
+    var dialog by remember { mutableStateOf<String?>(null) }
+    var running by remember { mutableStateOf(false) }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .clickable(enabled = !running) {
+                if (com.brahmadeo.supertonic.tts.service.PlaybackService.busy() || test.running) {
+                    android.widget.Toast.makeText(context, AppR.string.speed_test_busy, android.widget.Toast.LENGTH_LONG).show()
+                    return@clickable
+                }
+                running = true
+                dialog = context.getString(AppR.string.speed_test_starting)
+                Thread {
+                    val text = test.run(context) { msg -> main.post { dialog = msg } }
+                    main.post { running = false; dialog = text }
+                }.start()
+            },
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(text = stringResource(AppR.string.speed_test_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = stringResource(AppR.string.speed_test_desc, now) +
+                    (last?.let { "\n" + stringResource(AppR.string.speed_test_last, it) } ?: ""),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+    dialog?.let { text ->
+        AlertDialog(
+            onDismissRequest = { if (!running) dialog = null },
+            title = { Text(stringResource(AppR.string.speed_test_title)) },
+            text = {
+                Column {
+                    if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
+                    Text(text)
+                }
+            },
+            confirmButton = {
+                if (!running) TextButton(onClick = { dialog = null }) { Text(stringResource(android.R.string.ok)) }
+            }
+        )
+    }
 }
 
 /** Your own voice: a Supertonic .json or the two TeraTTS .npy files, added to the voice list. */

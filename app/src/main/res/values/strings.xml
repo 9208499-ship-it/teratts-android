@@ -343,4 +343,24 @@
     <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more.</string>
     <string name="noise_scale_stable">steady</string>
     <string name="noise_scale_lively">lively</string>
+    <string name="speed_test_title">Speed test</string>
+    <string name="speed_test_desc">Now: %1$s. Tap: the app tries all cores, fast cores only and the XNNPACK accelerator in turn (about a minute) and keeps the fastest.</string>
+    <string name="speed_test_last">Last test: %1$s</string>
+    <string name="speed_test_busy">Stop reading or saving first</string>
+    <string name="speed_test_starting">Starting…</string>
+    <string name="speed_test_loading">%1$s: loading…</string>
+    <string name="speed_test_measuring">%1$s: measuring…</string>
+    <string name="speed_test_mode_all">all cores</string>
+    <string name="speed_test_mode_fast">fast cores only</string>
+    <string name="speed_test_mode_xnn">XNNPACK</string>
+    <string name="speed_test_line">%1$s — ×%2$s</string>
+    <string name="speed_test_failed">%1$s — did not start</string>
+    <string name="speed_test_chosen">Chosen: %1$s. ×2 means 2 seconds of speech per second of work; under ×1 reading will stall.</string>
+    <string name="speed_test_none">Could not measure: settings unchanged.</string>
+    <string name="export_job_channel">Saving a book</string>
+    <string name="export_job_title">Saving a book</string>
+    <string name="export_job_resumed">Continuing to save the book from the interrupted chapter</string>
+    <string name="export_job_tap">Saving stopped: the system closed the app. Tap to continue from the interrupted chapter.</string>
+    <string name="export_job_gave_up">Saving the book stopped and will not continue by itself. Open the book and tap Save again: finished chapters are skipped.</string>
+    <string name="export_job_done">Book saved: %1$s</string>
 </resources>

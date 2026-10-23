@@ -424,6 +424,8 @@ class MainActivity : ComponentActivity() {
         // a voice imported in the settings shows up in the list at once
         setupVoicesMap(viewModel.currentLang.value)
         if (!offerCrashReport()) offerAccentDictionary()
+        // a book's saving cut short by the system (the app killed): go on with it
+        com.brahmadeo.supertonic.tts.utils.ExportJob.revive(this, byUser = true)
     }
 
     /** After a crash (here or while another reader used the engine): offer to send the report. */

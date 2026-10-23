@@ -307,6 +307,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         private const val POSITIONS_PREFS = "TeraReadingPositions"
         fun positionKey(text: String) = "pos_" + Integer.toHexString(text.hashCode()) + "_" + text.length
 
+        @Volatile private var self: java.lang.ref.WeakReference<PlaybackService>? = null
+
+        /** Reading or saving is going on (the speed test and a revived saving wait for it). */
+        fun busy(): Boolean = self?.get()?.isServiceActive() == true
+
         // a new channel: the importance of an existing one cannot be changed from the app
         const val CHANNEL_ID = "tera_now_playing"
         const val NOTIFICATION_ID = 1
@@ -324,6 +329,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     override fun onCreate() {
         super.onCreate()
+        self = java.lang.ref.WeakReference(this)
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         createNotificationChannel()
@@ -382,6 +388,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val job = com.brahmadeo.supertonic.tts.utils.ExportJob
+        if (intent?.action == job.ACTION_RESUME || (intent == null && job.pending(this) != null)) {
+            // the app was killed while saving a book: go on (started again by the system,
+            // the alarm, the notification or the app being opened)
+            resumeExport()
+            return START_STICKY
+        } else if (intent?.action == job.ACTION_STICKY) {
+            // saving a book: if the system kills the app for memory, it starts this service again
+            return START_STICKY
+        } else if (intent == null) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (intent?.action == "STOP_PLAYBACK") {
             stopPlayback()
         } else if (intent?.action == "TERA_PLAY") {
@@ -1560,6 +1579,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 } catch (e: Throwable) {
                     Log.e(TAG, "Export failed", e)
                 } finally {
+                    // any ordinary end (done, stopped, replaced, failed): nothing to continue later;
+                    // a killed process never gets here — that is what ExportJob continues
+                    com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere = false
+                    com.brahmadeo.supertonic.tts.utils.ExportJob.finish(this@PlaybackService)
                     com.brahmadeo.supertonic.tts.utils.SilentKeepAlive.stop()
                     try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) { }
                     withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
@@ -1584,6 +1607,37 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
+    /** Goes on with a book's saving left by a killed process ([ExportJob]). */
+    private fun resumeExport() {
+        val job = com.brahmadeo.supertonic.tts.utils.ExportJob
+        val pending = job.pending(this)
+        if (isServiceActive()) {
+            // reading or saving already (in the foreground): leave it, look in later
+            if (pending != null) job.arm(this)
+            return
+        }
+        // started with startForegroundService: in the foreground within 5 seconds, whatever follows
+        try { startForegroundService(getString(R.string.notif_exporting), false) } catch (e: Exception) { Log.w(TAG, "resume fg: ${e.message}") }
+        if (pending == null || job.runningHere) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        serviceScope.launch {
+            engineReady?.join()
+            val book = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService)
+            if (pending.book != null && book != pending.book) {
+                // another book was opened since: its chapters are not this book's
+                Log.w(TAG, "resume: the book changed, not continuing")
+                job.notifyStopped(this@PlaybackService, gaveUp = true)
+                job.finish(this@PlaybackService)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                return@launch
+            }
+            Log.i(TAG, "resuming the book's saving into ${pending.outputDir}")
+            exportBook(pending.lang, pending.stylePath, pending.speed, pending.steps, File(pending.outputDir), -1, resumed = true)
+        }
+    }
+
     /**
      * The book being read into its own folder ([outputDir] = Music/Supertonic Audio/<book>), a file
      * per chapter: "01 - <chapter title>.m4a" (the title from the book's contents; "Глава 5" if it
@@ -1593,8 +1647,20 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
      * skipped, so a stopped saving goes on where it stopped (progress: chapter x 1000 + the part
      * of it done, out of chapters x 1000).
      */
-    fun exportBook(lang: String, stylePath: String, speed: Float, steps: Int, outputDir: File, onlyChapter: Int) {
+    fun exportBook(lang: String, stylePath: String, speed: Float, steps: Int, outputDir: File, onlyChapter: Int,
+                   resumed: Boolean = false) {
         runExport {
+            val job = com.brahmadeo.supertonic.tts.utils.ExportJob
+            if (onlyChapter < 0) {
+                // written down until the saving ends; left behind only if the app is killed
+                if (!resumed) job.start(this@PlaybackService, lang, stylePath, speed, steps, outputDir.absolutePath,
+                    com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService))
+                job.runningHere = true
+                job.cancelNotification(this@PlaybackService)
+                try {
+                    startService(Intent(this@PlaybackService, PlaybackService::class.java).setAction(job.ACTION_STICKY))
+                } catch (e: Exception) { Log.w(TAG, "sticky: ${e.message}") }
+            }
             val publisher = com.brahmadeo.supertonic.tts.utils.AudioPublisher
             val relDir = publisher.relDirOf(outputDir)
             val shownDir = "${android.os.Environment.DIRECTORY_MUSIC}/$relDir"
@@ -1633,8 +1699,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(k * 1000 + s * 1000 / maxOf(n, 1), chapters.size * 1000) }
                 }
-                if (shown != null) saved++ else { all = false; if (!isActive || SupertonicTTS.isCancelled()) break }
+                if (shown != null) { saved++; job.chapterDone(this@PlaybackService, saved) }
+                else { all = false; if (!isActive || SupertonicTTS.isCancelled()) break }
             }
+            if (resumed && all && saved > 0) job.notifyDone(this@PlaybackService, shownDir)
             (all && saved > 0) to shownDir
         }
     }
@@ -1741,6 +1809,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     override fun onDestroy() {
         super.onDestroy()
+        if (self?.get() === this) self = null
         mediaSession.release()
         try {
             audioTrack?.release()

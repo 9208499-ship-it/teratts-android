@@ -28,6 +28,7 @@ object SupertonicTTS {
     private external fun setNoiseScale(scale: Float)
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
+    private external fun isXnnpackEnabled(): Boolean
 
     /** "Fast cores only" (CpuCores): threads = the fast cores, pinned to them. */
     @Volatile var fastCoresOnly = false
@@ -40,11 +41,22 @@ object SupertonicTTS {
         nativePtr != 0L && currentModelPath == modelPath
 
     /**
-     * XNNPACK accelerator switch. With it the heavy ops run in XNNPACK's own
-     * pool (4 threads) and plain ORT gets 1 thread so the pools don't fight
-     * over cores (ONNX Runtime's recommendation). false = plain ORT, 4 threads.
+     * XNNPACK accelerator. With it the heavy ops run in XNNPACK's own pool (4 threads) and
+     * plain ORT gets 1 thread so the pools don't fight over cores (ONNX Runtime's
+     * recommendation). Off by default (plain ORT on all cores was faster on the phones
+     * measured); Settings → "Тест скорости" turns it on where it wins (CpuCores.applyPref).
      */
-    const val USE_XNNPACK = false
+    @Volatile var useXnnpack = false
+
+    /** Is XNNPACK built into the engine (the cargo feature)? */
+    fun xnnpackAvailable(): Boolean = try { isXnnpackEnabled() } catch (e: Throwable) { false }
+
+    /** Unload and load again with the current settings (the speed test); false if it failed. */
+    @Synchronized
+    fun reload(modelPath: String, libPath: String): Boolean {
+        release()
+        return initialize(modelPath, libPath)
+    }
 
     @Synchronized
     fun initialize(
@@ -52,8 +64,8 @@ object SupertonicTTS {
         libPath: String,
         // all cores: with the screen fully off the phone caps the big cores hardest,
         // and the little ones add real throughput (measured: RTF 2.07 on / 0.6 off on 4 threads)
-        ortThreads: Int = if (USE_XNNPACK) 1 else Runtime.getRuntime().availableProcessors().coerceIn(4, 8),
-        xnnThreads: Int = if (USE_XNNPACK) 4 else 0
+        ortThreads: Int = if (useXnnpack) 1 else Runtime.getRuntime().availableProcessors().coerceIn(4, 8),
+        xnnThreads: Int = if (useXnnpack) 4 else 0
     ): Boolean {
         initModelPath = modelPath
         initLibPath = libPath
@@ -80,7 +92,7 @@ object SupertonicTTS {
         try {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
         } catch (e: Exception) { }
-        val fast = if (fastCoresOnly && !USE_XNNPACK) com.brahmadeo.supertonic.tts.utils.CpuCores.fast() else emptyList()
+        val fast = if (fastCoresOnly && !useXnnpack) com.brahmadeo.supertonic.tts.utils.CpuCores.fast() else emptyList()
         try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
         val threads = if (fast.isNotEmpty()) fast.size else ortThreads
         Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")

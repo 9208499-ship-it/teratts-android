@@ -343,4 +343,24 @@
     <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается.</string>
     <string name="noise_scale_stable">ровно</string>
     <string name="noise_scale_lively">живо</string>
+    <string name="speed_test_title">Тест скорости</string>
+    <string name="speed_test_desc">Сейчас: %1$s. Нажмите — программа по очереди попробует все ядра, только быстрые ядра и ускоритель XNNPACK (около минуты) и оставит самый быстрый вариант.</string>
+    <string name="speed_test_last">Последний тест: %1$s</string>
+    <string name="speed_test_busy">Сначала остановите чтение или сохранение</string>
+    <string name="speed_test_starting">Начинаю…</string>
+    <string name="speed_test_loading">%1$s: загрузка…</string>
+    <string name="speed_test_measuring">%1$s: замер…</string>
+    <string name="speed_test_mode_all">все ядра</string>
+    <string name="speed_test_mode_fast">только быстрые ядра</string>
+    <string name="speed_test_mode_xnn">XNNPACK</string>
+    <string name="speed_test_line">%1$s — ×%2$s</string>
+    <string name="speed_test_failed">%1$s — не запустилось</string>
+    <string name="speed_test_chosen">Выбрано: %1$s. ×2 значит, что за секунду работы готовы 2 секунды речи; меньше ×1 — чтение будет прерываться.</string>
+    <string name="speed_test_none">Замерить не удалось — настройки не изменены.</string>
+    <string name="export_job_channel">Сохранение книги</string>
+    <string name="export_job_title">Сохранение книги</string>
+    <string name="export_job_resumed">Продолжаю сохранение книги — с прерванной главы</string>
+    <string name="export_job_tap">Сохранение прервалось: система закрыла программу. Нажмите, чтобы продолжить с прерванной главы.</string>
+    <string name="export_job_gave_up">Сохранение книги остановилось и само не продолжится. Откройте книгу и снова нажмите «Сохранить» — готовые главы пропустятся.</string>
+    <string name="export_job_done">Книга сохранена: %1$s</string>
 </resources>

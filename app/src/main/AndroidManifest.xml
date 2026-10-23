@@ -133,5 +133,7 @@
                 android:name="android.speech.tts"
                 android:resource="@xml/tts_engine" />
         </service>
+        <!-- continues a book's saving after the app was killed (ExportJob) -->
+        <receiver android:name=".utils.ExportReviver" android:exported="false" />
     </application>
 </manifest>

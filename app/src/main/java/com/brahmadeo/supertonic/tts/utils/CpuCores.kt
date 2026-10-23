@@ -10,6 +10,8 @@ import java.io.File
  */
 object CpuCores {
     const val PREF = "cpu_fast_cores_only"
+    /** XNNPACK on (chosen by the speed test when it is the fastest on this phone). */
+    const val PREF_XNN = "engine_xnnpack"
 
     private fun maxFreqs(): IntArray {
         val n = Runtime.getRuntime().availableProcessors()
@@ -32,17 +34,34 @@ object CpuCores {
     fun total(): Int = Runtime.getRuntime().availableProcessors()
 
     fun enabled(context: Context): Boolean =
-        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getBoolean(PREF, true)   // measured: ×1.6 with the screen off
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getBoolean(PREF, false)
+
+    fun xnnpack(context: Context): Boolean =
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getBoolean(PREF_XNN, false) &&
+            SupertonicTTS.xnnpackAvailable()
 
     /** Read the setting into the engine (before it loads). */
     fun applyPref(context: Context) {
         SupertonicTTS.fastCoresOnly = enabled(context)
+        SupertonicTTS.useXnnpack = xnnpack(context)
+    }
+
+    /** Saves a mode chosen by the speed test (the engine is reloaded by the caller). */
+    fun setMode(context: Context, fast: Boolean, xnn: Boolean) {
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).edit()
+            .putBoolean(PREF, fast).putBoolean(PREF_XNN, xnn).apply()
+        SupertonicTTS.fastCoresOnly = fast
+        SupertonicTTS.useXnnpack = xnn
     }
 
     /** Change the setting: the engine is reloaded on the next phrase with the new threads. */
     fun set(context: Context, on: Boolean) {
-        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).edit().putBoolean(PREF, on).apply()
+        // a choice by hand is a plain-processor mode: XNNPACK (if the test chose it) goes off
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).edit()
+            .putBoolean(PREF, on).putBoolean(PREF_XNN, false).apply()
         SupertonicTTS.fastCoresOnly = on
+        SupertonicTTS.useXnnpack = false
+        SpeedTest.version.intValue++
         Thread { SupertonicTTS.release() }.start()
     }
 }
