@@ -44,6 +44,10 @@ object PunctuationPrefs {
     @Volatile var pauseScale: Float = 1.0f
         private set
 
+    /** Stability ↔ expressiveness: the sampler's noise (0.4 steady … 1.0 lively, default 0.667). */
+    @Volatile var noiseScale: Float = 0.667f
+        private set
+
     @Volatile var tightQuestionExclamation: Boolean = false
         private set
     @Volatile var strengthenIntonation: Boolean = false
@@ -68,6 +72,7 @@ object PunctuationPrefs {
         tightQuestionExclamation = p.getBoolean(KEY_TIGHT_QUESTION, false)
         tightCommasAndPeriods = p.getBoolean(KEY_TIGHT_COMMAS_PERIODS, false)
         pauseScale = p.getFloat(KEY_PAUSE_SCALE, 1.0f)
+        noiseScale = p.getFloat("noise_scale", 0.667f)
         paragraphPause = p.getFloat(KEY_PARAGRAPH_PAUSE, 0.9f)
         // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
         // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
@@ -105,6 +110,13 @@ object PunctuationPrefs {
         pauseScale = value.coerceIn(0f, 2f)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putFloat(KEY_PAUSE_SCALE, pauseScale)
+            .apply()
+    }
+
+    fun setNoiseScale(context: Context, value: Float) {
+        noiseScale = value.coerceIn(0.4f, 1.0f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putFloat("noise_scale", noiseScale)
             .apply()
     }
 

@@ -730,7 +730,10 @@ impl TextToSpeech {
         // 4. Sampler: N(0,1) noise → latent in one call
         // a little more room than predicted: the end of the phrase is not squeezed or cut
         let frames = tera::latent_len(duration + tera::TAIL_ROOM_S);
-        let normal = Normal::new(0.0f32, 1.0f32).unwrap();
+        // lowered "temperature": the sampler starts from calmer noise, which makes the model's
+        // known fault — a word skipped or said twice — much rarer (the old Supertonic path had
+        // 0.667 for the same reason; the TeraTTS path used full 1.0)
+        let normal = Normal::new(0.0f32, tera::noise_scale()).unwrap();
         let mut rng = rand::thread_rng();
         let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
         let noise_value = Value::from_array(noise)?;

@@ -70,6 +70,7 @@ class BookSearchActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         enableEdgeToEdge()
         setContent {
             SupertonicTheme {

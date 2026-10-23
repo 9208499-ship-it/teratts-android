@@ -12,6 +12,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPauseS
     crate::tera::set_pause_scale(scale);
 }
 
+/// Stability ↔ expressiveness: the spread of the sampler's starting noise (settings slider).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseScale(
+    _env: JNIEnv,
+    _class: JClass,
+    scale: jfloat,
+) {
+    crate::tera::set_noise_scale(scale);
+}
+
 /// Pause after a paragraph, seconds (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(

@@ -226,7 +226,7 @@ private fun CharacterCard(
                     Icon(Icons.Default.PlayArrow, contentDescription = stringResource(AppR.string.characters_listen))
                 }
                 Box {
-                    TextButton(onClick = { voiceMenu = true }) { Text(voice?.removeSuffix(".json") ?: defaultLabel) }
+                    TextButton(onClick = { voiceMenu = true }) { Text(voice?.let { com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(it) } ?: defaultLabel) }
                     DropdownMenu(expanded = voiceMenu, onDismissRequest = { voiceMenu = false }) {
                         DropdownMenuItem(
                             text = { Text(defaultLabel) },
@@ -234,7 +234,7 @@ private fun CharacterCard(
                         )
                         for (v in voices) {
                             DropdownMenuItem(
-                                text = { Text(v.removeSuffix(".json")) },
+                                text = { Text(com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(v)) },
                                 onClick = { voiceMenu = false; voice = v; CharacterVoices.set(context, c.name, v, scope) }
                             )
                         }

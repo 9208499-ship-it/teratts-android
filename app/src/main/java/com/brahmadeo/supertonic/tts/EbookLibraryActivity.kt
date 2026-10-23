@@ -80,6 +80,7 @@ class EbookLibraryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         setContent {
             SupertonicTheme {
                 LibraryScreen(

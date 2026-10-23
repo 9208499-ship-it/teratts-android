@@ -316,12 +316,16 @@ class TextNormalizer {
     private val footnoteSuperscript = Regex("(?<![мМ])[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
     private val footnoteAsterisk = Regex("(?<=[\\p{L}.,!?»\")])\\*{1,3}(?![\\p{L}*])")
 
+    // links and e-mail addresses: read letter by letter they only get in the way
+    private val urlOrMail = Regex("""(?i)\b(?:https?://|ftp://|www\.)[^\s<>«»"]+[^\s<>«»".,;:!?)\]]|\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b""")
+
     private val invisibleChars = Regex("[\u00AD\u200B\u2060\uFEFF]")
 
     fun stripFootnoteMarks(text: String): String {
         var t = footnoteBracket.replace(text, "")
         t = footnoteSuperscript.replace(t, "")
         t = footnoteAsterisk.replace(t, "")
+        t = urlOrMail.replace(t, "")
         return t
     }
 

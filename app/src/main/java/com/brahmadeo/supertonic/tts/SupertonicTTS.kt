@@ -25,6 +25,7 @@ object SupertonicTTS {
     private external fun close(ptr: Long)
     private external fun reset(ptr: Long)
     private external fun setPauseScale(scale: Float)
+    private external fun setNoiseScale(scale: Float)
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
 
@@ -186,6 +187,7 @@ object SupertonicTTS {
         
         try {
             setPauseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.pauseScale)
+            setNoiseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.noiseScale)
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             val data = synthesize(nativePtr, text, lang, stylePath, speed, bufferDuration, steps, gain)
             return if (data.isNotEmpty()) data else null

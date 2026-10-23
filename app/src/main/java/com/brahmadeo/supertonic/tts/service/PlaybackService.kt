@@ -325,6 +325,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     override fun onCreate() {
         super.onCreate()
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
+        com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         createNotificationChannel()
         com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)

@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         PDFBoxResourceLoader.init(this)
 
@@ -595,6 +596,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setupVoicesMap(lang: String) {
+        com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         viewModel.voiceFiles.clear()
         val voiceResources = emptyMap<String, Int>() // TeraTTS voices are listed by file name (ru_f1, ru_m5, …)
 
@@ -608,7 +610,7 @@ class MainActivity : ComponentActivity() {
             val files = voiceDir.listFiles { _, name -> name.endsWith(".json") }
             files?.forEach { file ->
                 if (!voiceResources.containsKey(file.name)) {
-                    val friendlyName = file.name.removeSuffix(".json")
+                    val friendlyName = com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(file.name)
                     viewModel.voiceFiles[friendlyName] = file.name
                 }
             }

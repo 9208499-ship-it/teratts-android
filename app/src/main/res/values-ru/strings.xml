@@ -339,4 +339,8 @@
     <string name="voice_import_desc">Свой тембр: файл голоса .json от Supertonic (подходит как есть) или два файла TeraTTS — style_ttl.npy и style_dp.npy, выбранные вместе. Появится в списке голосов как my_&lt;имя&gt;, его можно дать и персонажу.</string>
     <string name="voice_import_done">Голос добавлен: %1$s</string>
     <string name="voice_import_failed">Голос не добавлен: %1$s</string>
+    <string name="noise_scale_title">Стабильность ↔ выразительность</string>
+    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается.</string>
+    <string name="noise_scale_stable">ровно</string>
+    <string name="noise_scale_lively">живо</string>
 </resources>

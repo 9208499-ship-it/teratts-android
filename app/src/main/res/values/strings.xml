@@ -339,4 +339,8 @@
     <string name="voice_import_desc">Your own timbre: a voice .json made for Supertonic (it fits as is) or the two TeraTTS files style_ttl.npy and style_dp.npy, chosen together. It appears in the voice list as my_&lt;name&gt; and can be given to a character.</string>
     <string name="voice_import_done">Voice added: %1$s</string>
     <string name="voice_import_failed">Voice not added: %1$s</string>
+    <string name="noise_scale_title">Stability ↔ expressiveness</string>
+    <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more.</string>
+    <string name="noise_scale_stable">steady</string>
+    <string name="noise_scale_lively">lively</string>
 </resources>

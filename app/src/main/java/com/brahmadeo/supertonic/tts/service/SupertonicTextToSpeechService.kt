@@ -65,6 +65,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
     override fun onCreate() {
         super.onCreate()
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
+        com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         Log.i("SupertonicTTS", "Service created")
         com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)

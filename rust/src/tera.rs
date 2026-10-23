@@ -22,6 +22,19 @@ pub const SAMPLES_PER_FRAME: usize = 3_072;
 pub const LATENT_CHANNELS: usize = 144;
 /// Global duration correction: duration = raw * scale / SPEED
 pub const SPEED: f32 = 1.05;
+/// Spread of the starting noise of the sampler ("temperature"). 1.0 is the model's own;
+/// lower is steadier: fewer skipped or repeated words, slightly flatter intonation.
+/// Settings slider "стабильность ↔ выразительность", 0.4…1.0, default 0.667.
+static NOISE_SCALE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F2A_C083); // 0.667
+
+pub fn set_noise_scale(v: f32) {
+    let v = if v.is_finite() { v.clamp(0.3, 1.2) } else { 0.667 };
+    NOISE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn noise_scale() -> f32 {
+    f32::from_bits(NOISE_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
 /// Baked into the distilled sampler; the graph still takes the input.
 pub const GUIDANCE: f32 = 3.0;
 /// The model was trained on ≤25 s utterances; ~200 chars keeps well inside.

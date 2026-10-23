@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -296,6 +297,7 @@ fun LexiconScreen(
             item { KeepReadyRow() }
             item { FastCoresRow() }
             item { RolesSection() }
+            item { NoiseScaleRow() }
             item { PauseScaleRow() }
             item { ParagraphPauseRow() }
 
@@ -756,7 +758,7 @@ private fun RoleVoicePicker(
             Text(label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Box {
                 TextButton(onClick = { open = true }) {
-                    Text(if (current.isEmpty() && mainLabel != null) mainLabel else current.removeSuffix(".json"))
+                    Text(if (current.isEmpty() && mainLabel != null) mainLabel else com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(current))
                 }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                     if (mainLabel != null) {
@@ -764,7 +766,7 @@ private fun RoleVoicePicker(
                     }
                     for (v in voices) {
                         DropdownMenuItem(
-                            text = { Text(v.removeSuffix(".json")) },
+                            text = { Text(com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(v)) },
                             onClick = { open = false; onPick(v) }
                         )
                     }
@@ -775,6 +777,40 @@ private fun RoleVoicePicker(
 }
 
 /** "Pause length" slider: multiplies the pauses the engine adds at punctuation. */
+@Composable
+private fun NoiseScaleRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var v by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.noiseScale) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 6.dp)) {
+            Text(text = stringResource(AppR.string.noise_scale_title), style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = stringResource(AppR.string.noise_scale_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(AppR.string.noise_scale_stable), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = v,
+                    onValueChange = { v = Math.round(it * 20f) / 20f },
+                    onValueChangeFinished = { com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setNoiseScale(context, v) },
+                    valueRange = 0.4f..1.0f,
+                    steps = 11,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                Text(stringResource(AppR.string.noise_scale_lively), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
 @Composable
 private fun PauseScaleRow() {
     val context = androidx.compose.ui.platform.LocalContext.current

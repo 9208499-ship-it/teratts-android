@@ -287,6 +287,7 @@ class PlaybackActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         recreated = savedInstanceState != null
 
         currentText = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, intent.getStringExtra(EXTRA_TEXT)) ?: ""
@@ -637,6 +638,19 @@ class PlaybackActivity : ComponentActivity() {
         else Toast.makeText(this, getString(R.string.export_need_permission), Toast.LENGTH_LONG).show()
     }
 
+    private fun askBatteryOnce() {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        if (prefs.getBoolean("battery_asked", false)) return
+        val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        prefs.edit().putBoolean("battery_asked", true).apply()
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:$packageName")))
+        } catch (_: Exception) { }
+    }
+
     /** A chapter of a book: "this chapter or the whole book?"; any other text is saved at once. */
     private fun startExport() {
         if (currentText.isEmpty()) {
@@ -648,6 +662,9 @@ class PlaybackActivity : ComponentActivity() {
                 com.brahmadeo.supertonic.tts.utils.BookSession.matches(this, currentText)
             if (inBook) exportAskState.value = true else exportChapter()
         }
+        // saving runs for a long time with the screen off: once, ask to be let off battery
+        // optimisation — Huawei, MIUI and others stop the app otherwise
+        askBatteryOnce()
         val perm = android.Manifest.permission.WRITE_EXTERNAL_STORAGE
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q &&
             androidx.core.content.ContextCompat.checkSelfPermission(this, perm) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
