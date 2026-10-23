@@ -14,12 +14,19 @@ object RolePrefs {
     private const val KEY_UNKNOWN = "roles_unknown_voice"
     private const val KEY_MAIN_COUNT = "roles_main_count"
 
-    /** Only this many main characters (most lines in the book) get their own voices. */
+    /**
+     * Only this many main characters (most lines in the book) get their own voices. With the
+     * 40 library voices there are some 25 per sex to hand out (1.6.15: up to 40, by default 24;
+     * it was 10 of about 8 per sex).
+     */
     fun mainCount(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAIN_COUNT, 10)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAIN_COUNT, DEFAULT_MAIN_COUNT)
+
+    const val DEFAULT_MAIN_COUNT = 24
+    const val MAX_MAIN_COUNT = 40
 
     fun setMainCount(context: Context, n: Int) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_MAIN_COUNT, n.coerceIn(1, 16)).apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_MAIN_COUNT, n.coerceIn(1, MAX_MAIN_COUNT)).apply()
 
     /** Voice for lines whose speaker is not known; "" = the male lines' voice. Never the narrator. */
     fun unknownVoice(context: Context): String =

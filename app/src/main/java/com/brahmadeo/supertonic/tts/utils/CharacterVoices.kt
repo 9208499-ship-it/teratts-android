@@ -61,8 +61,11 @@ object CharacterVoices {
         }.sortedWith(compareBy({ rank(it) }, { it }))
         if (pool.isEmpty()) return null
         val ordered = (listOf(genderDefault).filter { it in pool } + pool).distinct()
-        val used = p.all.values.filterIsInstance<String>().toSet()
-        val pick = ordered.firstOrNull { it !in used } ?: ordered[Math.floorMod(name.hashCode(), ordered.size)]
+        val usedList = p.all.values.filterIsInstance<String>()
+        val used = usedList.toSet()
+        // all taken (more characters than voices): the voice given to the fewest so far
+        val pick = ordered.firstOrNull { it !in used }
+            ?: ordered.minByOrNull { v -> usedList.count { it == v } } ?: ordered[Math.floorMod(name.hashCode(), ordered.size)]
         p.edit().putString(name, pick).apply()
         return pick
     }

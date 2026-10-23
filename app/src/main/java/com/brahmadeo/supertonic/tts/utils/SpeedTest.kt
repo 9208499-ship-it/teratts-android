@@ -33,7 +33,8 @@ object SpeedTest {
         private set
 
     class Mode(val label: String, val fast: Boolean, val xnn: Boolean)
-    class Result(val mode: Mode, val speed: Double?)
+    /** [loaded]: the engine started in this mode; [speed] null with loaded = it gave no sound. */
+    class Result(val mode: Mode, val speed: Double?, val loaded: Boolean = true)
 
     fun modes(context: Context): List<Mode> = buildList {
         add(Mode(context.getString(R.string.speed_test_mode_all), false, false))
@@ -59,6 +60,7 @@ object SpeedTest {
     fun run(context: Context, progress: (String) -> Unit): String {
         running = true
         val app = context.applicationContext
+        SupertonicTTS.setCancelled(false)
         val fast0 = CpuCores.enabled(app)
         val xnn0 = CpuCores.xnnpack(app)
         try {
@@ -73,7 +75,10 @@ object SpeedTest {
                 progress(app.getString(R.string.speed_test_loading, mode.label))
                 SupertonicTTS.fastCoresOnly = mode.fast
                 SupertonicTTS.useXnnpack = mode.xnn
-                if (!SupertonicTTS.reload(modelPath, libPath)) { results.add(Result(mode, null)); continue }
+                if (!SupertonicTTS.reload(modelPath, libPath)) { results.add(Result(mode, null, loaded = false)); continue }
+                // "Стоп" in the player leaves the engine's cancel flag set until the next reading:
+                // every phrase of the test came back empty ("не запустилось" for all three modes)
+                SupertonicTTS.setCancelled(false)
                 // the first phrase pays for laying out memory (and XNNPACK's kernels): not timed
                 SupertonicTTS.generateAudio(PHRASES[0], "ru", style.absolutePath, 1f, 0f, 5, 1f, null)
                 progress(app.getString(R.string.speed_test_measuring, mode.label))
@@ -96,7 +101,7 @@ object SpeedTest {
             if (best != null) CpuCores.setMode(app, best.mode.fast, best.mode.xnn)
             else CpuCores.setMode(app, fast0, xnn0)
             val lines = results.joinToString("\n") { r ->
-                if (r.speed == null) app.getString(R.string.speed_test_failed, r.mode.label)
+                if (r.speed == null) app.getString(if (r.loaded) R.string.speed_test_silent else R.string.speed_test_failed, r.mode.label)
                 else app.getString(R.string.speed_test_line, r.mode.label, String.format(java.util.Locale.US, "%.1f", r.speed))
             }
             val text = lines + "\n\n" + if (best != null) app.getString(R.string.speed_test_chosen, best.mode.label)

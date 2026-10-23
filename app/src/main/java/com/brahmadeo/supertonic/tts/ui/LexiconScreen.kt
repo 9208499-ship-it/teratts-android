@@ -772,8 +772,8 @@ private fun RolesSection() {
                         value = mainCount,
                         onValueChange = { mainCount = Math.round(it).toFloat() },
                         onValueChangeFinished = { prefs.setMainCount(context, mainCount.toInt()) },
-                        valueRange = 2f..12f,
-                        steps = 9
+                        valueRange = 2f..com.brahmadeo.supertonic.tts.utils.RolePrefs.MAX_MAIN_COUNT.toFloat(),
+                        steps = com.brahmadeo.supertonic.tts.utils.RolePrefs.MAX_MAIN_COUNT - 3
                     )
                 }
             }

@@ -363,4 +363,5 @@
     <string name="export_job_tap">Saving stopped: the system closed the app. Tap to continue from the interrupted chapter.</string>
     <string name="export_job_gave_up">Saving the book stopped and will not continue by itself. Open the book and tap Save again: finished chapters are skipped.</string>
     <string name="export_job_done">Book saved: %1$s</string>
+    <string name="speed_test_silent">%1$s — loaded but gave no sound</string>
 </resources>
