@@ -1540,7 +1540,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
      * saved file's path to show ("Music/…/name.m4a"), or null if nothing was saved.
      */
     private suspend fun exportText(text: String, lang: String, stylePath: String, speed: Float, steps: Int,
-                                   relDir: String, baseName: String, progress: suspend (Int, Int) -> Unit): String? {
+                                   relDir: String, baseName: String,
+                                   tags: com.brahmadeo.supertonic.tts.utils.Mp4Tags.Tags? = null,
+                                   progress: suspend (Int, Int) -> Unit): String? {
         val sentences = textNormalizer.splitIntoSentences(text, lang)
         if (sentences.isEmpty()) { Log.w(TAG, "Export: No sentences found"); return null }
         val tmpDir = File(cacheDir, "export").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
@@ -1565,6 +1567,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
         try {
             if (!writer.finish()) return null
+            // chapter title, book, author, track number and the cover — players show them
+            if (tags != null && made.extension == "m4a") com.brahmadeo.supertonic.tts.utils.Mp4Tags.write(made, tags)
             return com.brahmadeo.supertonic.tts.utils.AudioPublisher.publish(this, made, relDir, baseName + "." + made.extension)
         } finally {
             made.delete()
@@ -1682,6 +1686,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this@PlaybackService)
             if (chapters.isEmpty()) return@runExport false to shownDir
             val digits = maxOf(2, chapters.size.toString().length)
+            // the book's title, author and cover go into every chapter file (players show the cover)
+            val info = com.brahmadeo.supertonic.tts.utils.BookInfo.load(this@PlaybackService)
+            fun tagsFor(k: Int) = com.brahmadeo.supertonic.tts.utils.Mp4Tags.Tags(
+                title = chapters[k].title?.takeIf { it.isNotBlank() } ?: getString(R.string.outline_chapter_n, k + 1),
+                album = info.title?.takeIf { it.isNotBlank() } ?: relDir.substringAfterLast('/'),
+                artist = info.author, track = k + 1, tracks = chapters.size, coverJpeg = info.coverJpeg)
             fun fileName(k: Int): String {
                 val c = chapters[k]
                 val title = c.title?.let { publisher.safeName(it, 60) }?.takeIf { it.isNotEmpty() }
@@ -1695,7 +1705,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 publisher.delete(this@PlaybackService, relDir, "$name.m4a")
                 publisher.delete(this@PlaybackService, relDir, "$name.wav")
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
-                val shown = exportText(chapters[k].text, lang, stylePath, speed, steps, relDir, name) { s, n ->
+                val shown = exportText(chapters[k].text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(s, n) }
                 }
                 return@runExport (shown != null) to (shown ?: shownDir)
@@ -1711,7 +1721,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     continue
                 }
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
-                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name) { s, n ->
+                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(k * 1000 + s * 1000 / maxOf(n, 1), chapters.size * 1000) }
                 }
                 if (shown != null) { saved++; job.chapterDone(this@PlaybackService, saved) }
