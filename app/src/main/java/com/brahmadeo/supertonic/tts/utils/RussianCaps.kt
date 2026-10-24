@@ -50,6 +50,18 @@ object RussianCaps {
         return sb.toString()
     }
 
+    private val TITLE = Regex("(?<![\\p{L}\\p{M}+])[А-ЯЁ][\\p{M}+]*[а-яё][а-яё\\p{M}+]*(?![\\p{L}\\p{M}+])")
+
+    /**
+     * "в системе Тень-0" → "в системе тень-0": inside a sentence the model takes a capitalised
+     * word for a foreign name and reads "Тень" as "тэнь", "Тени" as "тэни". Lower case reads
+     * right. The first word of a sentence keeps its capital (the engine uses it to tell the end
+     * of a sentence from an abbreviation's dot).
+     */
+    fun lowerNames(text: String): String = TITLE.replace(text) { m ->
+        if (sentenceStart(text, m.range.first)) m.value else m.value.lowercase()
+    }
+
     private fun adjacent(text: String, a: MatchResult?, b: MatchResult?): Boolean {
         if (a == null || b == null) return false
         return GAP.matches(text.substring(a.range.last + 1, b.range.first))

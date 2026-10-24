@@ -359,7 +359,9 @@ class TextNormalizer {
                 t = RussianCaps.fix(t) { AccentDictionaryManager.has(it) }
                 t = russianNumbers.normalize(t)
             }
-            AccentDictionaryManager.apply(t, lowerLang)
+            t = AccentDictionaryManager.apply(t, lowerLang)
+            // capitalised words inside a sentence ("Тень", "Тени") are read as foreign names
+            if (lowerLang.startsWith("ru")) RussianCaps.lowerNames(t) else t
         } else {
             inputText
         }
