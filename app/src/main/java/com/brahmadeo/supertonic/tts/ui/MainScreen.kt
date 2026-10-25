@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.History
@@ -57,6 +58,9 @@ fun MainScreen(
     voices: Map<String, String>,
     selectedVoiceFile: String,
     onVoiceChange: (String) -> Unit,
+    hiddenVoiceCount: Int = 0,
+    onVoiceDelete: (String) -> Unit = {},
+    onRestoreVoices: () -> Unit = {},
 
     isMixingEnabled: Boolean,
     onMixingEnabledChange: (Boolean) -> Unit,
@@ -314,7 +318,12 @@ fun MainScreen(
                             label = stringResource(AppR.string.voice_style_label),
                             options = voices.keys.toList().sorted(),
                             selectedOption = voices.entries.find { it.value == selectedVoiceFile }?.key ?: "",
-                            onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") }
+                            onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") },
+                            // ✕ next to every voice but the one in use
+                            deletable = { name -> voices[name] != null && voices[name] != selectedVoiceFile && voices.size > 1 },
+                            onDelete = { name -> voices[name]?.let(onVoiceDelete) },
+                            footer = if (hiddenVoiceCount > 0) stringResource(AppR.string.voice_restore, hiddenVoiceCount) else null,
+                            onFooter = onRestoreVoices
                         )
 
                         // voice mixing is not offered: with reading by roles every character has
@@ -513,9 +522,22 @@ fun DropdownSelector(
     label: String,
     options: List<String>,
     selectedOption: String,
-    onOptionSelected: (String) -> Unit
+    onOptionSelected: (String) -> Unit,
+    deletable: (String) -> Boolean = { false },
+    onDelete: (String) -> Unit = {},
+    footer: String? = null,
+    onFooter: () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<String?>(null) }
+    confirm?.let { name ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            text = { Text(stringResource(AppR.string.voice_delete_confirm, name)) },
+            confirmButton = { TextButton(onClick = { confirm = null; onDelete(name) }) { Text(stringResource(AppR.string.voice_delete_yes)) } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text(stringResource(android.R.string.cancel)) } }
+        )
+    }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -542,7 +564,22 @@ fun DropdownSelector(
                     onClick = {
                         onOptionSelected(option)
                         expanded = false
-                    }
+                    },
+                    trailingIcon = if (deletable(option)) {
+                        {
+                            IconButton(onClick = { expanded = false; confirm = option }) {
+                                Icon(androidx.compose.material.icons.Icons.Filled.Close,
+                                    contentDescription = stringResource(AppR.string.voice_delete_cd))
+                            }
+                        }
+                    } else null
+                )
+            }
+            footer?.let { f ->
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(f, color = MaterialTheme.colorScheme.primary) },
+                    onClick = { expanded = false; onFooter() }
                 )
             }
         }

@@ -364,4 +364,23 @@
     <string name="export_job_gave_up">Saving the book stopped and will not continue by itself. Open the book and tap Save again: finished chapters are skipped.</string>
     <string name="export_job_done">Book saved: %1$s</string>
     <string name="speed_test_silent">%1$s — loaded but gave no sound</string>
+    <string name="roles_tempo_title">Speed up slow voices</string>
+    <string name="roles_tempo_desc">A voice noticeably slower than the main one (for example, one made from a recording) is sped up to it. Faster voices are left alone. Each voice is measured on its first lines</string>
+    <string name="voice_delete_confirm">Remove the voice “%1$s” from the list? It will not be offered or given to characters. Your own (imported) voice is deleted; a bundled one can be brought back.</string>
+    <string name="voice_delete_yes">Remove</string>
+    <string name="voice_delete_cd">Remove voice</string>
+    <string name="voice_restore">Bring back removed voices (%1$d)</string>
+    <string name="music_title">Background music</string>
+    <string name="music_desc">A quiet melody under the reading in the app\'s player: it plays while reading and stops with pause and stop. When saving to an audio file the app asks whether to mix it in</string>
+    <string name="music_none">No bundled melodies — pick your own file</string>
+    <string name="music_own">Own file: %1$s</string>
+    <string name="music_pick">Pick your own file…</string>
+    <string name="music_volume">Music volume: %1$d %%</string>
+    <string name="music_own_done">Melody added: %1$s</string>
+    <string name="music_own_failed">Melody not added: %1$s</string>
+    <string name="export_with_music">Mix in background music</string>
+    <string name="export_music_title">Background music</string>
+    <string name="export_music_question">Mix the background music into the file?</string>
+    <string name="export_music_yes">With music</string>
+    <string name="export_music_no">Without music</string>
 </resources>

@@ -519,6 +519,15 @@ object DialogueAnalyzer2 {
                         else -> null
                     }
                 }
+                // «Спасибо, обдумаю», - мысленно протранслировал ему: a first-person book, author words
+                // with a verb but no subject — "(я) протранслировал", the hero (it went to "a man")
+                if (speaker == null && h != null && h.name == null && h.noun == null && h.pronoun == null && h.verbGender != null &&
+                    authors.isNotEmpty() && heroAttributed > 0 && (heroNear || pi - heroSeenAt <= 6) &&
+                    (heroGender == null || heroGender == h.verbGender) &&
+                    authors.none { (a, b) -> words(text, a, b).any { it.lowercase() in setOf("мне", "меня", "мной", "мною") } } &&
+                    !subjectAfterVerb(authors.first().let { (a, b) -> words(text, a, b) })) {
+                    speaker = HERO; heroAttributed++
+                }
                 pendingQuoteSpeaker = if (authors.isEmpty()) speaker else null
                 lastQuoteBody = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }.trim()
                 if (speaker == SYSTEM) systemSeen = true
@@ -1379,6 +1388,26 @@ object DialogueAnalyzer2 {
     }
 
     /** Machines and acronyms ("ИИ", "компьютер") are rarely what "он/она" refers to. */
+    /**
+     * "подумал разведчик", "был скрытый вызов": the word after the past-tense verb is its subject
+     * (a noun or an adjective in the nominative) — not "протранслировал ему", "проговорил про себя",
+     * "раздал указания".
+     */
+    private fun subjectAfterVerb(ws: List<String>): Boolean {
+        val k = ws.indexOfFirst { PAST_VERB.matches(it.lowercase()) }
+        // the verb opens the author words ("мысленно протранслировал", "рассмотрев противника, проговорил");
+        // further on it is some other sentence, not "(я) сказал"
+        if (k < 0 || k > 2) return true
+        val next = ws.getOrNull(k + 1)?.lowercase() ?: return false
+        if (next in SOMEONE) return true
+        if (next in SMALL_WORDS) return false
+        return next.last() in "бвгджзклмнпрстфхцчшщ" || next.endsWith("ый") || next.endsWith("ий") || next.endsWith("ой")
+    }
+    private val PAST_VERB = Regex("[а-яё]{2,}(л|ла|лся|лась)")
+    private val SOMEONE = setOf("некто", "кто-то", "кто-нибудь", "никто", "нечто", "что-то", "все", "всё", "каждый", "один", "одна", "голос")
+    private val SMALL_WORDS = setOf("про", "в", "во", "на", "с", "со", "к", "ко", "у", "от", "за", "из", "без", "под", "над", "при",
+        "по", "для", "до", "о", "об", "обо", "не", "же", "бы", "ли", "уж", "вслух", "всем", "нам", "вам", "им", "ему", "ей", "себе", "мой", "свой")
+
     private fun isHuman(speaker: String): Boolean =
         speaker != HERO && speaker != SYSTEM && speaker !in machines && !(speaker.length <= 4 && speaker.all { it.isUpperCase() }) &&
             !speaker.first().isDigit()

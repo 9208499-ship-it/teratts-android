@@ -20,6 +20,7 @@ import com.brahmadeo.supertonic.tts.ui.PlaybackScreen
 import com.brahmadeo.supertonic.tts.ui.theme.SupertonicTheme
 import com.brahmadeo.supertonic.tts.utils.TextNormalizer
 import java.io.File
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.dp
@@ -158,6 +159,9 @@ class PlaybackActivity : ComponentActivity() {
     private var exportBookState = mutableStateOf(false)
     // "this chapter or the whole book?" is being asked
     private var exportAskState = mutableStateOf(false)
+    // background music on: saving asks whether to mix it into the file
+    private var exportMusicState = mutableStateOf(false)
+    private var musicAskState = mutableStateOf(false)
 
     // State persistence
     private var currentText = ""
@@ -404,12 +408,23 @@ class PlaybackActivity : ComponentActivity() {
                             androidx.compose.foundation.layout.Column {
                                 androidx.compose.material3.Text(getString(R.string.export_choose_message))
                                 androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.height(12.dp))
+                                // background music on: mix it into the files? (the last answer is ticked)
+                                if (com.brahmadeo.supertonic.tts.utils.BackgroundMusic.ready(this@PlaybackActivity)) {
+                                    androidx.compose.foundation.layout.Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                                            .clickable { exportMusicState.value = !exportMusicState.value }
+                                    ) {
+                                        androidx.compose.material3.Checkbox(checked = exportMusicState.value, onCheckedChange = { exportMusicState.value = it })
+                                        androidx.compose.material3.Text(getString(R.string.export_with_music))
+                                    }
+                                }
                                 androidx.compose.material3.OutlinedButton(
-                                    onClick = { exportAskState.value = false; exportChapter() },
+                                    onClick = { exportAskState.value = false; com.brahmadeo.supertonic.tts.utils.BackgroundMusic.setExportChoice(this@PlaybackActivity, exportMusicState.value); exportChapter() },
                                     modifier = androidx.compose.ui.Modifier.fillMaxWidth()
                                 ) { androidx.compose.material3.Text(getString(R.string.export_this_chapter)) }
                                 androidx.compose.material3.OutlinedButton(
-                                    onClick = { exportAskState.value = false; exportWholeBook() },
+                                    onClick = { exportAskState.value = false; com.brahmadeo.supertonic.tts.utils.BackgroundMusic.setExportChoice(this@PlaybackActivity, exportMusicState.value); exportWholeBook() },
                                     modifier = androidx.compose.ui.Modifier.fillMaxWidth()
                                 ) { androidx.compose.material3.Text(getString(R.string.export_whole_book)) }
                             }
@@ -419,6 +434,23 @@ class PlaybackActivity : ComponentActivity() {
                             androidx.compose.material3.TextButton(onClick = { exportAskState.value = false }) {
                                 androidx.compose.material3.Text(getString(R.string.cancel_action))
                             }
+                        }
+                    )
+                }
+                if (musicAskState.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { musicAskState.value = false },
+                        title = { androidx.compose.material3.Text(getString(R.string.export_music_title)) },
+                        text = { androidx.compose.material3.Text(getString(R.string.export_music_question)) },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(onClick = {
+                                musicAskState.value = false; com.brahmadeo.supertonic.tts.utils.BackgroundMusic.setExportChoice(this@PlaybackActivity, true); exportChapter()
+                            }) { androidx.compose.material3.Text(getString(R.string.export_music_yes)) }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = {
+                                musicAskState.value = false; com.brahmadeo.supertonic.tts.utils.BackgroundMusic.setExportChoice(this@PlaybackActivity, false); exportChapter()
+                            }) { androidx.compose.material3.Text(getString(R.string.export_music_no)) }
                         }
                     )
                 }
@@ -660,7 +692,13 @@ class PlaybackActivity : ComponentActivity() {
         val go: () -> Unit = {
             val inBook = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) != null &&
                 com.brahmadeo.supertonic.tts.utils.BookSession.matches(this, currentText)
-            if (inBook) exportAskState.value = true else exportChapter()
+            val music = com.brahmadeo.supertonic.tts.utils.BackgroundMusic.ready(this)
+            exportMusicState.value = music && com.brahmadeo.supertonic.tts.utils.BackgroundMusic.exportChoice(this)
+            when {
+                inBook -> exportAskState.value = true
+                music -> musicAskState.value = true
+                else -> exportChapter()
+            }
         }
         // saving runs for a long time with the screen off: once, ask to be let off battery
         // optimisation — Huawei, MIUI and others stop the app otherwise

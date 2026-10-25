@@ -364,4 +364,23 @@
     <string name="export_job_gave_up">Сохранение книги остановилось и само не продолжится. Откройте книгу и снова нажмите «Сохранить» — готовые главы пропустятся.</string>
     <string name="export_job_done">Книга сохранена: %1$s</string>
     <string name="speed_test_silent">%1$s — загрузилось, но звука не дало</string>
+    <string name="roles_tempo_title">Подгонять темп медленных голосов</string>
+    <string name="roles_tempo_desc">Голос, заметно более медленный, чем основной (например, сделанный по записи), ускоряется до него. Быстрые голоса не трогаются. Каждый голос измеряется по первым репликам</string>
+    <string name="voice_delete_confirm">Убрать голос «%1$s» из списка? Он не будет предлагаться и даваться персонажам. Свой (импортированный) голос удаляется совсем, встроенный можно вернуть.</string>
+    <string name="voice_delete_yes">Убрать</string>
+    <string name="voice_delete_cd">Убрать голос</string>
+    <string name="voice_restore">Вернуть убранные голоса (%1$d)</string>
+    <string name="music_title">Фоновая музыка</string>
+    <string name="music_desc">Тихая мелодия под чтение в плеере программы: играет, пока идёт чтение, останавливается с паузой и стопом. При сохранении в аудиофайл программа спросит, подмешивать ли её</string>
+    <string name="music_none">Встроенных мелодий нет — выберите свой файл</string>
+    <string name="music_own">Свой файл: %1$s</string>
+    <string name="music_pick">Выбрать свой файл…</string>
+    <string name="music_volume">Громкость музыки: %1$d %%</string>
+    <string name="music_own_done">Мелодия добавлена: %1$s</string>
+    <string name="music_own_failed">Мелодия не добавлена: %1$s</string>
+    <string name="export_with_music">Подмешать фоновую музыку</string>
+    <string name="export_music_title">Фоновая музыка</string>
+    <string name="export_music_question">Подмешать фоновую музыку в файл?</string>
+    <string name="export_music_yes">С музыкой</string>
+    <string name="export_music_no">Без музыки</string>
 </resources>

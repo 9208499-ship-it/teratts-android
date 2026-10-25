@@ -235,7 +235,8 @@ object EbookManager {
             val stamp = digest.digest().take(8).joinToString("") { "%02x".format(it) }
             File(context.filesDir, "ebooks/book_$stamp.$extension").takeIf { it.exists() }
                 ?.let { tmp.delete(); return it.absolutePath }
-            File(context.filesDir, "ebooks/book_$stamp.epub").takeIf { it.exists() }
+            // converted before covers were kept: convert it again (same file — places and characters stay)
+            File(context.filesDir, "ebooks/book_$stamp.epub").takeIf { it.exists() && !BookConverter.outdated(it) }
                 ?.let { tmp.delete(); return it.absolutePath }
             val destFile = File(context.filesDir, "ebooks/book_$stamp.$extension")
             if (!tmp.renameTo(destFile)) { tmp.copyTo(destFile, overwrite = true); tmp.delete() }

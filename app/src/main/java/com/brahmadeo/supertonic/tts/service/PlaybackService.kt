@@ -327,9 +327,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         return binder
     }
 
+    // background music follows the reading: plays while the book is read, stops with pause and stop
+    private val musicHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val musicFollower = object : Runnable {
+        override fun run() {
+            com.brahmadeo.supertonic.tts.utils.BackgroundMusic.follow(this@PlaybackService, isPlaying && isSynthesizing)
+            musicHandler.postDelayed(this, 400)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         self = java.lang.ref.WeakReference(this)
+        musicHandler.post(musicFollower)
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         createNotificationChannel()
@@ -476,9 +486,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val ref = com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService).takeIf { it.isNotEmpty() }
                 ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: main
             val gain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, voice, ref)
-            val pcm = SupertonicTTS.generateAudio(prepared, lang, voice, speed.coerceIn(0.5f, 2.5f), 0f, steps,
+            // as fast as it will be in the book (a slow voice made from a recording is sped up)
+            val previewSpeed = (speed * com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this@PlaybackService, voice, ref)).coerceIn(0.5f, 2.5f)
+            val pcm = SupertonicTTS.generateAudio(prepared, lang, voice, previewSpeed, 0f, steps,
                 gain, null) ?: return@launch
             com.brahmadeo.supertonic.tts.utils.VoiceLoudness.observe(this@PlaybackService, voice, pcm, gain, SupertonicTTS.getAudioSampleRate())
+            com.brahmadeo.supertonic.tts.utils.VoiceTempo.observe(this@PlaybackService, voice, prepared, pcm, previewSpeed, SupertonicTTS.getAudioSampleRate())
             if (!isActive || pcm.isEmpty()) return@launch
             val rate = SupertonicTTS.getAudioSampleRate()
             val track = try {
@@ -1003,8 +1016,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 else -> narratorStyle
                             }
                             // character's own pace × how this line is said (выпалил / протянул)
+                            // × the voice's own tempo: a slow voice (made from a recording) is sped up to the others
                             val pieceSpeed = (liveSpeed * (pc.speaker?.let { charSpeed[it] } ?: 1f) *
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner)).coerceIn(0.5f, 2.5f)
+                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner) *
+                                com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this@PlaybackService, pieceStyle, narratorStyle)).coerceIn(0.5f, 2.5f)
                             // every voice as loud as the main one (voices differ by a lot), then how the line is said
                             val pieceGain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner) *
                                 com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, pieceStyle, narratorStyle)
@@ -1033,6 +1048,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 if (r != null && r.isNotEmpty()) {
                                     result = r; sentenceBytes += r.size
                                     com.brahmadeo.supertonic.tts.utils.VoiceLoudness.observe(this@PlaybackService, pieceStyle, r, pieceGain,
+                                        SupertonicTTS.getAudioSampleRate())
+                                    com.brahmadeo.supertonic.tts.utils.VoiceTempo.observe(this@PlaybackService, pieceStyle, normalizedText, r, pieceSpeed,
                                         SupertonicTTS.getAudioSampleRate())
                                 }
                             }
@@ -1551,18 +1568,24 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
         // a quiet voice as loud as in the player
         val gain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this, stylePath, stylePath)
+        // and as fast as in the player
+        val voiceSpeed = (speed * com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this, stylePath, stylePath)).coerceIn(0.5f, 2.5f)
+        // background music under the voice, if asked for on saving (each chapter starts it afresh, fading in)
+        val music = if (com.brahmadeo.supertonic.tts.utils.BackgroundMusic.ready(this) && com.brahmadeo.supertonic.tts.utils.BackgroundMusic.exportChoice(this))
+            com.brahmadeo.supertonic.tts.utils.MusicStream.open(this, SupertonicTTS.getAudioSampleRate()) else null
         var complete = false
         try {
             for ((index, sentence) in sentences.withIndex()) {
                 if (!currentCoroutineContext().isActive || SupertonicTTS.isCancelled()) break
                 progress(index + 1, sentences.size)
                 val normalizedText = textNormalizer.normalize(sentence, lang, isAdvancedEnabled)
-                val audioData = SupertonicTTS.generateAudio(normalizedText, lang, stylePath, speed, 0.0f, steps, gain, null)
-                if (audioData != null && audioData.isNotEmpty()) writer.write(audioData)
+                val audioData = SupertonicTTS.generateAudio(normalizedText, lang, stylePath, voiceSpeed, 0.0f, steps, gain, null)
+                if (audioData != null && audioData.isNotEmpty()) { music?.mixInto(audioData); writer.write(audioData) }
                 else if (SupertonicTTS.isCancelled()) break
             }
             complete = currentCoroutineContext().isActive && !SupertonicTTS.isCancelled()
         } finally {
+            music?.close()
             if (!complete) { writer.abort(); made.delete() }
         }
         try {
@@ -1835,6 +1858,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     override fun onDestroy() {
         super.onDestroy()
         if (self?.get() === this) self = null
+        musicHandler.removeCallbacks(musicFollower)
+        com.brahmadeo.supertonic.tts.utils.BackgroundMusic.release()
         mediaSession.release()
         try {
             audioTrack?.release()

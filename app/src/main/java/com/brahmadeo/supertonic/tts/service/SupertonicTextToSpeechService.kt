@@ -522,8 +522,10 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 // latency the next utterance will add anyway)
                 if (index == units.lastIndex) toSynthesize += "\u2063"
 
+                // a slow voice (made from a recording) as fast as the others — as in the app's player
                 SupertonicTTS.generateAudio(
-                    toSynthesize, requestedLang, stylePath, effectiveSpeed, 0.0f,
+                    toSynthesize, requestedLang, stylePath,
+                    (effectiveSpeed * com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this, stylePath, stylePath)).coerceAtMost(2.5f), 0.0f,
                     steps, VOLUME_BOOST_FACTOR, streamingListener
                 )
 

@@ -298,6 +298,7 @@ fun LexiconScreen(
             item { FastCoresRow() }
             item { SpeedTestRow() }
             item { RolesSection() }
+            item { MusicSection() }
             item { NoiseScaleRow() }
             item { PauseScaleRow() }
             item { ParagraphPauseRow() }
@@ -629,6 +630,61 @@ private fun SpeedTestRow() {
     }
 }
 
+/** Background music under the reading: on/off, the melody (bundled or the user's own file), its volume. */
+@Composable
+private fun MusicSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val music = com.brahmadeo.supertonic.tts.utils.BackgroundMusic
+    var on by remember { mutableStateOf(music.enabled(context)) }
+    var tracks by remember { mutableStateOf(music.tracks(context)) }
+    var chosen by remember { mutableStateOf(music.track(context)?.id) }
+    var volume by remember { mutableStateOf(music.volume(context).toFloat()) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val msg = try {
+            val name = music.importOwn(context, uri)
+            tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
+            context.getString(AppR.string.music_own_done, name)
+        } catch (e: Exception) {
+            context.getString(AppR.string.music_own_failed, e.message ?: "?")
+        }
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+    }
+    Column {
+        PunctuationToggleRow(
+            title = stringResource(AppR.string.music_title),
+            description = stringResource(AppR.string.music_desc),
+            checked = on,
+            onToggle = { on = it; music.setEnabled(context, it) }
+        )
+        if (on) {
+            Column(modifier = Modifier.padding(horizontal = 28.dp)) {
+                if (tracks.isEmpty()) Text(stringResource(AppR.string.music_none), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (t in tracks) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { chosen = t.id; music.setTrack(context, t.id) }
+                    ) {
+                        RadioButton(selected = chosen == t.id, onClick = { chosen = t.id; music.setTrack(context, t.id) })
+                        Text(if (t.id == com.brahmadeo.supertonic.tts.utils.BackgroundMusic.OWN) stringResource(AppR.string.music_own, t.title) else t.title,
+                            style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text(stringResource(AppR.string.music_pick)) }
+                Text(stringResource(AppR.string.music_volume, volume.toInt()), style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = volume,
+                    onValueChange = { volume = Math.round(it).toFloat(); music.setVolume(context, volume.toInt()) },
+                    valueRange = 0f..60f
+                )
+            }
+        }
+    }
+}
+
 /** Your own voice: a Supertonic .json or the two TeraTTS .npy files, added to the voice list. */
 @Composable
 private fun ImportVoiceRow() {
@@ -744,6 +800,7 @@ private fun RolesSection() {
     var mainCount by remember { mutableStateOf(prefs.mainCount(context).toFloat()) }
     var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
     var evenLoudness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceLoudness.enabled(context)) }
+    var evenTempo by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceTempo.enabled(context)) }
     val voices = remember { prefs.availableVoices(context) }
     Column {
         PunctuationToggleRow(
@@ -764,6 +821,12 @@ private fun RolesSection() {
                 description = stringResource(AppR.string.roles_loudness_desc),
                 checked = evenLoudness,
                 onToggle = { evenLoudness = it; com.brahmadeo.supertonic.tts.utils.VoiceLoudness.setEnabled(context, it) }
+            )
+            PunctuationToggleRow(
+                title = stringResource(AppR.string.roles_tempo_title),
+                description = stringResource(AppR.string.roles_tempo_desc),
+                checked = evenTempo,
+                onToggle = { evenTempo = it; com.brahmadeo.supertonic.tts.utils.VoiceTempo.setEnabled(context, it) }
             )
             if (perCharacter) {
                 Column(modifier = Modifier.padding(horizontal = 28.dp)) {

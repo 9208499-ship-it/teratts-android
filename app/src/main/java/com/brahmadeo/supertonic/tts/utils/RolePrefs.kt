@@ -13,6 +13,7 @@ object RolePrefs {
     private const val KEY_CHARACTERS = "roles_per_character"
     private const val KEY_UNKNOWN = "roles_unknown_voice"
     private const val KEY_MAIN_COUNT = "roles_main_count"
+    private const val KEY_HIDDEN = "hidden_voices"
 
     /**
      * Only this many main characters (most lines in the book) get their own voices. With the
@@ -70,9 +71,33 @@ object RolePrefs {
 
     fun voicesDir(context: Context) = File(context.filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
 
-    /** All installed voice files, sorted. */
-    fun availableVoices(context: Context): List<String> =
-        voicesDir(context).listFiles { _, n -> n.endsWith(".json") }?.map { it.name }?.sorted() ?: emptyList()
+    /** All installed voice files, sorted — without the ones the user removed from the list. */
+    fun availableVoices(context: Context): List<String> {
+        val hidden = hiddenVoices(context)
+        return voicesDir(context).listFiles { _, n -> n.endsWith(".json") }?.map { it.name }
+            ?.filter { it !in hidden }?.sorted() ?: emptyList()
+    }
+
+    /** Bundled voices the user removed from the list (✕): they are not offered and not given to characters. */
+    fun hiddenVoices(context: Context): Set<String> =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_HIDDEN, null)?.toSet() ?: emptySet()
+
+    private fun bundled(file: String) =
+        file.startsWith("ru_") || file.startsWith("eng_") || file.startsWith("st3_") || file.startsWith("lib_")
+
+    /**
+     * Removes a voice from the lists. One of the user's own (imported) voices is deleted; a bundled
+     * one is only hidden — its file would be put back on the next start — and can be returned.
+     */
+    fun removeVoice(context: Context, file: String) {
+        if (!bundled(file)) { File(voicesDir(context), file).delete(); return }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putStringSet(KEY_HIDDEN, hiddenVoices(context) + file).apply()
+    }
+
+    /** Brings back all hidden bundled voices. */
+    fun restoreVoices(context: Context) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_HIDDEN).apply()
 
     /** Absolute style path for a voice file, or null if it is not installed. */
     fun pathOf(context: Context, file: String): String? =

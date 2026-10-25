@@ -26,7 +26,24 @@ object BookConverter {
         val textLength: Int get() = paragraphs.sumBy { it.length }
     }
 
-    class Book(val title: String, val author: String, val chapters: List<Chapter>)
+    /** [cover]: the book's cover picture (FB2 <coverpage>), [coverMime] its type ("image/jpeg"). */
+    class Book(val title: String, val author: String, val chapters: List<Chapter>,
+               val cover: ByteArray? = null, val coverMime: String? = null)
+
+    /**
+     * Marks an EPUB made by this converter that keeps the cover (2: since 1.6.19). Books converted
+     * before have no cover — the FB2 is gone after conversion — and are converted again when the
+     * same file is opened once more ([outdated]).
+     */
+    private const val CONVERTER_MARK = "teratts-converter"
+
+    /** An EPUB this converter made before covers were kept: convert the book again if its file is at hand. */
+    fun outdated(epub: File): Boolean = try {
+        ZipFile(epub).use { z ->
+            val opf = z.getEntry("OEBPS/content.opf")?.let { e -> z.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) } } ?: return false
+            opf.contains("urn:teratts:") && !opf.contains(CONVERTER_MARK)
+        }
+    } catch (e: Exception) { false }
 
     /** Lower-case format tag by file name / content, or null if not convertible. */
     fun detectFormat(fileName: String, header: ByteArray): String? {
@@ -79,7 +96,7 @@ object BookConverter {
         }
         // the imported copy is called book_<hash>: that is no title for the library
         val unnamed = parsed.title.isBlank() || parsed.title == source.nameWithoutExtension || parsed.title.startsWith("book_")
-        val book = if (unnamed && !title.isNullOrBlank()) Book(title, parsed.author, parsed.chapters) else parsed
+        val book = if (unnamed && !title.isNullOrBlank()) Book(title, parsed.author, parsed.chapters, parsed.cover, parsed.coverMime) else parsed
         writeEpub(postprocess(book), target)
     }
 
@@ -202,8 +219,27 @@ object BookConverter {
         val body = children(root).firstOrNull { localName(it) == "body" && it.getAttribute("name").lowercase() !in setOf("notes", "comments", "footnotes") }
             ?: throw IllegalArgumentException("FB2 without <body>")
         walkSection(body, chapters)
-        return Book(title, author, chapters)
+        val (cover, mime) = fb2Cover(root) ?: (null to null)
+        return Book(title, author, chapters, cover, mime)
     }
+
+    /** <coverpage><image l:href="#cover.jpg"/></coverpage> → the <binary id="cover.jpg"> it points to. */
+    private fun fb2Cover(root: Element): Pair<ByteArray, String>? = try {
+        val page = firstDescendant(root, "description", "title-info", "coverpage")
+        val image = page?.let { p -> children(p).firstOrNull { localName(it) == "image" } }
+        val href = image?.let { img ->
+            val attrs = img.attributes
+            (0 until attrs.length).map { attrs.item(it) }.firstOrNull { it.nodeName.substringAfter(':') == "href" }?.nodeValue
+        }?.removePrefix("#")
+        val binary = href?.let { id -> children(root).firstOrNull { localName(it) == "binary" && it.getAttribute("id") == id } }
+        binary?.let { b ->
+            val bytes = java.util.Base64.getMimeDecoder().decode(b.textContent.trim())
+            val type = b.getAttribute("content-type").lowercase().ifEmpty {
+                if (bytes.size > 3 && bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()) "image/png" else "image/jpeg"
+            }
+            if (bytes.size > 100 && (type == "image/jpeg" || type == "image/jpg" || type == "image/png")) bytes to (if (type == "image/png") type else "image/jpeg") else null
+        }
+    } catch (e: Exception) { null }
 
     // ------------------------------------------------------------------ FB3
 
@@ -326,7 +362,7 @@ object BookConverter {
         if (out.isEmpty()) throw IllegalArgumentException("no text found in the book")
         // untitled chapters get a number
         out.forEachIndexed { i, c -> if (c.title.isEmpty()) c.title = "${i + 1}" }
-        return Book(book.title, book.author, out)
+        return Book(book.title, book.author, out, book.cover, book.coverMime)
     }
 
     private fun joinTitles(a: String, b: String): String =
@@ -363,6 +399,9 @@ object BookConverter {
 </container>
 """)
             val ids = book.chapters.indices.map { "ch%03d".format(it + 1) }
+            // the cover, for the library and for the saved audio files (players show it)
+            val cover = book.cover?.takeIf { book.coverMime != null }
+            val coverFile = if (book.coverMime == "image/png") "cover.png" else "cover.jpg"
             for ((i, c) in book.chapters.withIndex()) {
                 val sb = StringBuilder()
                 sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>")
@@ -391,13 +430,19 @@ object BookConverter {
                 .append("<dc:title>").append(esc(book.title)).append("</dc:title>\n")
                 .append("<dc:language>ru</dc:language>\n")
             if (book.author.isNotEmpty()) opf.append("<dc:creator>").append(esc(book.author)).append("</dc:creator>\n")
+            if (cover != null) opf.append("<meta name=\"cover\" content=\"cover-image\"/>\n")
+            opf.append("<meta name=\"$CONVERTER_MARK\" content=\"2\"/>\n")
             opf.append("<meta property=\"dcterms:modified\">2026-01-01T00:00:00Z</meta>\n</metadata>\n<manifest>\n")
                 .append("<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n")
                 .append("<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n")
+            if (cover != null) opf.append("<item id=\"cover-image\" href=\"$coverFile\" media-type=\"${book.coverMime}\" properties=\"cover-image\"/>\n")
             for (id in ids) opf.append("<item id=\"$id\" href=\"$id.xhtml\" media-type=\"application/xhtml+xml\"/>\n")
             opf.append("</manifest>\n<spine toc=\"ncx\">\n")
             for (id in ids) opf.append("<itemref idref=\"$id\"/>\n")
             opf.append("</spine>\n</package>\n")
+            if (cover != null) {
+                zip.putNextEntry(ZipEntry("OEBPS/$coverFile")); zip.write(cover); zip.closeEntry()
+            }
             put("OEBPS/content.opf", opf.toString())
         }
         if (!tmp.renameTo(target)) throw java.io.IOException("rename failed: $tmp")

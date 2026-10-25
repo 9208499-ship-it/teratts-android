@@ -371,6 +371,16 @@ class MainActivity : ComponentActivity() {
                         onHistoryClick = { historyLauncher.launch(Intent(this, HistoryActivity::class.java)) },
                         onQueueClick = { startActivity(Intent(this, QueueActivity::class.java)) },
                         onLexiconClick = { startActivity(Intent(this, LexiconActivity::class.java)) },
+                        // ✕ in the voice list: an imported voice is deleted, a bundled one hidden
+                        hiddenVoiceCount = com.brahmadeo.supertonic.tts.utils.RolePrefs.hiddenVoices(this).size,
+                        onVoiceDelete = { file ->
+                            com.brahmadeo.supertonic.tts.utils.RolePrefs.removeVoice(this, file)
+                            setupVoicesMap(viewModel.currentLang.value)
+                        },
+                        onRestoreVoices = {
+                            com.brahmadeo.supertonic.tts.utils.RolePrefs.restoreVoices(this)
+                            setupVoicesMap(viewModel.currentLang.value)
+                        },
                         onTtsSettingsClick = { openSystemTtsSettings() },
                         onDeleteModelClick = { viewModel.showModelDeleteDialog.value = true },
                         onOpenEbookClick = {
@@ -609,9 +619,10 @@ class MainActivity : ComponentActivity() {
         // Check dynamic dir for default listing
         val voiceDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
         if (voiceDir.exists()) {
+            val hidden = com.brahmadeo.supertonic.tts.utils.RolePrefs.hiddenVoices(this)
             val files = voiceDir.listFiles { _, name -> name.endsWith(".json") }
             files?.forEach { file ->
-                if (!voiceResources.containsKey(file.name)) {
+                if (!voiceResources.containsKey(file.name) && file.name !in hidden) {
                     val friendlyName = com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(file.name)
                     viewModel.voiceFiles[friendlyName] = file.name
                 }
