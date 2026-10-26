@@ -392,4 +392,5 @@
     <string name="engine_downloading">Downloading Supertonic 3: %1$d %%</string>
     <string name="engine_download_failed">Download failed: %1$s. Check the connection and tap again — what is downloaded is kept</string>
     <string name="engine_st3_delete">Delete Supertonic 3 (%1$d MB)</string>
+    <string name="engine_st3_upgrade">Download the sped-up Supertonic 3 (faster on phones)</string>
 </resources>

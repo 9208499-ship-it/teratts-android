@@ -234,10 +234,19 @@ object AssetManager {
     private const val KEY_ENGINE = "engine_model"
     const val ENGINE_TERA = "tera"
     const val ENGINE_ST3 = "st3"
+    /**
+     * Sped up for phones (teratts-st3-optimize.sh: 1×1 convolutions as MatMul — they then use every
+     * core — and the vector estimator in int8), hosted with the app's releases; Supertone's own
+     * files are the fallback (same inputs and outputs, so any mix works).
+     */
+    private const val ST3_FAST_URL = "https://github.com/9208499-ship-it/teratts-android/releases/download/models-st3-v1"
     private val ST3_URLS = listOf(
+        ST3_FAST_URL,
         "https://huggingface.co/Supertone/supertonic-3/resolve/main/onnx",
         "https://huggingface.co/supertone-oss-archive/supertonic-3/resolve/aafc6e32416a594460b32413efc49d7fe4ce6d46/onnx"
     )
+    private const val ST3_FAST_MARK = ".fast"
+
     private val ST3_FILES = listOf("tts.json", "unicode_indexer.json", "duration_predictor.onnx", "text_encoder.onnx",
         "vocoder.onnx", "vector_estimator.onnx")
 
@@ -248,6 +257,17 @@ object AssetManager {
     private fun st3Dir(context: Context) = File(context.filesDir, "$MODEL_VERSION/st3")
 
     fun st3Ready(context: Context) = ST3_FILES.all { File(st3Dir(context), it).let { f -> f.exists() && f.length() > 0 } }
+
+    /** Downloaded from the sped-up set (every model file); false — Supertone's original files, slower. */
+    fun st3Fast(context: Context) = File(st3Dir(context), ST3_FAST_MARK).exists()
+
+    /** Replaces Supertonic 3's original files with the sped-up ones (deleted, downloaded again). */
+    suspend fun upgradeSt3(context: Context, onProgress: (Float) -> Unit) {
+        withContext(Dispatchers.IO) {
+            st3Dir(context).listFiles()?.forEach { if (it.name.endsWith(".onnx") || it.name.endsWith(".opt")) it.delete() }
+        }
+        downloadSt3(context, onProgress)
+    }
 
     /** The model chosen in Settings (TeraTTS unless Supertonic 3 is chosen and downloaded). */
     fun engine(context: Context): String {
@@ -272,6 +292,8 @@ object AssetManager {
         for (f in ST3_FILES) if (!File(dir, f).exists()) lengths[f] = contentLength(f)
         val total = lengths.values.sum().coerceAtLeast(1L)
         var done = 0L
+        // the sped-up set only if every model file came from it (the marker tells the settings)
+        var allFast = File(dir, ST3_FAST_MARK).exists() || ST3_FILES.none { it.endsWith(".onnx") && File(dir, it).exists() }
         for (f in ST3_FILES) {
             val target = File(dir, f)
             if (target.exists() && target.length() > 0) continue
@@ -279,6 +301,7 @@ object AssetManager {
             for (base in ST3_URLS) {
                 try {
                     fetchCounting("$base/$f", target) { n -> onProgress(((done + n).toFloat() / total).coerceIn(0f, 1f)) }
+                    if (base != ST3_FAST_URL && f.endsWith(".onnx")) allFast = false
                     last = null
                     break
                 } catch (e: Exception) { last = e }
@@ -286,6 +309,8 @@ object AssetManager {
             last?.let { throw it }
             done += target.length()
         }
+        val mark = File(dir, ST3_FAST_MARK)
+        if (allFast) mark.writeText("models-st3-v1") else mark.delete()
         onProgress(1f)
     }
 

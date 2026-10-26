@@ -642,6 +642,7 @@ private fun EngineSection() {
     val scope = rememberCoroutineScope()
     var engine by remember { mutableStateOf(assets.engine(context)) }
     var ready by remember { mutableStateOf(assets.st3Ready(context)) }
+    var fast by remember { mutableStateOf(assets.st3Fast(context)) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     fun restart() {
@@ -657,7 +658,7 @@ private fun EngineSection() {
             scope.launch {
                 try {
                     assets.downloadSt3(context) { p -> scope.launch { progress = p } }
-                    ready = assets.st3Ready(context)
+                    ready = assets.st3Ready(context); fast = assets.st3Fast(context)
                     if (ready) { assets.setEngine(context, e); engine = e; restart() }
                 } catch (ex: Exception) {
                     error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
@@ -691,6 +692,23 @@ private fun EngineSection() {
             LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        // downloaded before the sped-up files were there (1.6.21): offer them
+        if (ready && !fast && progress == null) {
+            TextButton(onClick = {
+                error = null; progress = 0f
+                scope.launch {
+                    try {
+                        assets.upgradeSt3(context) { p -> scope.launch { progress = p } }
+                        ready = assets.st3Ready(context); fast = assets.st3Fast(context)
+                        if (engine == assets.ENGINE_ST3) restart()
+                    } catch (ex: Exception) {
+                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                        ready = assets.st3Ready(context)
+                    }
+                    progress = null
+                }
+            }) { Text(stringResource(AppR.string.engine_st3_upgrade)) }
+        }
         if (ready && engine != assets.ENGINE_ST3 && progress == null) {
             TextButton(onClick = { assets.deleteSt3(context); ready = false }) {
                 Text(stringResource(AppR.string.engine_st3_delete, assets.st3SizeMb(context)))
