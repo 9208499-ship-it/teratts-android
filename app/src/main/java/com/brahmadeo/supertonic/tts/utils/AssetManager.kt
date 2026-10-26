@@ -265,6 +265,7 @@ object AssetManager {
     suspend fun upgradeSt3(context: Context, onProgress: (Float) -> Unit) {
         withContext(Dispatchers.IO) {
             st3Dir(context).listFiles()?.forEach { if (it.name.endsWith(".onnx") || it.name.endsWith(".opt")) it.delete() }
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, false).apply()
         }
         downloadSt3(context, onProgress)
     }
@@ -351,7 +352,46 @@ object AssetManager {
     /** Frees the space Supertonic 3 takes (back to TeraTTS). */
     fun deleteSt3(context: Context) {
         setEngine(context, ENGINE_TERA)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, false).apply()
         st3Dir(context).deleteRecursively()
+    }
+
+    // ---- Supertonic 3's precision: the main part (vector estimator) in 32 bits or in 8 ----
+    // The engine loads vector_estimator.onnx; the other variant waits beside it under its own
+    // name, so switching back and forth is two renames (the 8-bit one is downloaded once, 66 MB).
+
+    private const val KEY_ST3_INT8 = "st3_int8"
+    private const val VE = "vector_estimator.onnx"
+    private const val VE_FP32 = "vector_estimator_fp32.onnx"
+    private const val VE_INT8 = "vector_estimator_int8.onnx"
+
+    /** 8 bits chosen (faster on weak phones, slightly less exact sound). */
+    fun st3Int8(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ST3_INT8, false)
+
+    /** Switches the precision; downloads the 8-bit part the first time. The engine must be restarted after. */
+    suspend fun setSt3Int8(context: Context, on: Boolean, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        if (st3Int8(context) == on) return@withContext
+        val dir = st3Dir(context)
+        val active = File(dir, VE)
+        val wanted = File(dir, if (on) VE_INT8 else VE_FP32)
+        if (!wanted.exists() || wanted.length() == 0L) {
+            // only the sped-up release has it (Supertone has no 8-bit model; the 32-bit one is in both)
+            val urls = if (on) listOf("$ST3_FAST_URL/$VE_INT8") else ST3_URLS.map { "$it/$VE" }
+            var last: Exception? = null
+            for (u in urls) {
+                try { fetchCounting(u, wanted) { n -> onProgress((n / 70e6f).coerceIn(0f, 0.99f)) }; last = null; break }
+                catch (e: Exception) { last = e }
+            }
+            last?.let { throw it }
+        }
+        val aside = File(dir, if (on) VE_FP32 else VE_INT8)
+        aside.delete()
+        if (active.exists() && !active.renameTo(aside)) throw java.io.IOException("rename failed: $active")
+        if (!wanted.renameTo(active)) throw java.io.IOException("rename failed: $wanted")
+        // the graph the engine optimised for the other variant must not be taken for this one
+        File(dir, "$VE.opt").delete()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, on).apply()
+        onProgress(1f)
     }
 
     fun st3SizeMb(context: Context): Long =

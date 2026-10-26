@@ -393,4 +393,7 @@
     <string name="engine_download_failed">Download failed: %1$s. Check the connection and tap again — what is downloaded is kept</string>
     <string name="engine_st3_delete">Delete Supertonic 3 (%1$d MB)</string>
     <string name="engine_st3_upgrade">Download the sped-up Supertonic 3 (faster on phones)</string>
+    <string name="engine_st3_precision">Supertonic 3 precision</string>
+    <string name="engine_st3_fp32">Full (32-bit) — sounds like the original</string>
+    <string name="engine_st3_int8">Faster (8-bit) — for slow phones, downloads 66 MB</string>
 </resources>

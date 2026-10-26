@@ -393,4 +393,7 @@
     <string name="engine_download_failed">Не скачалось: %1$s. Проверьте интернет и нажмите ещё раз — скачанное не потеряется</string>
     <string name="engine_st3_delete">Удалить Supertonic 3 (%1$d МБ)</string>
     <string name="engine_st3_upgrade">Скачать ускоренный Supertonic 3 (быстрее на телефоне)</string>
+    <string name="engine_st3_precision">Точность Supertonic 3</string>
+    <string name="engine_st3_fp32">Полная (32 бита) — звук как у оригинала</string>
+    <string name="engine_st3_int8">Быстрее (8 бит) — для слабых телефонов, докачивается 66 МБ</string>
 </resources>

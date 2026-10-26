@@ -648,6 +648,10 @@ impl HomoRuntime {
     }
 }
 
+/// Fewest denoising steps Supertonic 3 is run with (measured against 32 steps: 3 steps clip and
+/// hiss, 5 are clean; 8 are a little closer still).
+pub const MIN_ST3_STEPS: usize = 5;
+
 /// Which model the four graphs are: TeraTTSv2 (a distilled sampler, one call) or
 /// Supertonic 3 (Supertone's multilingual model: a vector estimator called step by step).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -776,7 +780,9 @@ impl TextToSpeech {
         let lmask_value = Value::from_array(Array3::<f32>::ones((1, 1, frames)))?;
         let latent = if st3 {
             // Supertonic 3: the vector estimator, step by step (Supertone's helper.py `_infer`)
-            let steps = if total_step == 0 { 5 } else { total_step.clamp(2, 16) };
+            // at least 5 steps: the app's default is 3 (TeraTTS ignores it — its sampler has 8 inside),
+            // and Supertonic 3 at 3 steps overshoots (peaks 1.6 instead of 0.5) and hisses
+            let steps = total_step.clamp(MIN_ST3_STEPS, 16);
             let total_value = Value::from_array(Array::from_elem(1, steps as f32))?;
             let mut xt_value = noise_value;
             for step in 0..steps {

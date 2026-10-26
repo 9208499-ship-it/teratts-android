@@ -643,6 +643,7 @@ private fun EngineSection() {
     var engine by remember { mutableStateOf(assets.engine(context)) }
     var ready by remember { mutableStateOf(assets.st3Ready(context)) }
     var fast by remember { mutableStateOf(assets.st3Fast(context)) }
+    var int8 by remember { mutableStateOf(assets.st3Int8(context)) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     fun restart() {
@@ -684,6 +685,33 @@ private fun EngineSection() {
                 Column {
                     Text(title, style = MaterialTheme.typography.bodyMedium)
                     Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        // Supertonic 3's precision: 32 bits (exact) or 8 (faster on weak phones)
+        if (ready && fast && engine == assets.ENGINE_ST3) {
+            Text(stringResource(AppR.string.engine_st3_precision), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            for ((on, label) in listOf(false to stringResource(AppR.string.engine_st3_fp32), true to stringResource(AppR.string.engine_st3_int8))) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable(enabled = progress == null) {
+                        if (int8 == on) return@clickable
+                        error = null; progress = 0f
+                        scope.launch {
+                            try {
+                                assets.setSt3Int8(context, on) { p -> scope.launch { progress = p } }
+                                int8 = assets.st3Int8(context)
+                                restart()
+                            } catch (ex: Exception) {
+                                error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                            }
+                            progress = null
+                        }
+                    }
+                ) {
+                    RadioButton(selected = int8 == on, onClick = null)
+                    Text(label, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
