@@ -33,7 +33,8 @@ object VoiceTempo {
     fun setEnabled(context: Context, on: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
 
-    private fun key(voicePath: String) = File(voicePath).name
+    // per model: the same voice is faster or slower in TeraTTS and in Supertonic 3
+    private fun key(voicePath: String) = AssetManager.engineKey + File(voicePath).name
 
     private fun load(context: Context) {
         if (loaded) return
@@ -49,8 +50,11 @@ object VoiceTempo {
 
     /** The usual tempo: the median of the bundled voices measured so far (own voices left out). */
     private fun usual(): Float? {
+        val prefix = AssetManager.engineKey
         val v = tempos.keys.filter { k ->
-            (k.startsWith("ru_") || k.startsWith("eng_") || k.startsWith("st3_") || k.startsWith("lib_")) && measured(k) != null
+            val name = k.removePrefix(prefix)
+            k.startsWith(prefix) && !name.startsWith("st3:") &&
+                (name.startsWith("ru_") || name.startsWith("eng_") || name.startsWith("st3_") || name.startsWith("lib_")) && measured(k) != null
         }.mapNotNull { measured(it) }.sorted()
         if (v.size < 3) return null
         return v[v.size / 2]

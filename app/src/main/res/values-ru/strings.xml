@@ -383,4 +383,13 @@
     <string name="export_music_question">Подмешать фоновую музыку в файл?</string>
     <string name="export_music_yes">С музыкой</string>
     <string name="export_music_no">Без музыки</string>
+    <string name="engine_title">Голосовая модель</string>
+    <string name="engine_tera">TeraTTS</string>
+    <string name="engine_tera_desc">Русская модель, встроенная</string>
+    <string name="engine_st3">Supertonic 3</string>
+    <string name="engine_st3_desc_download">Новая многоязычная модель от Supertone (31 язык, есть русский). Скачивается при выборе, около 400 МБ</string>
+    <string name="engine_st3_desc_ready">Новая многоязычная модель от Supertone (31 язык, есть русский). Скачана</string>
+    <string name="engine_downloading">Скачивание Supertonic 3: %1$d %%</string>
+    <string name="engine_download_failed">Не скачалось: %1$s. Проверьте интернет и нажмите ещё раз — скачанное не потеряется</string>
+    <string name="engine_st3_delete">Удалить Supertonic 3 (%1$d МБ)</string>
 </resources>

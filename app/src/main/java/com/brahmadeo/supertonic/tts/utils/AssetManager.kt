@@ -228,6 +228,110 @@ object AssetManager {
         File(context.filesDir, MODEL_VERSION).takeIf { it.exists() }?.deleteRecursively()
     }
 
+    // ---- Supertonic 3 (Supertone, OpenRAIL-M): the second model to choose, downloaded on request ----
+
+    private const val PREFS = "SupertonicPrefs"
+    private const val KEY_ENGINE = "engine_model"
+    const val ENGINE_TERA = "tera"
+    const val ENGINE_ST3 = "st3"
+    private val ST3_URLS = listOf(
+        "https://huggingface.co/Supertone/supertonic-3/resolve/main/onnx",
+        "https://huggingface.co/supertone-oss-archive/supertonic-3/resolve/aafc6e32416a594460b32413efc49d7fe4ce6d46/onnx"
+    )
+    private val ST3_FILES = listOf("tts.json", "unicode_indexer.json", "duration_predictor.onnx", "text_encoder.onnx",
+        "vocoder.onnx", "vector_estimator.onnx")
+
+    /** Prefix for what is measured per voice (tempo, loudness): the same voice differs between the models. */
+    @Volatile var engineKey: String = ""
+        private set
+
+    private fun st3Dir(context: Context) = File(context.filesDir, "$MODEL_VERSION/st3")
+
+    fun st3Ready(context: Context) = ST3_FILES.all { File(st3Dir(context), it).let { f -> f.exists() && f.length() > 0 } }
+
+    /** The model chosen in Settings (TeraTTS unless Supertonic 3 is chosen and downloaded). */
+    fun engine(context: Context): String {
+        val e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ENGINE, ENGINE_TERA) ?: ENGINE_TERA
+        return if (e == ENGINE_ST3 && st3Ready(context)) ENGINE_ST3 else ENGINE_TERA
+    }
+
+    fun setEngine(context: Context, engine: String) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_ENGINE, engine).apply()
+
+    /** The folder of the model to start the engine with — every engine start goes through here. */
+    fun modelDir(context: Context): File {
+        val st3 = engine(context) == ENGINE_ST3
+        engineKey = if (st3) "st3:" else ""
+        return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
+    }
+
+    /** Downloads Supertonic 3 (~400 MB; what is there already is not downloaded again). */
+    suspend fun downloadSt3(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        val dir = st3Dir(context).apply { mkdirs() }
+        val lengths = HashMap<String, Long>()
+        for (f in ST3_FILES) if (!File(dir, f).exists()) lengths[f] = contentLength(f)
+        val total = lengths.values.sum().coerceAtLeast(1L)
+        var done = 0L
+        for (f in ST3_FILES) {
+            val target = File(dir, f)
+            if (target.exists() && target.length() > 0) continue
+            var last: Exception? = null
+            for (base in ST3_URLS) {
+                try {
+                    fetchCounting("$base/$f", target) { n -> onProgress(((done + n).toFloat() / total).coerceIn(0f, 1f)) }
+                    last = null
+                    break
+                } catch (e: Exception) { last = e }
+            }
+            last?.let { throw it }
+            done += target.length()
+        }
+        onProgress(1f)
+    }
+
+    private fun contentLength(f: String): Long {
+        for (base in ST3_URLS) {
+            try {
+                val c = URL("$base/$f").openConnection() as java.net.HttpURLConnection
+                c.requestMethod = "HEAD"; c.instanceFollowRedirects = true
+                val n = c.contentLengthLong; c.disconnect()
+                if (n > 0) return n
+            } catch (_: Exception) { }
+        }
+        return 0L
+    }
+
+    private fun fetchCounting(url: String, target: File, onBytes: (Long) -> Unit) {
+        target.parentFile?.mkdirs()
+        val part = File(target.path + ".part")
+        try {
+            URL(url).openStream().use { input ->
+                FileOutputStream(part).use { output ->
+                    val buf = ByteArray(1 shl 16)
+                    var n = 0L
+                    var lastReport = 0L
+                    while (true) {
+                        val r = input.read(buf); if (r < 0) break
+                        output.write(buf, 0, r); n += r
+                        if (n - lastReport > (1 shl 20)) { lastReport = n; onBytes(n) }
+                    }
+                }
+            }
+            if (!part.renameTo(target)) throw java.io.IOException("rename failed: $part")
+        } catch (e: Exception) {
+            part.delete(); throw e
+        }
+    }
+
+    /** Frees the space Supertonic 3 takes (back to TeraTTS). */
+    fun deleteSt3(context: Context) {
+        setEngine(context, ENGINE_TERA)
+        st3Dir(context).deleteRecursively()
+    }
+
+    fun st3SizeMb(context: Context): Long =
+        (st3Dir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
+
     /** Remove Supertonic model directories left by earlier installs. */
     fun cleanupOldVersions(context: Context) {
         listOf("v1", "v2", "v3").forEach { old ->

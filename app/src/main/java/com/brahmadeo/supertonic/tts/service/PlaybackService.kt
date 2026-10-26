@@ -374,7 +374,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             isActive = true
         }
 
-        val modelPath = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/onnx").absolutePath
+        val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
         val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
         // start the engine in the background: on the main thread it froze the app
         engineReady = serviceScope.launch(Dispatchers.IO) {
@@ -427,7 +427,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         } else if (intent?.action == "RESET_ENGINE") {
             // reload in the background: loading the models takes seconds, and on the
             // main thread it froze the app ("не отвечает"); reading waits for engineReady
-            val modelPath = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/onnx").absolutePath
+            val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             val previous = engineReady
             engineReady = serviceScope.launch(Dispatchers.IO) {

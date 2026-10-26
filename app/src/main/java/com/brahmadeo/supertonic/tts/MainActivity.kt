@@ -581,7 +581,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun initializeEngine() {
-        val modelPath = File(filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
+        val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
         val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
 
         if (SupertonicTTS.isInitialized(modelPath)) {

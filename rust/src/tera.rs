@@ -784,6 +784,31 @@ pub fn spell_signs(s: &str, base: &str) -> String {
 /// Full front-end: returns the exact string for the text encoder (with '+'),
 /// or None if nothing speakable is left.
 pub fn prepare(text: &str, lang: &str, table: &[i64]) -> Option<String> {
+    prepare_with(text, lang, table, false)
+}
+
+/// Stress for Supertonic 3: it marks stress with U+0301 after the vowel, not '+' before it.
+/// Without the acute in its vocabulary the marks are dropped (a '+' would be read aloud).
+pub fn plus_to_acute(s: &str, keep: bool) -> String {
+    let ch: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len() + 8);
+    let mut i = 0;
+    while i < ch.len() {
+        if ch[i] == '+' && i + 1 < ch.len() && RU_VOWELS.contains(ch[i + 1]) {
+            out.push(ch[i + 1]);
+            if keep { out.push('\u{301}'); }
+            i += 2;
+            continue;
+        }
+        if ch[i] != '+' { out.push(ch[i]); }
+        i += 1;
+    }
+    out
+}
+
+/// [prepare] for either model: TeraTTSv2 (stress as '+'), or Supertonic 3 ([st3]: stress as
+/// U+0301, a period at the end if there is no punctuation — as Supertone's own front-end does).
+pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<String> {
     let t: String = text.nfc().collect();
     let t = t.replace(['<', '>'], " ");
     let base0 = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
@@ -796,6 +821,11 @@ pub fn prepare(text: &str, lang: &str, table: &[i64]) -> Option<String> {
     let base = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
     let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
     let t = spell_leftover_digits(&t, base);
+    let t = if st3 {
+        let t = plus_to_acute(&t, is_known(table, '\u{301}'));
+        let trimmed = t.trim_end();
+        if trimmed.is_empty() || trimmed.ends_with(|c: char| ".!?;:,'\")…»".contains(c)) { t } else { format!("{trimmed}.") }
+    } else { t };
     let t = skip_unknown(&t, table);
     let t = COMMA_RUN.replace_all(&t, ",");
     let t = WS.replace_all(&t, " ").trim().to_string();
@@ -982,6 +1012,22 @@ mod tests {
         // the whole front-end keeps the converted marks
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru+".chars().enumerate() { table[c as usize] = i as i64 + 1; }
+        assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");
+    }
+
+    #[test]
+    fn supertonic3_front_end() {
+        assert_eq!(plus_to_acute("Зам+ок и молок+о", true), "Замо\u{301}к и молоко\u{301}");
+        assert_eq!(plus_to_acute("Зам+ок, C+", false), "Замок, C");
+        let mut table = vec![-1i64; 65536];
+        for (i, c) in "замокЗи. <>/ru".chars().enumerate() { table[c as usize] = i as i64 + 1; }
+        // no acute in the vocabulary: marks dropped, a period added
+        assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок.</ru>");
+        table[0x301] = 99;
+        let nfkd: String = "<ru>Замо\u{301}к.</ru>".nfkd().collect();
+        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
+        // TeraTTS unchanged
+        table['+' as usize] = 98;
         assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");
     }
 

@@ -74,7 +74,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         com.brahmadeo.supertonic.tts.utils.PlaybackPrefs.load(this)
 
         initJob = serviceScope.launch(Dispatchers.IO) {
-            val modelPath = File(filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
+            val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             SupertonicTTS.initialize(modelPath, libPath)
@@ -448,7 +448,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         val steps = prefs.getInt("diffusion_steps", 5)
 
         if (SupertonicTTS.getSoC() == -1) {
-            val modelPath = File(filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
+            val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
             SupertonicTTS.initialize(modelPath, libPath)

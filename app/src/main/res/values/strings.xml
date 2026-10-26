@@ -383,4 +383,13 @@
     <string name="export_music_question">Mix the background music into the file?</string>
     <string name="export_music_yes">With music</string>
     <string name="export_music_no">Without music</string>
+    <string name="engine_title">Voice model</string>
+    <string name="engine_tera">TeraTTS</string>
+    <string name="engine_tera_desc">The Russian model, built in</string>
+    <string name="engine_st3">Supertonic 3</string>
+    <string name="engine_st3_desc_download">Supertone\'s new multilingual model (31 languages, Russian among them). Downloaded when chosen, about 400 MB</string>
+    <string name="engine_st3_desc_ready">Supertone\'s new multilingual model (31 languages, Russian among them). Downloaded</string>
+    <string name="engine_downloading">Downloading Supertonic 3: %1$d %%</string>
+    <string name="engine_download_failed">Download failed: %1$s. Check the connection and tap again — what is downloaded is kept</string>
+    <string name="engine_st3_delete">Delete Supertonic 3 (%1$d MB)</string>
 </resources>

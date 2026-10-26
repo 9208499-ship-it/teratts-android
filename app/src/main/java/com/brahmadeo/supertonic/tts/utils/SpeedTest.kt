@@ -64,7 +64,7 @@ object SpeedTest {
         val fast0 = CpuCores.enabled(app)
         val xnn0 = CpuCores.xnnpack(app)
         try {
-            val modelPath = File(app.filesDir, "${AssetManager.MODEL_VERSION}/onnx").absolutePath
+            val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(app).absolutePath
             val libPath = app.applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             val voice = app.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)
                 .getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"

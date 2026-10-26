@@ -296,6 +296,7 @@ fun LexiconScreen(
             item { SendLogRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
+            item { EngineSection() }
             item { SpeedTestRow() }
             item { RolesSection() }
             item { MusicSection() }
@@ -627,6 +628,74 @@ private fun SpeedTestRow() {
                 if (!running) TextButton(onClick = { dialog = null }) { Text(stringResource(android.R.string.ok)) }
             }
         )
+    }
+}
+
+/**
+ * The voice model: TeraTTS (Russian, bundled) or Supertonic 3 (Supertone's new multilingual
+ * model, downloaded here on request). The engine restarts with the chosen one.
+ */
+@Composable
+private fun EngineSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
+    val scope = rememberCoroutineScope()
+    var engine by remember { mutableStateOf(assets.engine(context)) }
+    var ready by remember { mutableStateOf(assets.st3Ready(context)) }
+    var progress by remember { mutableStateOf<Float?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    fun restart() {
+        try {
+            context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
+                .setAction("RESET_ENGINE"))
+        } catch (_: Exception) { }
+    }
+    fun choose(e: String) {
+        if (e == assets.ENGINE_ST3 && !ready) {
+            if (progress != null) return
+            error = null; progress = 0f
+            scope.launch {
+                try {
+                    assets.downloadSt3(context) { p -> scope.launch { progress = p } }
+                    ready = assets.st3Ready(context)
+                    if (ready) { assets.setEngine(context, e); engine = e; restart() }
+                } catch (ex: Exception) {
+                    error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                }
+                progress = null
+            }
+            return
+        }
+        assets.setEngine(context, e); engine = e; restart()
+    }
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(stringResource(AppR.string.engine_title), style = MaterialTheme.typography.titleSmall)
+        for ((id, title, desc) in listOf(
+            Triple(assets.ENGINE_TERA, stringResource(AppR.string.engine_tera), stringResource(AppR.string.engine_tera_desc)),
+            Triple(assets.ENGINE_ST3, stringResource(AppR.string.engine_st3), stringResource(
+                if (ready) AppR.string.engine_st3_desc_ready else AppR.string.engine_st3_desc_download))
+        )) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable { choose(id) }
+            ) {
+                RadioButton(selected = engine == id, onClick = { choose(id) })
+                Column {
+                    Text(title, style = MaterialTheme.typography.bodyMedium)
+                    Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        progress?.let { p ->
+            Text(stringResource(AppR.string.engine_downloading, (p * 100).toInt()), style = MaterialTheme.typography.bodySmall)
+            LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        if (ready && engine != assets.ENGINE_ST3 && progress == null) {
+            TextButton(onClick = { assets.deleteSt3(context); ready = false }) {
+                Text(stringResource(AppR.string.engine_st3_delete, assets.st3SizeMb(context)))
+            }
+        }
     }
 }
 
