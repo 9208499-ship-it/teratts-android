@@ -27,6 +27,7 @@ object SupertonicTTS {
     private external fun setPauseScale(scale: Float)
     private external fun setNoiseScale(scale: Float)
     private external fun setSt3Steps(steps: Int)
+    @Volatile private var st3StepsAvailable = true
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
     private external fun isXnnpackEnabled(): Boolean
@@ -201,7 +202,14 @@ object SupertonicTTS {
         try {
             setPauseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.pauseScale)
             setNoiseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.noiseScale)
-            setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps)
+            // an engine library from an older build has no such function: never crash on it
+            if (st3StepsAvailable) {
+                try { setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps) }
+                catch (e: UnsatisfiedLinkError) {
+                    st3StepsAvailable = false
+                    Log.e("SupertonicTTS", "engine library without setSt3Steps — an old build of the engine got into the APK")
+                }
+            }
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             val data = synthesize(nativePtr, text, lang, stylePath, speed, bufferDuration, steps, gain)
             return if (data.isNotEmpty()) data else null
