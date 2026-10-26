@@ -39,6 +39,8 @@ pub fn noise_scale() -> f32 {
 pub const GUIDANCE: f32 = 3.0;
 /// The model was trained on ≤25 s utterances; ~200 chars keeps well inside.
 pub const MAX_CHUNK_CHARS: usize = 200;
+/// Supertonic 3: pieces of at most 160 characters (longer ones are split at sentences, commas, words).
+pub const ST3_MAX_CHUNK_CHARS: usize = 160;
 
 /// int8 sampler: the Loop unrolled, 1x1 Conv1d -> MatMul, MatMul quantized to int8
 /// (tools/tera_graph_tools.py). ~3.5x faster on ARM with i8mm, 256 MB -> 72 MB.

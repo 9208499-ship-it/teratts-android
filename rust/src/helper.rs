@@ -864,7 +864,9 @@ impl TextToSpeech {
         mut callback: F,
     ) -> Result<(Vec<f32>, f32)> 
     where F: FnMut(usize, usize, Option<&[f32]>) -> bool {
-        let max_len = tera::MAX_CHUNK_CHARS;
+        // Supertonic 3 repeats and drops words more the longer a piece is (SuperClonica measured
+        // 3360 Russian draws: up to 160 characters ~0.06 %, 200 — 1.1 %, 290 — 4.2 %)
+        let max_len = if self.kind == ModelKind::Supertonic3 { tera::ST3_MAX_CHUNK_CHARS } else { tera::MAX_CHUNK_CHARS };
         let sr = self.sample_rate as f32;
         // Pauses follow the reading speed: at 2× a colon pause is half as long.
         let scale = tera::pause_scale() / speed.max(0.1);
