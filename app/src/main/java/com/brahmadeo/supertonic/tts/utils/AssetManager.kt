@@ -279,8 +279,19 @@ object AssetManager {
     fun setEngine(context: Context, engine: String) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_ENGINE, engine).apply()
 
+    /** Supertonic 3's quality: denoising steps 5 / 8 (Supertone's default) / 12. Read on every phrase. */
+    @Volatile var st3Steps: Int = 8
+        private set
+    private const val KEY_ST3_STEPS = "st3_steps"
+
+    fun setSt3Steps(context: Context, steps: Int) {
+        st3Steps = steps.coerceIn(5, 16)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ST3_STEPS, st3Steps).apply()
+    }
+
     /** The folder of the model to start the engine with — every engine start goes through here. */
     fun modelDir(context: Context): File {
+        st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
         val st3 = engine(context) == ENGINE_ST3
         engineKey = if (st3) "st3:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")

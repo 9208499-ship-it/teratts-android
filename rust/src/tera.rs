@@ -27,10 +27,23 @@ pub const SPEED: f32 = 1.05;
 /// Settings slider "стабильность ↔ выразительность", 0.4…1.0, default 0.667.
 static NOISE_SCALE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F2A_C083); // 0.667
 
-/// The stability slider (0.4…1.0) for Supertonic 3: not below the default 0.667 — under it the
-/// model sounds metallic; to the right it works as for TeraTTS.
-pub fn st3_noise_scale(slider: f32) -> f32 {
-    slider.clamp(0.667, 1.0)
+/// Supertonic 3's starting noise: Supertone's own 1.0, whatever the stability slider says. Measured
+/// against 32 steps on three voices: 8 steps at 1.0 — distance 1.35, at 0.667 — 1.89; below ~0.6 it
+/// sounds metallic. (The slider is TeraTTS's: its distilled sampler likes calm noise.)
+pub fn st3_noise_scale(_slider: f32) -> f32 {
+    1.0
+}
+
+/// Supertonic 3's denoising steps (Settings → Голосовая модель → Качество): 5 fast, 8 Supertone's
+/// default, 12 high. Measured distance to 32 steps (noise 1.0): 5 — 1.84, 8 — 1.35, 12 — 1.03.
+static ST3_STEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(8);
+
+pub fn set_st3_steps(n: i32) {
+    ST3_STEPS.store((n.clamp(5, 16)) as usize, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn st3_steps() -> usize {
+    ST3_STEPS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 pub fn set_noise_scale(v: f32) {
@@ -1091,10 +1104,12 @@ mod tests {
 
     #[test]
     fn supertonic3_noise() {
-        assert!((st3_noise_scale(0.4) - 0.667).abs() < 1e-4);
-        assert!((st3_noise_scale(1.0) - 1.0).abs() < 1e-4);
-        assert!((st3_noise_scale(0.667) - 0.667).abs() < 1e-4);
-        assert!((st3_noise_scale(0.85) - 0.85).abs() < 1e-4);
+        assert_eq!(st3_noise_scale(0.4), 1.0);
+        assert_eq!(st3_noise_scale(0.667), 1.0);
+        assert_eq!(st3_steps(), 8);
+        set_st3_steps(3); assert_eq!(st3_steps(), 5);
+        set_st3_steps(12); assert_eq!(st3_steps(), 12);
+        set_st3_steps(8);
     }
 
     #[test]

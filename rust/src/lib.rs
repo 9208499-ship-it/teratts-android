@@ -22,6 +22,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseS
     crate::tera::set_noise_scale(scale);
 }
 
+/// Supertonic 3's denoising steps (quality setting: 5 / 8 / 12).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Steps(
+    _env: JNIEnv,
+    _class: JClass,
+    steps: jint,
+) {
+    crate::tera::set_st3_steps(steps);
+}
+
 /// Pause after a paragraph, seconds (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(

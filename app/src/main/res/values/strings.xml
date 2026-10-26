@@ -340,7 +340,7 @@
     <string name="voice_import_done">Voice added: %1$s</string>
     <string name="voice_import_failed">Voice not added: %1$s</string>
     <string name="noise_scale_title">Stability ↔ expressiveness</string>
-    <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more. For Supertonic 3 the left half changes nothing: its sound turns metallic there.</string>
+    <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more. TeraTTS only: Supertonic 3 has its own settings (Voice model → Supertonic 3 quality).</string>
     <string name="noise_scale_stable">steady</string>
     <string name="noise_scale_lively">lively</string>
     <string name="speed_test_title">Speed test</string>
@@ -396,4 +396,8 @@
     <string name="engine_st3_precision">Supertonic 3 precision</string>
     <string name="engine_st3_fp32">Full (32-bit) — sounds like the original</string>
     <string name="engine_st3_int8">Faster (8-bit) — for slow phones, downloads 66 MB</string>
+    <string name="engine_st3_quality">Supertonic 3 quality</string>
+    <string name="engine_st3_q5">Fast (5 steps) — for slow phones</string>
+    <string name="engine_st3_q8">Normal (8 steps) — as Supertone has it</string>
+    <string name="engine_st3_q12">High (12 steps) — cleaner, 1.5× slower</string>
 </resources>

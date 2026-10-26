@@ -644,6 +644,7 @@ private fun EngineSection() {
     var ready by remember { mutableStateOf(assets.st3Ready(context)) }
     var fast by remember { mutableStateOf(assets.st3Fast(context)) }
     var int8 by remember { mutableStateOf(assets.st3Int8(context)) }
+    var st3Steps by remember { mutableStateOf(assets.st3Steps) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     fun restart() {
@@ -685,6 +686,21 @@ private fun EngineSection() {
                 Column {
                     Text(title, style = MaterialTheme.typography.bodyMedium)
                     Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        // Supertonic 3's quality: denoising steps (5 fast, 8 Supertone's default, 12 high)
+        if (ready && engine == assets.ENGINE_ST3) {
+            Text(stringResource(AppR.string.engine_st3_quality), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            for ((n, label) in listOf(5 to stringResource(AppR.string.engine_st3_q5), 8 to stringResource(AppR.string.engine_st3_q8),
+                    12 to stringResource(AppR.string.engine_st3_q12))) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable { st3Steps = n; assets.setSt3Steps(context, n) }
+                ) {
+                    RadioButton(selected = st3Steps == n, onClick = null)
+                    Text(label, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

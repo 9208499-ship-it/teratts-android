@@ -340,7 +340,7 @@
     <string name="voice_import_done">Голос добавлен: %1$s</string>
     <string name="voice_import_failed">Голос не добавлен: %1$s</string>
     <string name="noise_scale_title">Стабильность ↔ выразительность</string>
-    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается. У Supertonic 3 левее середины ничего не меняется: там его звук становится металлическим.</string>
+    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается. Только для TeraTTS: у Supertonic 3 свои настройки (Голосовая модель → Качество Supertonic 3).</string>
     <string name="noise_scale_stable">ровно</string>
     <string name="noise_scale_lively">живо</string>
     <string name="speed_test_title">Тест скорости</string>
@@ -396,4 +396,8 @@
     <string name="engine_st3_precision">Точность Supertonic 3</string>
     <string name="engine_st3_fp32">Полная (32 бита) — звук как у оригинала</string>
     <string name="engine_st3_int8">Быстрее (8 бит) — для слабых телефонов, докачивается 66 МБ</string>
+    <string name="engine_st3_quality">Качество Supertonic 3</string>
+    <string name="engine_st3_q5">Быстро (5 шагов) — для слабых телефонов</string>
+    <string name="engine_st3_q8">Обычно (8 шагов) — как у Supertone</string>
+    <string name="engine_st3_q12">Высоко (12 шагов) — чище, но в полтора раза медленнее</string>
 </resources>

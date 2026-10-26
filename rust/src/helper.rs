@@ -777,9 +777,8 @@ impl TextToSpeech {
         // lowered "temperature": the sampler starts from calmer noise, which makes the model's
         // known fault — a word skipped or said twice — much rarer (the old Supertonic path had
         // 0.667 for the same reason; the TeraTTS path used full 1.0)
-        // Supertonic 3 breaks below ~0.6 (peaks 0.8–1.5, a metallic sound — measured against 32
-        // steps); TeraTTS's distilled sampler likes calm noise. So the same slider gives Supertonic 3
-        // its own safe range: not below the default 0.667
+        // Supertonic 3: Supertone's own noise 1.0 (calm noise is TeraTTS's thing: below ~0.6 Supertonic 3
+        // sounds metallic, and even 0.667 is clearly worse than 1.0 — measured against 32 steps)
         let scale = if st3 { tera::st3_noise_scale(tera::noise_scale()) } else { tera::noise_scale() };
         let normal = Normal::new(0.0f32, scale).unwrap();
         let mut rng = rand::thread_rng();
@@ -788,9 +787,10 @@ impl TextToSpeech {
         let lmask_value = Value::from_array(Array3::<f32>::ones((1, 1, frames)))?;
         let latent = if st3 {
             // Supertonic 3: the vector estimator, step by step (Supertone's helper.py `_infer`)
-            // at least 5 steps: the app's default is 3 (TeraTTS ignores it — its sampler has 8 inside),
-            // and Supertonic 3 at 3 steps overshoots (peaks 1.6 instead of 0.5) and hisses
-            let steps = total_step.clamp(MIN_ST3_STEPS, 16);
+            // its own quality setting (5 / 8 / 12), not the app's step count: that is 3 by default
+            // (TeraTTS ignores it — its sampler has 8 inside), and Supertonic 3 at 3 steps overshoots
+            let _ = total_step;
+            let steps = tera::st3_steps().max(MIN_ST3_STEPS);
             let total_value = Value::from_array(Array::from_elem(1, steps as f32))?;
             let mut xt_value = noise_value;
             let emb_value = &emb_value;
