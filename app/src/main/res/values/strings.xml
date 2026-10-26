@@ -340,7 +340,7 @@
     <string name="voice_import_done">Voice added: %1$s</string>
     <string name="voice_import_failed">Voice not added: %1$s</string>
     <string name="noise_scale_title">Stability ↔ expressiveness</string>
-    <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more.</string>
+    <string name="noise_scale_desc">Left: steadier, words are skipped or repeated less often, the intonation is a little flatter. Right: livelier, as the model was made, but it stumbles more. For Supertonic 3 the left half changes nothing: its sound turns metallic there.</string>
     <string name="noise_scale_stable">steady</string>
     <string name="noise_scale_lively">lively</string>
     <string name="speed_test_title">Speed test</string>

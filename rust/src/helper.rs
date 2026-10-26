@@ -777,7 +777,11 @@ impl TextToSpeech {
         // lowered "temperature": the sampler starts from calmer noise, which makes the model's
         // known fault — a word skipped or said twice — much rarer (the old Supertonic path had
         // 0.667 for the same reason; the TeraTTS path used full 1.0)
-        let normal = Normal::new(0.0f32, tera::noise_scale()).unwrap();
+        // Supertonic 3 breaks below ~0.6 (peaks 0.8–1.5, a metallic sound — measured against 32
+        // steps); TeraTTS's distilled sampler likes calm noise. So the same slider gives Supertonic 3
+        // its own safe range: not below the default 0.667
+        let scale = if st3 { tera::st3_noise_scale(tera::noise_scale()) } else { tera::noise_scale() };
+        let normal = Normal::new(0.0f32, scale).unwrap();
         let mut rng = rand::thread_rng();
         let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
         let noise_value = Value::from_array(noise)?;

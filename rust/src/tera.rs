@@ -27,6 +27,12 @@ pub const SPEED: f32 = 1.05;
 /// Settings slider "стабильность ↔ выразительность", 0.4…1.0, default 0.667.
 static NOISE_SCALE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F2A_C083); // 0.667
 
+/// The stability slider (0.4…1.0) for Supertonic 3: not below the default 0.667 — under it the
+/// model sounds metallic; to the right it works as for TeraTTS.
+pub fn st3_noise_scale(slider: f32) -> f32 {
+    slider.clamp(0.667, 1.0)
+}
+
 pub fn set_noise_scale(v: f32) {
     let v = if v.is_finite() { v.clamp(0.3, 1.2) } else { 0.667 };
     NOISE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
@@ -1081,6 +1087,14 @@ mod tests {
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru+".chars().enumerate() { table[c as usize] = i as i64 + 1; }
         assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");
+    }
+
+    #[test]
+    fn supertonic3_noise() {
+        assert!((st3_noise_scale(0.4) - 0.667).abs() < 1e-4);
+        assert!((st3_noise_scale(1.0) - 1.0).abs() < 1e-4);
+        assert!((st3_noise_scale(0.667) - 0.667).abs() < 1e-4);
+        assert!((st3_noise_scale(0.85) - 0.85).abs() < 1e-4);
     }
 
     #[test]

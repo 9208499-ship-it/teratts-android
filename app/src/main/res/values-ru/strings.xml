@@ -340,7 +340,7 @@
     <string name="voice_import_done">Голос добавлен: %1$s</string>
     <string name="voice_import_failed">Голос не добавлен: %1$s</string>
     <string name="noise_scale_title">Стабильность ↔ выразительность</string>
-    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается.</string>
+    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается. У Supertonic 3 левее середины ничего не меняется: там его звук становится металлическим.</string>
     <string name="noise_scale_stable">ровно</string>
     <string name="noise_scale_lively">живо</string>
     <string name="speed_test_title">Тест скорости</string>
