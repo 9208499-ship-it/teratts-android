@@ -806,6 +806,73 @@ pub fn plus_to_acute(s: &str, keep: bool) -> String {
     out
 }
 
+/// The end Supertonic 3 is given after every piece of text: ". -" — the model then leaves room
+/// after the last word instead of cutting it (SuperClonica's study on 1584 voice previews: 6 cut
+/// endings instead of 14, no stray syllables). Words without vowels ("Хм") get "!" instead.
+pub fn st3_ending(t: &str) -> String {
+    let body = t.trim_end().trim_end_matches(|c: char| " ,:;-'".contains(c));
+    if !body.chars().any(char::is_alphanumeric) {
+        return t.to_string();
+    }
+    let vowelless = !body.to_lowercase().chars().any(|c| "аеёиоуыэюяaeiouy".contains(c))
+        && body.chars().all(|c| !c.is_alphabetic() || c.is_ascii() || ('\u{400}'..'\u{530}').contains(&c));
+    format!("{}{}", body, if vowelless { "!" } else { ". -" })
+}
+
+/// Supertonic 3's piece came out cut: the voice still sounds in the last 15 ms (as loud as
+/// within 19 dB of its speech), or there is almost no sound at all — it is voiced again,
+/// a little slower (SuperClonica's `rerender_reason`).
+pub fn st3_needs_retry(wav: &[f32]) -> bool {
+    let peak = wav.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+    if wav.is_empty() || peak < 0.03 {
+        return true;
+    }
+    let hop = 441usize; // 10 ms
+    let n = wav.len() / hop;
+    if n < 3 {
+        return false;
+    }
+    let rms: Vec<f32> = (0..n).map(|i| {
+        let w = &wav[i * hop..(i + 1) * hop];
+        (w.iter().map(|x| x * x).sum::<f32>() / hop as f32).sqrt()
+    }).collect();
+    let max = rms.iter().cloned().fold(0.0f32, f32::max);
+    let mut loud: Vec<f32> = rms.iter().cloned().filter(|&r| r > max * 0.1).collect();
+    loud.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let reference = loud[((loud.len() as f32 - 1.0) * 0.9).round() as usize].max(1e-9);
+    let k = (SAMPLE_RATE as usize * 15 / 1000).min(wav.len());
+    let tail = (wav[wav.len() - k..].iter().map(|x| x * x).sum::<f32>() / k as f32).sqrt();
+    20.0 * (tail / reference + 1e-12).log10() > -19.0
+}
+
+/// Supertonic 3 leaves a lot of silence around the speech (0.25–0.6 s before, more after):
+/// cut by the sound itself — from [lead] s before the first audible 5 ms to [tail] s after the
+/// last (audible: within 45 dB of the peak, so the decay of the last word is kept).
+pub fn trim_edges(wav: &[f32], lead: f32, tail: f32) -> Vec<f32> {
+    let hop = 220usize; // 5 ms
+    let n = wav.len() / hop;
+    if n < 2 {
+        return wav.to_vec();
+    }
+    let rms: Vec<f32> = (0..n).map(|i| {
+        let w = &wav[i * hop..(i + 1) * hop];
+        (w.iter().map(|x| x * x).sum::<f32>() / hop as f32).sqrt()
+    }).collect();
+    let max = rms.iter().cloned().fold(0.0f32, f32::max);
+    let thr = max * 10f32.powf(-45.0 / 20.0);
+    let (Some(first), Some(last)) = (rms.iter().position(|&r| r > thr), rms.iter().rposition(|&r| r > thr)) else {
+        return wav.to_vec();
+    };
+    let sr = SAMPLE_RATE as f32;
+    let start = (first * hop).saturating_sub((lead * sr) as usize);
+    let stop = ((last + 1) * hop + (tail * sr) as usize).min(wav.len());
+    let mut out = wav[start..stop].to_vec();
+    // a soft start: the cut may fall inside a quiet breath
+    let f = out.len().min(220);
+    for i in 0..f { out[i] *= i as f32 / f as f32; }
+    out
+}
+
 /// [prepare] for either model: TeraTTSv2 (stress as '+'), or Supertonic 3 ([st3]: stress as
 /// U+0301, a period at the end if there is no punctuation — as Supertone's own front-end does).
 pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<String> {
@@ -823,8 +890,7 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
     let t = spell_leftover_digits(&t, base);
     let t = if st3 {
         let t = plus_to_acute(&t, is_known(table, '\u{301}'));
-        let trimmed = t.trim_end();
-        if trimmed.is_empty() || trimmed.ends_with(|c: char| ".!?;:,'\")…»".contains(c)) { t } else { format!("{trimmed}.") }
+        st3_ending(&t)
     } else { t };
     let t = skip_unknown(&t, table);
     let t = COMMA_RUN.replace_all(&t, ",");
@@ -1016,15 +1082,37 @@ mod tests {
     }
 
     #[test]
+    fn supertonic3_endings() {
+        assert_eq!(st3_ending("Привет, мир"), "Привет, мир. -");
+        assert_eq!(st3_ending("Как дела?"), "Как дела?. -");
+        assert_eq!(st3_ending("Ну и ладно, - "), "Ну и ладно. -");
+        assert_eq!(st3_ending("Хм"), "Хм!");
+        assert_eq!(st3_ending("..."), "...");
+        // cut: loud to the very end; whole: quiet tail
+        let sr = SAMPLE_RATE as usize;
+        let tone = |n: usize| (0..n).map(|i| (i as f32 * 0.05).sin() * 0.5).collect::<Vec<f32>>();
+        let mut whole = tone(sr / 2); whole.extend(vec![0.0f32; sr / 10]);
+        assert!(st3_needs_retry(&tone(sr / 2)));
+        assert!(!st3_needs_retry(&whole));
+        assert!(st3_needs_retry(&vec![0.001f32; sr]));
+        // trimming: 0.4 s silence, 0.5 s sound, 0.6 s silence → ~0.05 + 0.5 + 0.12
+        let mut x = vec![0.0f32; sr * 4 / 10]; x.extend(tone(sr / 2)); x.extend(vec![0.0f32; sr * 6 / 10]);
+        let t = trim_edges(&x, 0.05, 0.12);
+        let secs = t.len() as f32 / sr as f32;
+        assert!((secs - 0.67).abs() < 0.02, "{secs}");
+    }
+
+    #[test]
     fn supertonic3_front_end() {
         assert_eq!(plus_to_acute("Зам+ок и молок+о", true), "Замо\u{301}к и молоко\u{301}");
         assert_eq!(plus_to_acute("Зам+ок, C+", false), "Замок, C");
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru".chars().enumerate() { table[c as usize] = i as i64 + 1; }
-        // no acute in the vocabulary: marks dropped, a period added
-        assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок.</ru>");
+        // no acute in the vocabulary: marks dropped, the ending added
+        table['-' as usize] = 97;
+        assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
         table[0x301] = 99;
-        let nfkd: String = "<ru>Замо\u{301}к.</ru>".nfkd().collect();
+        let nfkd: String = "<ru>Замо\u{301}к. -</ru>".nfkd().collect();
         assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
         // TeraTTS unchanged
         table['+' as usize] = 98;

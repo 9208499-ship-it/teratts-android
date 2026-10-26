@@ -761,7 +761,12 @@ impl TextToSpeech {
             "text_mask" => &dmask_value
         })?;
         let raw = dp_outputs[dp_out].try_extract_tensor::<f32>()?.1[0];
-        let duration = raw / speed.max(0.1) / tera::SPEED;
+        let emb_value = Value::from_array(text_emb)?;
+        // Supertonic 3: a piece that comes out cut at the end is voiced again, a little slower
+        // (a longer predicted length), at most twice
+        let mut attempt = 0;
+        loop {
+        let duration = raw / speed.max(0.1) / tera::SPEED * 1.15f32.powi(attempt);
         if !duration.is_finite() || duration <= 0.0 {
             anyhow::bail!("duration predictor returned {raw}");
         }
@@ -776,7 +781,6 @@ impl TextToSpeech {
         let mut rng = rand::thread_rng();
         let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
         let noise_value = Value::from_array(noise)?;
-        let emb_value = Value::from_array(text_emb)?;
         let lmask_value = Value::from_array(Array3::<f32>::ones((1, 1, frames)))?;
         let latent = if st3 {
             // Supertonic 3: the vector estimator, step by step (Supertone's helper.py `_infer`)
@@ -785,11 +789,12 @@ impl TextToSpeech {
             let steps = total_step.clamp(MIN_ST3_STEPS, 16);
             let total_value = Value::from_array(Array::from_elem(1, steps as f32))?;
             let mut xt_value = noise_value;
+            let emb_value = &emb_value;
             for step in 0..steps {
                 let step_value = Value::from_array(Array::from_elem(1, step as f32))?;
                 let out = self.sampler_ort.run(ort::inputs!{
                     "noisy_latent" => &xt_value,
-                    "text_emb" => &emb_value,
+                    "text_emb" => emb_value,
                     "style_ttl" => &style_ttl_value,
                     "text_mask" => &mask_value,
                     "latent_mask" => &lmask_value,
@@ -826,13 +831,26 @@ impl TextToSpeech {
             "latent" => &latent_value
         })?;
         let wav_all = vocoder_outputs[voc_out].try_extract_tensor::<f32>()?.1;
+        if st3 {
+            if attempt < 2 && tera::st3_needs_retry(wav_all) {
+                attempt += 1;
+                log::info!("Supertonic 3: piece cut at the end, voiced again ({attempt})");
+                continue;
+            }
+            // cut by the sound, not by the predicted length (that is what swallowed last words)
+            let mut wav = tera::trim_edges(wav_all, 0.05, 0.12);
+            tera::fade_out(&mut wav);
+            let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
+            return Ok((wav, vec![kept]));
+        }
         let predicted = (duration * tera::SAMPLE_RATE as f32).round() as usize;
         let keep = tera::speech_end(wav_all, predicted);
         let mut wav = wav_all[..keep].to_vec();
         tera::fade_out(&mut wav);
         let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
 
-        Ok((wav, vec![kept]))
+        return Ok((wav, vec![kept]));
+        }
     }
 
     pub fn call<F>(
