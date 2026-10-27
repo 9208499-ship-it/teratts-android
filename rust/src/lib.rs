@@ -42,6 +42,42 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Red
     crate::tera::set_st3_reduce(on != 0);
 }
 
+/// "Voice repair" for TeraTTS: voice file name → a native TeraTTS voice whose rhythm (style_dp)
+/// it borrows. A Supertonic 3 voice keeps its timbre (style_ttl) but its own style_dp makes TeraTTS's
+/// duration predictor skip words (azimutspb, TeraTTS-GUI). Lines "file\tdonor path".
+static VOICE_RHYTHM: once_cell::sync::Lazy<std::sync::Mutex<(String, std::collections::HashMap<String, String>)>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new((String::new(), std::collections::HashMap::new())));
+
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setVoiceRhythm(
+    mut env: JNIEnv,
+    _class: JClass,
+    table: JString,
+) {
+    let Ok(s) = env.get_string(&table).map(String::from) else { return };
+    if let Ok(mut g) = VOICE_RHYTHM.lock() {
+        if g.0 != s {
+            let map = s.lines().filter_map(|l| l.split_once('\t'))
+                .map(|(f, d)| (f.to_string(), d.to_string())).collect();
+            *g = (s, map);
+        }
+    }
+}
+
+/// [style] with the rhythm of the voice's donor, if the user chose one (TeraTTS only).
+fn with_rhythm(mut style: Style, style_path: &str) -> Style {
+    let name = std::path::Path::new(style_path).file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let donor = VOICE_RHYTHM.lock().ok().and_then(|g| g.1.get(name).cloned());
+    if let Some(d) = donor {
+        match cached_style(&d, || load_voice_style(&[d.clone()], false)) {
+            Ok(ds) if ds.dp.shape() == style.dp.shape() => style.dp = ds.dp,
+            Ok(_) => log::warn!("voice rhythm {d}: other shape"),
+            Err(e) => log::warn!("voice rhythm {d}: {e:?}"),
+        }
+    }
+    style
+}
+
 /// Supertonic 3: how stress is given (0 plain text, 1 marks, 2 marks + as it sounds).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Stress(
@@ -232,6 +268,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
         }
     } else {
         match cached_style(&style_path, || load_voice_style(&[style_path.clone()], false)) {
+            Ok(s) if engine.tts.kind == helper::ModelKind::Tera => with_rhythm(s, &style_path),
             Ok(s) => s,
             Err(e) => {
                 log::error!("Failed to load voice style: {:?}", e);

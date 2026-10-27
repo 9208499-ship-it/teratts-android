@@ -303,6 +303,7 @@ object AssetManager {
     fun modelDir(context: Context): File {
         st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
         st3Stress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STRESS, 0).coerceIn(0, 2)
+        VoiceRhythm.load(context)
         val st3 = engine(context) == ENGINE_ST3
         engineKey = if (st3) "st3:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")

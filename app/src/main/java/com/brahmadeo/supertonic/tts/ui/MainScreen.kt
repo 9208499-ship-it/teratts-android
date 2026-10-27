@@ -325,6 +325,7 @@ fun MainScreen(
                             footer = if (hiddenVoiceCount > 0) stringResource(AppR.string.voice_restore, hiddenVoiceCount) else null,
                             onFooter = onRestoreVoices
                         )
+                        VoiceRhythmSelector(selectedVoiceFile)
 
                         // voice mixing is not offered: with reading by roles every character has
                         // a voice of its own, and a mixed narrator only confused things
@@ -517,6 +518,32 @@ fun SliderWithLabel(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+/** "Voice repair": a voice that is not TeraTTS's own can borrow a native voice's rhythm in TeraTTS. */
+@Composable
+private fun VoiceRhythmSelector(voiceFile: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
+    val rhythm = com.brahmadeo.supertonic.tts.utils.VoiceRhythm
+    if (!rhythm.applies(voiceFile) || assets.engine(context) != assets.ENGINE_TERA) return
+    var donor by remember(voiceFile) { mutableStateOf(rhythm.donor(context, voiceFile)) }
+    val own = stringResource(AppR.string.voice_rhythm_own)
+    val names = listOf("" to own) + rhythm.DONORS.map { it to stringResource(AppR.string.voice_rhythm_as, it) }
+    Column {
+        DropdownSelector(
+            label = stringResource(AppR.string.voice_rhythm_label),
+            options = names.map { it.second },
+            selectedOption = names.firstOrNull { it.first == donor }?.second ?: own,
+            onOptionSelected = { label ->
+                val d = names.firstOrNull { it.second == label }?.first ?: ""
+                donor = d
+                rhythm.setDonor(context, voiceFile, d)
+            }
+        )
+        Text(stringResource(AppR.string.voice_rhythm_desc), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
 @Composable
 fun DropdownSelector(
     label: String,

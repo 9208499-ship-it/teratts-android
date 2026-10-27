@@ -949,7 +949,8 @@ pub fn plus_to_acute(s: &str, keep: bool) -> String {
     while i < ch.len() {
         if ch[i] == '+' && i + 1 < ch.len() && RU_VOWELS.contains(ch[i + 1]) {
             out.push(ch[i + 1]);
-            if keep { out.push('\u{301}'); }
+            // ё is stressed by itself; with a mark over it Supertonic 3 reads a stressed е
+            if keep && !matches!(ch[i + 1], 'ё' | 'Ё') { out.push('\u{301}'); }
             i += 2;
             continue;
         }
@@ -1308,6 +1309,7 @@ mod tests {
     fn supertonic3_front_end() {
         assert_eq!(plus_to_acute("Зам+ок и молок+о", true), "Замо\u{301}к и молоко\u{301}");
         assert_eq!(plus_to_acute("Зам+ок, C+", false), "Замок, C");
+        assert_eq!(plus_to_acute("вес+ёлыми, Ч+ёрных", true), "весёлыми, Чёрных");
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru".chars().enumerate() { table[c as usize] = i as i64 + 1; }
         // no acute in the vocabulary: marks dropped, the ending added

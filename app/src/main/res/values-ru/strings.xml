@@ -404,4 +404,8 @@
     <string name="engine_st3_stress0">Сам; подсказка только для слов из своего словаря и спорных (за́мок/замо́к)</string>
     <string name="engine_st3_stress1">Знаки ударения на всех словах</string>
     <string name="engine_st3_stress2">Знаки + как слышится на всех словах («малако́», «ево»)</string>
+    <string name="voice_rhythm_label">Починка голоса для TeraTTS (если пропускает слова)</string>
+    <string name="voice_rhythm_own">Свой ритм</string>
+    <string name="voice_rhythm_as">Ритм как у %1$s</string>
+    <string name="voice_rhythm_desc">Голос сделан не для TeraTTS (Supertonic 3, Superclonica) — ритм речи можно взять у родного голоса: тембр останется этим, слова перестанут пропадать. На Supertonic 3 не влияет</string>
 </resources>

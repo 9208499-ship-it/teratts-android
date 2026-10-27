@@ -404,4 +404,8 @@
     <string name="engine_st3_stress0">By itself; a hint only for words in your own dictionary and homographs</string>
     <string name="engine_st3_stress1">Stress marks on every word</string>
     <string name="engine_st3_stress2">Marks + as it sounds on every word</string>
+    <string name="voice_rhythm_label">Voice repair for TeraTTS (if it skips words)</string>
+    <string name="voice_rhythm_own">Own rhythm</string>
+    <string name="voice_rhythm_as">Rhythm of %1$s</string>
+    <string name="voice_rhythm_desc">A voice not made for TeraTTS (Supertonic 3, Superclonica) can take its speech rhythm from a native voice: the timbre stays, words stop being skipped. Supertonic 3 is not affected</string>
 </resources>

@@ -352,6 +352,34 @@ object AccentDictionaryManager {
         return if (bin != null) bin.lookup(lower.toByteArray(Charsets.UTF_8)) != null else entries.containsKey(lower)
     }
 
+    /**
+     * Only the letter ё from the dictionary, no stress marks: «веселыми» → «весёлыми». For Supertonic 3
+     * reading by itself — it places stress itself, but reads е where ё is meant.
+     */
+    fun restoreYo(text: String): String {
+        val bin = binaryDict
+        val map = entries
+        if (bin == null && map.isEmpty()) return text
+        val matcher = wordPattern.matcher(text)
+        val sb = StringBuffer()
+        while (matcher.find()) {
+            val original = matcher.group() ?: continue
+            if (original.indexOf('+') >= 0 || original.indexOf('\u0301') >= 0) continue
+            val lower = original.lowercase()
+            if ('е' !in lower) continue
+            val hit = (if (bin != null) bin.lookup(lower.toByteArray(Charsets.UTF_8)) else map[lower]) ?: continue
+            val plain = hit.replace("+", "").replace("\u0301", "")
+            if ('ё' !in plain || plain.replace('ё', 'е') != lower) continue
+            // the original's letters, ё where the dictionary has it (case kept letter by letter)
+            val out = CharArray(original.length) { i ->
+                if (plain[i] == 'ё') (if (original[i].isUpperCase()) 'Ё' else 'ё') else original[i]
+            }
+            matcher.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(String(out)))
+        }
+        matcher.appendTail(sb)
+        return sb.toString()
+    }
+
     fun apply(text: String, lang: String = ""): String {
         // Snapshot the backends once per call so concurrent reload doesn't
         // flip us mid-iteration.

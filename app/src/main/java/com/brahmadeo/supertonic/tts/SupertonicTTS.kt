@@ -29,6 +29,8 @@ object SupertonicTTS {
     private external fun setSt3Steps(steps: Int)
     @Volatile private var st3StepsAvailable = true
     private external fun setSt3Stress(mode: Int)
+    private external fun setVoiceRhythm(table: String)
+    @Volatile private var rhythmAvailable = true
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
     private external fun isXnnpackEnabled(): Boolean
@@ -213,6 +215,10 @@ object SupertonicTTS {
                     st3StepsAvailable = false
                     Log.e("SupertonicTTS", "engine library without setSt3Steps — an old build of the engine got into the APK")
                 }
+            }
+            if (rhythmAvailable) {
+                try { setVoiceRhythm(com.brahmadeo.supertonic.tts.utils.VoiceRhythm.table) }
+                catch (e: UnsatisfiedLinkError) { rhythmAvailable = false }
             }
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             val data = synthesize(nativePtr, text, lang, stylePath, speed, bufferDuration, steps, gain)
