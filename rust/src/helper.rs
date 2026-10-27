@@ -761,12 +761,14 @@ impl TextToSpeech {
             "text_mask" => &dmask_value
         })?;
         let raw = dp_outputs[dp_out].try_extract_tensor::<f32>()?.1[0];
+        // TeraTTS stretches a lone short reply («Да.», «Хорошо.») to about a second: cap it
+        let natural = if st3 { raw / tera::SPEED } else { tera::cap_short_reply(raw / tera::SPEED, &source) };
         let emb_value = Value::from_array(text_emb)?;
         // Supertonic 3: a piece that comes out cut at the end is voiced again, a little slower
         // (a longer predicted length), at most twice
         let mut attempt = 0;
         loop {
-        let duration = raw / speed.max(0.1) / tera::SPEED * 1.15f32.powi(attempt);
+        let duration = natural / speed.max(0.1) * 1.15f32.powi(attempt);
         if !duration.is_finite() || duration <= 0.0 {
             anyhow::bail!("duration predictor returned {raw}");
         }

@@ -64,6 +64,18 @@ pub fn st3_stress() -> u8 {
     ST3_STRESS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// TeraTTS's duration predictor gives every utterance of up to four vowels about the same
+/// 0.9–1.2 s («Да.» as long as «Иди сюда!»), so a lone short reply comes out stretched 2–3×.
+/// Such replies get at most 0.35 s + 0.2 s per vowel (ordinary speech is 0.15–0.18 s per vowel);
+/// longer phrases are never touched. Measured and used by MyTTS (davnozdu/supertonic-android).
+pub fn cap_short_reply(seconds: f32, text: &str) -> f32 {
+    let vowels = text.chars().filter(|c| "аеёиоуыэюяАЕЁИОУЫЭЮЯ".contains(*c)).count();
+    if !(1..=4).contains(&vowels) {
+        return seconds;
+    }
+    seconds.min(0.35 + 0.2 * vowels as f32)
+}
+
 pub fn set_st3_reduce(on: bool) {
     set_st3_stress(if on { 2 } else { 1 });
 }
@@ -1237,6 +1249,17 @@ mod tests {
         assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
         assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
         assert_eq!(reduce_unstressed("из+ученных, в+ечер, п+амять, м+оре, д+елаем"), "из+учинных, в+ечир, п+амить, м+оре, д+елаем");
+    }
+
+    #[test]
+    fn short_reply_cap() {
+        assert!((cap_short_reply(1.03, "Да.") - 0.55).abs() < 1e-4);
+        assert!((cap_short_reply(1.19, "Хорош+о.") - 0.95).abs() < 1e-4);
+        assert!((cap_short_reply(1.26, "— Ид+и сюд+а!") - 1.15).abs() < 1e-4);
+        // already short enough, or a longer phrase: unchanged
+        assert_eq!(cap_short_reply(0.4, "Да."), 0.4);
+        assert_eq!(cap_short_reply(1.9, "Хорошо, он вернулся домой."), 1.9);
+        assert_eq!(cap_short_reply(0.8, "Хм…"), 0.8);
     }
 
     #[test]
