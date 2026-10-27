@@ -400,6 +400,8 @@
     <string name="engine_st3_q5">Быстро (5 шагов) — для слабых телефонов</string>
     <string name="engine_st3_q8">Обычно (8 шагов) — как у Supertone</string>
     <string name="engine_st3_q12">Высоко (12 шагов) — чище, но в полтора раза медленнее</string>
-    <string name="engine_st3_reduce">Ударения для Supertonic 3: читать как слышится</string>
-    <string name="engine_st3_reduce_desc">Supertonic 3 почти не замечает знак ударения. Безударные гласные передаются ему так, как звучат («малако́», «стрилки́», «ево») — тогда ударение встаёт на место. Текст на экране не меняется</string>
+    <string name="engine_st3_reduce">Ударения для Supertonic 3</string>
+    <string name="engine_st3_stress0">Сам, без знаков — обычный текст, как на 4PDA</string>
+    <string name="engine_st3_stress1">Знаки ударения из словаря</string>
+    <string name="engine_st3_stress2">Знаки + как слышится («малако́», «ево»)</string>
 </resources>

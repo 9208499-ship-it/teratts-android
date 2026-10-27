@@ -49,14 +49,21 @@ pub fn st3_steps() -> usize {
 /// Supertonic 3 hardly hears stress marks (measured: the marked syllable came out stronger in 50–54 %
 /// of minimal pairs — chance), but it reads letters: unstressed vowels written as they sound give it
 /// no full vowel to stress but the right one (an ear test: «стрилки́ застыли» right, «стре́лки» wrong).
-static ST3_REDUCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+/// How Supertonic 3 gets the dictionary's stress: 0 — not at all, plain text (it places stress
+/// itself, as it learned from spelling); 1 — a mark ´ over the stressed vowel; 2 — the mark plus
+/// unstressed vowels as they sound («малако́», «ево»).
+static ST3_STRESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
-pub fn set_st3_reduce(on: bool) {
-    ST3_REDUCE.store(on, std::sync::atomic::Ordering::Relaxed);
+pub fn set_st3_stress(mode: u8) {
+    ST3_STRESS.store(mode.min(2), std::sync::atomic::Ordering::Relaxed);
 }
 
-pub fn st3_reduce_on() -> bool {
-    ST3_REDUCE.load(std::sync::atomic::Ordering::Relaxed)
+pub fn st3_stress() -> u8 {
+    ST3_STRESS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_st3_reduce(on: bool) {
+    set_st3_stress(if on { 2 } else { 1 });
 }
 
 /// Words where the «г» of a final -ого/-его is a real «г» (the root, not the ending).
@@ -1016,8 +1023,9 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
     let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
     let t = spell_leftover_digits(&t, base);
     let t = if st3 {
-        let t = if st3_reduce_on() { reduce_unstressed(&g_as_v(&t)) } else { t };
-        let t = plus_to_acute(&t, is_known(table, '\u{301}'));
+        let mode = st3_stress();
+        let t = if mode == 2 { reduce_unstressed(&g_as_v(&t)) } else { t };
+        let t = plus_to_acute(&t, mode > 0 && is_known(table, '\u{301}'));
         st3_ending(&t)
     } else { t };
     let t = skip_unknown(&t, table);
@@ -1271,8 +1279,12 @@ mod tests {
         table['-' as usize] = 97;
         assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
         table[0x301] = 99;
+        // by default Supertonic 3 gets plain text and places stress itself
+        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
+        set_st3_stress(1);
         let nfkd: String = "<ru>Замо\u{301}к. -</ru>".nfkd().collect();
         assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
+        set_st3_stress(0);
         // TeraTTS unchanged
         table['+' as usize] = 98;
         assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");

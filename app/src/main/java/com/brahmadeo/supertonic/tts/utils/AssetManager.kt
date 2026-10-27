@@ -284,14 +284,14 @@ object AssetManager {
         private set
     private const val KEY_ST3_STEPS = "st3_steps"
 
-    /** Supertonic 3: unstressed vowels written as they sound (it hardly hears stress marks). */
-    @Volatile var st3Reduce: Boolean = true
+    /** Supertonic 3 stress: 0 — plain text, it places stress itself; 1 — marks; 2 — marks + as it sounds. */
+    @Volatile var st3Stress: Int = 0
         private set
-    private const val KEY_ST3_REDUCE = "st3_reduce"
+    private const val KEY_ST3_STRESS = "st3_stress"
 
-    fun setSt3Reduce(context: Context, on: Boolean) {
-        st3Reduce = on
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_REDUCE, on).apply()
+    fun setSt3Stress(context: Context, mode: Int) {
+        st3Stress = mode.coerceIn(0, 2)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ST3_STRESS, st3Stress).apply()
     }
 
     fun setSt3Steps(context: Context, steps: Int) {
@@ -302,7 +302,7 @@ object AssetManager {
     /** The folder of the model to start the engine with — every engine start goes through here. */
     fun modelDir(context: Context): File {
         st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
-        st3Reduce = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ST3_REDUCE, true)
+        st3Stress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STRESS, 0).coerceIn(0, 2)
         val st3 = engine(context) == ENGINE_ST3
         engineKey = if (st3) "st3:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")

@@ -42,6 +42,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Red
     crate::tera::set_st3_reduce(on != 0);
 }
 
+/// Supertonic 3: how stress is given (0 plain text, 1 marks, 2 marks + as it sounds).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Stress(
+    _env: JNIEnv,
+    _class: JClass,
+    mode: jni::sys::jint,
+) {
+    crate::tera::set_st3_stress(mode.clamp(0, 2) as u8);
+}
+
 /// Pause after a paragraph, seconds (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(

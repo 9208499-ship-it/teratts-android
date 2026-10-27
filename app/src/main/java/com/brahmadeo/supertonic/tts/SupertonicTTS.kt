@@ -28,7 +28,7 @@ object SupertonicTTS {
     private external fun setNoiseScale(scale: Float)
     private external fun setSt3Steps(steps: Int)
     @Volatile private var st3StepsAvailable = true
-    private external fun setSt3Reduce(on: Boolean)
+    private external fun setSt3Stress(mode: Int)
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
     private external fun isXnnpackEnabled(): Boolean
@@ -207,7 +207,7 @@ object SupertonicTTS {
             if (st3StepsAvailable) {
                 try {
                     setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps)
-                    setSt3Reduce(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Reduce)
+                    setSt3Stress(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Stress)
                 }
                 catch (e: UnsatisfiedLinkError) {
                     st3StepsAvailable = false
