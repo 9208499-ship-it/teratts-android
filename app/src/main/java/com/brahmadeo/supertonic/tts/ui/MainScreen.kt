@@ -314,9 +314,17 @@ fun MainScreen(
                             onOptionSelected = { name -> onLangChange(languages[name] ?: "en") }
                         )
 
+                        // Supertonic 3: voices made for TeraTTS only are shown pale (they sound metallic there)
+                        val voiceContext = androidx.compose.ui.platform.LocalContext.current
+                        val st3Engine = com.brahmadeo.supertonic.tts.utils.AssetManager.engine(voiceContext) ==
+                            com.brahmadeo.supertonic.tts.utils.AssetManager.ENGINE_ST3
+                        fun teraOnly(file: String?) = st3Engine && file != null &&
+                            com.brahmadeo.supertonic.tts.utils.VoiceCompat.teraOnly(voiceContext, file)
                         DropdownSelector(
                             label = stringResource(AppR.string.voice_style_label),
                             options = voices.keys.toList().sorted(),
+                            dimmed = { name -> teraOnly(voices[name]) },
+                            dimmedNote = stringResource(AppR.string.voice_tera_only_note),
                             selectedOption = voices.entries.find { it.value == selectedVoiceFile }?.key ?: "",
                             onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") },
                             // ✕ next to every voice but the one in use
@@ -325,6 +333,10 @@ fun MainScreen(
                             footer = if (hiddenVoiceCount > 0) stringResource(AppR.string.voice_restore, hiddenVoiceCount) else null,
                             onFooter = onRestoreVoices
                         )
+                        if (teraOnly(selectedVoiceFile)) {
+                            Text(stringResource(AppR.string.voice_tera_only_warning), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error)
+                        }
                         VoiceRhythmSelector(selectedVoiceFile)
 
                         // voice mixing is not offered: with reading by roles every character has
@@ -552,6 +564,8 @@ fun DropdownSelector(
     onOptionSelected: (String) -> Unit,
     deletable: (String) -> Boolean = { false },
     onDelete: (String) -> Unit = {},
+    dimmed: (String) -> Boolean = { false },
+    dimmedNote: String = "",
     footer: String? = null,
     onFooter: () -> Unit = {}
 ) {
@@ -587,7 +601,11 @@ fun DropdownSelector(
         ) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option) },
+                    text = {
+                        if (dimmed(option)) Text("$option $dimmedNote",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        else Text(option)
+                    },
                     onClick = {
                         onOptionSelected(option)
                         expanded = false

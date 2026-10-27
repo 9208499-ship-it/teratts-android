@@ -408,4 +408,12 @@
     <string name="voice_rhythm_own">Own rhythm</string>
     <string name="voice_rhythm_as">Rhythm of %1$s</string>
     <string name="voice_rhythm_desc">A voice not made for TeraTTS (Supertonic 3, Superclonica) can take its speech rhythm from a native voice: the timbre stays, words stop being skipped. Supertonic 3 is not affected</string>
+    <string name="tera_comma_quotes">Comma replacement</string>
+    <string name="tera_comma_quotes_desc">A comma is read as a short pause without the comma intonation — sounds more natural (from azimutspb's TeraTTS-GUI). TeraTTS only</string>
+    <string name="tera_teacher">Teacher — the full TeraTTS model</string>
+    <string name="tera_teacher_desc">Cleaner sound in places, but about 3 times slower: reading may stall on a weak phone</string>
+    <string name="tera_teacher_desc_download">Cleaner sound in places, but about 3 times slower. Switching on downloads 256 MB (once)</string>
+    <string name="tera_teacher_delete">Delete the teacher (256 MB)</string>
+    <string name="voice_tera_only_note">· for TeraTTS</string>
+    <string name="voice_tera_only_warning">This voice was made for TeraTTS — in Supertonic 3 it sounds metallic. For Supertonic 3, make it again in the notebook with MODEL=\"st3\"</string>
 </resources>

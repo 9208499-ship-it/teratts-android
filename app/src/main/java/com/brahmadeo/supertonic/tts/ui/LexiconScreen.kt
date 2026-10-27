@@ -646,6 +646,9 @@ private fun EngineSection() {
     var int8 by remember { mutableStateOf(assets.st3Int8(context)) }
     var st3Steps by remember { mutableStateOf(assets.st3Steps) }
     var st3Stress by remember { mutableStateOf(assets.st3Stress) }
+    var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
+    var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
+    var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     fun restart() {
@@ -687,6 +690,52 @@ private fun EngineSection() {
                 Column {
                     Text(title, style = MaterialTheme.typography.bodyMedium)
                     Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        // TeraTTS: comma replacement and the teacher sampler
+        if (engine == assets.ENGINE_TERA) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    .clickable { commaQuotes = !commaQuotes; assets.setCommaQuotes(context, commaQuotes) }
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(AppR.string.tera_comma_quotes), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(AppR.string.tera_comma_quotes_desc), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = commaQuotes, onCheckedChange = { commaQuotes = it; assets.setCommaQuotes(context, it) })
+            }
+            fun switchTeacher(on: Boolean) {
+                if (progress != null) return
+                error = null; progress = if (on && !teacherFile) 0f else null
+                scope.launch {
+                    try {
+                        assets.setTeacher(context, on) { p -> scope.launch { progress = p } }
+                        teacher = assets.teacherOn(context); teacherFile = assets.teacherDownloaded(context)
+                        restart()
+                    } catch (ex: Exception) {
+                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                        teacher = assets.teacherOn(context); teacherFile = assets.teacherDownloaded(context)
+                    }
+                    progress = null
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clickable { switchTeacher(!teacher) }
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(AppR.string.tera_teacher), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(if (teacherFile) AppR.string.tera_teacher_desc else AppR.string.tera_teacher_desc_download),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = teacher, onCheckedChange = { switchTeacher(it) })
+            }
+            if (teacherFile && !teacher && progress == null) {
+                TextButton(onClick = { assets.deleteTeacher(context); teacherFile = false }) {
+                    Text(stringResource(AppR.string.tera_teacher_delete))
                 }
             }
         }

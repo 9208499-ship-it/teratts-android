@@ -30,6 +30,7 @@ object SupertonicTTS {
     @Volatile private var st3StepsAvailable = true
     private external fun setSt3Stress(mode: Int)
     private external fun setVoiceRhythm(table: String)
+    private external fun setCommaQuotes(on: Boolean)
     @Volatile private var rhythmAvailable = true
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
@@ -217,7 +218,10 @@ object SupertonicTTS {
                 }
             }
             if (rhythmAvailable) {
-                try { setVoiceRhythm(com.brahmadeo.supertonic.tts.utils.VoiceRhythm.table) }
+                try {
+                    setVoiceRhythm(com.brahmadeo.supertonic.tts.utils.VoiceRhythm.table)
+                    setCommaQuotes(com.brahmadeo.supertonic.tts.utils.AssetManager.commaQuotes)
+                }
                 catch (e: UnsatisfiedLinkError) { rhythmAvailable = false }
             }
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)

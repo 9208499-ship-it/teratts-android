@@ -408,4 +408,12 @@
     <string name="voice_rhythm_own">Свой ритм</string>
     <string name="voice_rhythm_as">Ритм как у %1$s</string>
     <string name="voice_rhythm_desc">Голос сделан не для TeraTTS (Supertonic 3, Superclonica) — ритм речи можно взять у родного голоса: тембр останется этим, слова перестанут пропадать. На Supertonic 3 не влияет</string>
+    <string name="tera_comma_quotes">Замена запятых</string>
+    <string name="tera_comma_quotes_desc">Запятая читается как короткая пауза без «запятой» интонации — звучит естественнее (из TeraTTS-GUI от azimutspb). Только для TeraTTS</string>
+    <string name="tera_teacher">«Учитель» — полная модель TeraTTS</string>
+    <string name="tera_teacher_desc">Местами чище звук, но примерно в 3 раза медленнее: на слабом телефоне чтение может прерываться</string>
+    <string name="tera_teacher_desc_download">Местами чище звук, но примерно в 3 раза медленнее. Включение скачает 256 МБ (один раз)</string>
+    <string name="tera_teacher_delete">Удалить «учителя» (256 МБ)</string>
+    <string name="voice_tera_only_note">· для TeraTTS</string>
+    <string name="voice_tera_only_warning">Этот голос сделан для TeraTTS — в Supertonic 3 он звучит металлически. Для Supertonic 3 сделайте его заново в блокноте с MODEL=\"st3\"</string>
 </resources>

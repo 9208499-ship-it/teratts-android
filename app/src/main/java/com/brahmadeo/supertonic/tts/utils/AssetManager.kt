@@ -304,6 +304,7 @@ object AssetManager {
         st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
         st3Stress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STRESS, 0).coerceIn(0, 2)
         VoiceRhythm.load(context)
+        loadCommaQuotes(context)
         val st3 = engine(context) == ENGINE_ST3
         engineKey = if (st3) "st3:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
@@ -370,6 +371,61 @@ object AssetManager {
         } catch (e: Exception) {
             part.delete(); throw e
         }
+    }
+
+    // ---- TeraTTS: «учитель» (teacher sampler) and comma replacement ----
+    private const val TEACHER_FILE = "sampler_teacher_8step.onnx"
+    private const val TEACHER_MARK = "teacher.on"
+    private const val TEACHER_SIZE = 256528347L
+    private const val TEACHER_SHA = "b38b6334cdc5fa228f260710a41082d52a581b29c1a474f87e2a0f70887258fb"
+    private const val TEACHER_URL =
+        "https://github.com/9208499-ship-it/teratts-android/releases/download/models-v1/$TEACHER_FILE"
+    private const val KEY_COMMA_QUOTES = "comma_quotes"
+
+    private fun teraDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/onnx")
+
+    /** «Замена запятых» for TeraTTS (azimutspb's TeraTTS-GUI): on by default. */
+    @Volatile var commaQuotes: Boolean = true
+        private set
+
+    fun loadCommaQuotes(context: Context) {
+        commaQuotes = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_COMMA_QUOTES, true)
+    }
+
+    fun setCommaQuotes(context: Context, on: Boolean) {
+        commaQuotes = on
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_COMMA_QUOTES, on).apply()
+    }
+
+    fun teacherDownloaded(context: Context) = File(teraDir(context), TEACHER_FILE).length() == TEACHER_SIZE
+    fun teacherOn(context: Context) = teacherDownloaded(context) && File(teraDir(context), TEACHER_MARK).exists()
+
+    /** Switches the teacher on (downloading it once, 256 MB, checked) or off; the engine restarts after. */
+    suspend fun setTeacher(context: Context, on: Boolean, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        val dir = teraDir(context)
+        val mark = File(dir, TEACHER_MARK)
+        if (!on) { mark.delete(); return@withContext }
+        val file = File(dir, TEACHER_FILE)
+        if (file.length() != TEACHER_SIZE) {
+            fetchCounting(TEACHER_URL, file) { n -> onProgress((n.toFloat() / TEACHER_SIZE).coerceIn(0f, 0.99f)) }
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buf = ByteArray(1 shl 16)
+                while (true) { val r = input.read(buf); if (r < 0) break; md.update(buf, 0, r) }
+            }
+            val sha = md.digest().joinToString("") { "%02x".format(it) }
+            if (file.length() != TEACHER_SIZE || sha != TEACHER_SHA) {
+                file.delete(); throw java.io.IOException("файл «учителя» повреждён, попробуйте ещё раз")
+            }
+        }
+        mark.writeText("1")
+        onProgress(1f)
+    }
+
+    /** Frees the 256 MB of the teacher. */
+    fun deleteTeacher(context: Context) {
+        File(teraDir(context), TEACHER_MARK).delete()
+        File(teraDir(context), TEACHER_FILE).delete()
     }
 
     /** Frees the space Supertonic 3 takes (back to TeraTTS). */

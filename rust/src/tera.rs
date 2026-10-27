@@ -197,6 +197,36 @@ pub const ST3_MAX_CHUNK_CHARS: usize = 160;
 /// (tools/tera_graph_tools.py). ~3.5x faster on ARM with i8mm, 256 MB -> 72 MB.
 pub const SAMPLER_FILE: &str = "sampler_distilled_int8.onnx";
 
+/// TeraTTSv2's teacher sampler (fp32, 256 MB): the model the fast one was distilled from — a cleaner
+/// sound in places, about 3x slower (Mac: 2.0 s of speech per second against 5.7). Optional: used
+/// while the marker file lies next to it (the app's switch).
+pub const TEACHER_FILE: &str = "sampler_teacher_8step.onnx";
+pub const TEACHER_MARK: &str = "teacher.on";
+
+/// The TeraTTS sampler to load from [onnx_dir]: the teacher if switched on and present.
+pub fn tera_sampler_file(onnx_dir: &str) -> &'static str {
+    let d = std::path::Path::new(onnx_dir);
+    if d.join(TEACHER_MARK).exists() && d.join(TEACHER_FILE).exists() { TEACHER_FILE } else { SAMPLER_FILE }
+}
+
+/// "Comma replacement" (azimutspb's TeraTTS-GUI, on by default there): TeraTTS reads a pause marked
+/// with quotes more naturally than a comma — «улыбнулся " " кивнул». Commas and semicolons inside
+/// a phrase; one at the very end is dropped. Spaced dashes are commas by then ([dashes_to_pauses]).
+static COMMA_QUOTES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_comma_quotes(on: bool) {
+    COMMA_QUOTES.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn comma_quotes(s: &str) -> String {
+    let body = s.trim_end().trim_end_matches([',', ';']);
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in body.chars() {
+        if c == ',' || c == ';' { out.push_str(" \" \""); } else { out.push(c); }
+    }
+    out
+}
+
 /// Parenthetical asides ("(как будто фамилия должна была что-то сказать)") are
 /// voiced as their own phrase: a pause around them, slightly faster and quieter.
 pub const ASIDE_PAUSE_S: f32 = 0.25;
@@ -1052,6 +1082,7 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
         let t = plus_to_acute(&t, is_known(table, '\u{301}'));
         st3_ending(&t)
     } else { t };
+    let t = if !st3 && COMMA_QUOTES.load(std::sync::atomic::Ordering::Relaxed) { comma_quotes(&t) } else { t };
     let t = skip_unknown(&t, table);
     let t = COMMA_RUN.replace_all(&t, ",");
     let t = WS.replace_all(&t, " ").trim().to_string();
@@ -1250,6 +1281,14 @@ mod tests {
         assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
         assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
         assert_eq!(reduce_unstressed("из+ученных, в+ечер, п+амять, м+оре, д+елаем"), "из+учинных, в+ечир, п+амить, м+оре, д+елаем");
+    }
+
+    #[test]
+    fn comma_replacement() {
+        assert_eq!(comma_quotes("Он ул+ыбнулся, кивн+ул и, не говор+я ни сл+ова, в+ышел."),
+                   "Он ул+ыбнулся \" \" кивн+ул и \" \" не говор+я ни сл+ова \" \" в+ышел.");
+        assert_eq!(comma_quotes("т+ихий; да,"), "т+ихий \" \" да");
+        assert_eq!(comma_quotes("Без запятых."), "Без запятых.");
     }
 
     #[test]

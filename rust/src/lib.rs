@@ -48,6 +48,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Red
 static VOICE_RHYTHM: once_cell::sync::Lazy<std::sync::Mutex<(String, std::collections::HashMap<String, String>)>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new((String::new(), std::collections::HashMap::new())));
 
+/// TeraTTS: commas as quoted pauses («Замена запятых», on/off).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setCommaQuotes(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jni::sys::jboolean,
+) {
+    crate::tera::set_comma_quotes(on != 0);
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setVoiceRhythm(
     mut env: JNIEnv,

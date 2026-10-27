@@ -1235,7 +1235,7 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
     let dp_path = format!("{}/duration_predictor.onnx", onnx_dir);
     let text_enc_path = format!("{}/text_encoder.onnx", onnx_dir);
     let sampler_path = if kind == ModelKind::Supertonic3 { format!("{}/vector_estimator.onnx", onnx_dir) }
-        else { format!("{}/{}", onnx_dir, tera::SAMPLER_FILE) };
+        else { format!("{}/{}", onnx_dir, tera::tera_sampler_file(onnx_dir)) };
     let vocoder_path = format!("{}/vocoder.onnx", onnx_dir);
 
     // The four models and the homograph resolver load side by side: each load (reading the
