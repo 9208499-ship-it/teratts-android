@@ -401,7 +401,7 @@
     <string name="engine_st3_q8">Normal (8 steps) — as Supertone has it</string>
     <string name="engine_st3_q12">High (12 steps) — cleaner, 1.5× slower</string>
     <string name="engine_st3_reduce">Stress for Supertonic 3</string>
-    <string name="engine_st3_stress0">By itself — plain text</string>
-    <string name="engine_st3_stress1">Stress marks from the dictionary</string>
-    <string name="engine_st3_stress2">Marks + as it sounds</string>
+    <string name="engine_st3_stress0">By itself; a hint only for words in your own dictionary and homographs</string>
+    <string name="engine_st3_stress1">Stress marks on every word</string>
+    <string name="engine_st3_stress2">Marks + as it sounds on every word</string>
 </resources>

@@ -401,7 +401,7 @@
     <string name="engine_st3_q8">Обычно (8 шагов) — как у Supertone</string>
     <string name="engine_st3_q12">Высоко (12 шагов) — чище, но в полтора раза медленнее</string>
     <string name="engine_st3_reduce">Ударения для Supertonic 3</string>
-    <string name="engine_st3_stress0">Сам, без знаков — обычный текст, как на 4PDA</string>
-    <string name="engine_st3_stress1">Знаки ударения из словаря</string>
-    <string name="engine_st3_stress2">Знаки + как слышится («малако́», «ево»)</string>
+    <string name="engine_st3_stress0">Сам; подсказка только для слов из своего словаря и спорных (за́мок/замо́к)</string>
+    <string name="engine_st3_stress1">Знаки ударения на всех словах</string>
+    <string name="engine_st3_stress2">Знаки + как слышится на всех словах («малако́», «ево»)</string>
 </resources>

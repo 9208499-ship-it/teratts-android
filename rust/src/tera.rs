@@ -49,9 +49,11 @@ pub fn st3_steps() -> usize {
 /// Supertonic 3 hardly hears stress marks (measured: the marked syllable came out stronger in 50–54 %
 /// of minimal pairs — chance), but it reads letters: unstressed vowels written as they sound give it
 /// no full vowel to stress but the right one (an ear test: «стрилки́ застыли» right, «стре́лки» wrong).
-/// How Supertonic 3 gets the dictionary's stress: 0 — not at all, plain text (it places stress
-/// itself, as it learned from spelling); 1 — a mark ´ over the stressed vowel; 2 — the mark plus
-/// unstressed vowels as they sound («малако́», «ево»).
+/// How Supertonic 3 gets stress: 0 — it places stress itself (it knows ordinary words from their
+/// spelling); only words that still carry a mark — the user's dictionary, a stress-marked book,
+/// homographs resolved by context — get a hint: the mark plus unstressed vowels as they sound
+/// (the app then leaves out the bulk stress dictionary); 1 — a mark ´ on every marked word;
+/// 2 — the mark plus vowels as they sound on every marked word, and «его» as «ево».
 static ST3_STRESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 pub fn set_st3_stress(mode: u8) {
@@ -110,7 +112,8 @@ pub fn g_as_v(text: &str) -> String {
 
 /// Unstressed vowels as they sound, in words that carry a stress mark ('+' before the vowel):
 /// о → а everywhere unstressed («мол+око» → «мал+ако»); е, я → и before the stress after a consonant
-/// («стрелк+и» → «стрилк+и»). Not touched: ё, е/я at the start of a word or after a vowel or ь/ъ
+/// («стрелк+и» → «стрилк+и»), and after the stress inside the word («из+ученных» → «из+учинных»,
+/// «п+амять» → «п+амить»; not at the end: «м+оре»). Not touched: ё, е/я at the start of a word or after a vowel or ь/ъ
 /// (heard as «йи»: «язык», «поезд+а»), words without a mark, Latin.
 pub fn reduce_unstressed(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -131,9 +134,13 @@ pub fn reduce_unstressed(text: &str) -> String {
                 let low = c.to_lowercase().next().unwrap_or(c);
                 let prev = if i > 0 { word[i - 1].to_lowercase().next().unwrap_or(' ') } else { ' ' };
                 let after_consonant = i > 0 && prev.is_alphabetic() && !"аеёиоуыэюяьъ".contains(prev);
+                let next_consonant = word.get(i + 1)
+                    .map(|n| n.is_alphabetic() && !"аеёиоуыэюяьъАЕЁИОУЫЭЮЯЬЪ".contains(*n))
+                    .unwrap_or(false);
                 let to = match low {
                     'о' => Some('а'),
                     'е' | 'я' if !after && after_consonant => Some('и'),
+                    'е' | 'я' if after && after_consonant && next_consonant => Some('и'),
                     _ => None,
                 };
                 match to {
@@ -1024,8 +1031,12 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
     let t = spell_leftover_digits(&t, base);
     let t = if st3 {
         let mode = st3_stress();
-        let t = if mode == 2 { reduce_unstressed(&g_as_v(&t)) } else { t };
-        let t = plus_to_acute(&t, mode > 0 && is_known(table, '\u{301}'));
+        let t = match mode {
+            1 => t,
+            2 => reduce_unstressed(&g_as_v(&t)),
+            _ => reduce_unstressed(&t),
+        };
+        let t = plus_to_acute(&t, is_known(table, '\u{301}'));
         st3_ending(&t)
     } else { t };
     let t = skip_unknown(&t, table);
@@ -1225,6 +1236,7 @@ mod tests {
         assert_eq!(reduce_unstressed("яз+ык, по+езд, поезд+а, ёлка, окно, мест+а, пят+ак"), "яз+ык, па+езд, паезд+а, ёлка, окно, мист+а, пит+ак");
         assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
         assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
+        assert_eq!(reduce_unstressed("из+ученных, в+ечер, п+амять, м+оре, д+елаем"), "из+учинных, в+ечир, п+амить, м+оре, д+елаем");
     }
 
     #[test]
@@ -1279,10 +1291,11 @@ mod tests {
         table['-' as usize] = 97;
         assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
         table[0x301] = 99;
-        // by default Supertonic 3 gets plain text and places stress itself
-        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
-        set_st3_stress(1);
+        // by default a word that still carries a mark gets it, with vowels as they sound
         let nfkd: String = "<ru>Замо\u{301}к. -</ru>".nfkd().collect();
+        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
+        assert_eq!(prepare_with("Замок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
+        set_st3_stress(1);
         assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
         set_st3_stress(0);
         // TeraTTS unchanged
