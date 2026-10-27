@@ -32,6 +32,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Ste
     crate::tera::set_st3_steps(steps);
 }
 
+/// Supertonic 3: unstressed vowels written as they sound (on/off).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Reduce(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jni::sys::jboolean,
+) {
+    crate::tera::set_st3_reduce(on != 0);
+}
+
 /// Pause after a paragraph, seconds (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(

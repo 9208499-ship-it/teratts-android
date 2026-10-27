@@ -645,6 +645,7 @@ private fun EngineSection() {
     var fast by remember { mutableStateOf(assets.st3Fast(context)) }
     var int8 by remember { mutableStateOf(assets.st3Int8(context)) }
     var st3Steps by remember { mutableStateOf(assets.st3Steps) }
+    var st3Reduce by remember { mutableStateOf(assets.st3Reduce) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     fun restart() {
@@ -702,6 +703,20 @@ private fun EngineSection() {
                     RadioButton(selected = st3Steps == n, onClick = null)
                     Text(label, style = MaterialTheme.typography.bodySmall)
                 }
+            }
+        }
+        // Supertonic 3 hardly hears stress marks: unstressed vowels as they sound
+        if (ready && engine == assets.ENGINE_ST3) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clickable { st3Reduce = !st3Reduce; assets.setSt3Reduce(context, st3Reduce) }
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(AppR.string.engine_st3_reduce), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(AppR.string.engine_st3_reduce_desc), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = st3Reduce, onCheckedChange = { st3Reduce = it; assets.setSt3Reduce(context, it) })
             }
         }
         // Supertonic 3's precision: 32 bits (exact) or 8 (faster on weak phones)

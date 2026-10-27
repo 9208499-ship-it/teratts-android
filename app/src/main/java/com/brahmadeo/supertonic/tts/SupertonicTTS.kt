@@ -28,6 +28,7 @@ object SupertonicTTS {
     private external fun setNoiseScale(scale: Float)
     private external fun setSt3Steps(steps: Int)
     @Volatile private var st3StepsAvailable = true
+    private external fun setSt3Reduce(on: Boolean)
     private external fun setParagraphPause(seconds: Float)
     private external fun setFastCores(cores: IntArray)
     private external fun isXnnpackEnabled(): Boolean
@@ -204,7 +205,10 @@ object SupertonicTTS {
             setNoiseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.noiseScale)
             // an engine library from an older build has no such function: never crash on it
             if (st3StepsAvailable) {
-                try { setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps) }
+                try {
+                    setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps)
+                    setSt3Reduce(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Reduce)
+                }
                 catch (e: UnsatisfiedLinkError) {
                     st3StepsAvailable = false
                     Log.e("SupertonicTTS", "engine library without setSt3Steps — an old build of the engine got into the APK")

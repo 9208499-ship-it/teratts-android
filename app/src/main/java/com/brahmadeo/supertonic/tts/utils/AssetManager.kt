@@ -284,6 +284,16 @@ object AssetManager {
         private set
     private const val KEY_ST3_STEPS = "st3_steps"
 
+    /** Supertonic 3: unstressed vowels written as they sound (it hardly hears stress marks). */
+    @Volatile var st3Reduce: Boolean = true
+        private set
+    private const val KEY_ST3_REDUCE = "st3_reduce"
+
+    fun setSt3Reduce(context: Context, on: Boolean) {
+        st3Reduce = on
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_REDUCE, on).apply()
+    }
+
     fun setSt3Steps(context: Context, steps: Int) {
         st3Steps = steps.coerceIn(5, 16)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ST3_STEPS, st3Steps).apply()
@@ -292,6 +302,7 @@ object AssetManager {
     /** The folder of the model to start the engine with — every engine start goes through here. */
     fun modelDir(context: Context): File {
         st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
+        st3Reduce = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ST3_REDUCE, true)
         val st3 = engine(context) == ENGINE_ST3
         engineKey = if (st3) "st3:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")

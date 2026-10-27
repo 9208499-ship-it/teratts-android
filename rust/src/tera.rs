@@ -46,6 +46,70 @@ pub fn st3_steps() -> usize {
     ST3_STEPS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Supertonic 3 hardly hears stress marks (measured: the marked syllable came out stronger in 50–54 %
+/// of minimal pairs — chance), but it reads letters: unstressed vowels written as they sound give it
+/// no full vowel to stress but the right one (an ear test: «стрилки́ застыли» right, «стре́лки» wrong).
+static ST3_REDUCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_st3_reduce(on: bool) {
+    ST3_REDUCE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn st3_reduce_on() -> bool {
+    ST3_REDUCE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Unstressed vowels as they sound, in words that carry a stress mark ('+' before the vowel):
+/// о → а everywhere unstressed («мол+око» → «мал+ако»); е, я → и before the stress after a consonant
+/// («стрелк+и» → «стрилк+и»). Not touched: ё, е/я at the start of a word or after a vowel or ь/ъ
+/// (heard as «йи»: «язык», «поезд+а»), words without a mark, Latin.
+pub fn reduce_unstressed(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word: Vec<char> = Vec::new();
+    let flush = |word: &mut Vec<char>, out: &mut String| {
+        if word.contains(&'+') {
+            let mut after = false;
+            let mut i = 0;
+            while i < word.len() {
+                let c = word[i];
+                if c == '+' && i + 1 < word.len() {
+                    out.push('+');
+                    out.push(word[i + 1]);
+                    after = true;
+                    i += 2;
+                    continue;
+                }
+                let low = c.to_lowercase().next().unwrap_or(c);
+                let prev = if i > 0 { word[i - 1].to_lowercase().next().unwrap_or(' ') } else { ' ' };
+                let after_consonant = i > 0 && prev.is_alphabetic() && !"аеёиоуыэюяьъ".contains(prev);
+                let to = match low {
+                    'о' => Some('а'),
+                    'е' | 'я' if !after && after_consonant => Some('и'),
+                    _ => None,
+                };
+                match to {
+                    Some(t) => out.push(if c.is_uppercase() { t.to_uppercase().next().unwrap_or(t) } else { t }),
+                    None => out.push(c),
+                }
+                i += 1;
+            }
+        } else {
+            out.extend(word.iter());
+        }
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_alphabetic() || c == '+' || c == '\u{301}' {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
 pub fn set_noise_scale(v: f32) {
     let v = if v.is_finite() { v.clamp(0.3, 1.2) } else { 0.667 };
     NOISE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
@@ -910,6 +974,7 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
     let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
     let t = spell_leftover_digits(&t, base);
     let t = if st3 {
+        let t = if st3_reduce_on() { reduce_unstressed(&t) } else { t };
         let t = plus_to_acute(&t, is_known(table, '\u{301}'));
         st3_ending(&t)
     } else { t };
@@ -1100,6 +1165,16 @@ mod tests {
         let mut table = vec![-1i64; 65536];
         for (i, c) in "замокЗи. <>/ru+".chars().enumerate() { table[c as usize] = i as i64 + 1; }
         assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");
+    }
+
+    #[test]
+    fn supertonic3_reduce() {
+        assert_eq!(reduce_unstressed("Стр+елки час+ов, а стрелк+и заст+ыли"), "Стр+елки час+ов, а стрилк+и заст+ыли");
+        assert_eq!(reduce_unstressed("молок+о, хорош+о, гор+ода, гол+ова"), "малак+о, хараш+о, гар+ода, гал+ова");
+        // е/я at the start or after a vowel are «йи»; ё and unmarked words untouched
+        assert_eq!(reduce_unstressed("яз+ык, по+езд, поезд+а, ёлка, окно, мест+а, пят+ак"), "яз+ык, па+езд, паезд+а, ёлка, окно, мист+а, пит+ак");
+        assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
+        assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
     }
 
     #[test]

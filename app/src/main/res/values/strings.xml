@@ -400,4 +400,6 @@
     <string name="engine_st3_q5">Fast (5 steps) — for slow phones</string>
     <string name="engine_st3_q8">Normal (8 steps) — as Supertone has it</string>
     <string name="engine_st3_q12">High (12 steps) — cleaner, 1.5× slower</string>
+    <string name="engine_st3_reduce">Stress for Supertonic 3: as it sounds</string>
+    <string name="engine_st3_reduce_desc">Supertonic 3 hardly notices stress marks. Unstressed vowels are given to it as they sound — then the stress falls in place. The text on screen does not change</string>
 </resources>
