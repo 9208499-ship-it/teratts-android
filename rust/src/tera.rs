@@ -59,6 +59,48 @@ pub fn st3_reduce_on() -> bool {
     ST3_REDUCE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Words where the «г» of a final -ого/-его is a real «г» (the root, not the ending).
+const ST3_G_KEEP: &[&str] = &[
+    "много", "немного", "премного", "строго", "нестрого", "дорого", "недорого", "задорого",
+    "убого", "полого", "отлого", "итого", "ого", "лего", "эго", "того-то",
+];
+
+/// «г» read as «в» where Russian says so: the endings -ого/-его («его» → «ево», «красного» →
+/// «красново», «ничего» → «ничево») and «сегодня». Supertonic 3 reads the letter as written.
+pub fn g_as_v(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word: Vec<char> = Vec::new();
+    let flush = |word: &mut Vec<char>, out: &mut String| {
+        let letters: Vec<(usize, char)> = word.iter().copied().enumerate()
+            .filter(|(_, c)| c.is_alphabetic())
+            .map(|(i, c)| (i, c.to_lowercase().next().unwrap_or(c)))
+            .collect();
+        let plain: String = letters.iter().map(|(_, c)| *c).collect();
+        let n = letters.len();
+        let mut at: Option<usize> = None;
+        if n >= 3 && (plain.ends_with("ого") || plain.ends_with("его")) && !ST3_G_KEEP.contains(&plain.as_str()) {
+            at = Some(letters[n - 2].0);
+        } else if plain.starts_with("сегодн") {
+            at = Some(letters[2].0);
+        }
+        if let Some(i) = at {
+            word[i] = if word[i].is_uppercase() { 'В' } else { 'в' };
+        }
+        out.extend(word.iter());
+        word.clear();
+    };
+    for c in text.chars() {
+        if c.is_alphabetic() || c == '+' || c == '\u{301}' {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
 /// Unstressed vowels as they sound, in words that carry a stress mark ('+' before the vowel):
 /// о → а everywhere unstressed («мол+око» → «мал+ако»); е, я → и before the stress after a consonant
 /// («стрелк+и» → «стрилк+и»). Not touched: ё, е/я at the start of a word or after a vowel or ь/ъ
@@ -974,7 +1016,7 @@ pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<
     let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
     let t = spell_leftover_digits(&t, base);
     let t = if st3 {
-        let t = if st3_reduce_on() { reduce_unstressed(&t) } else { t };
+        let t = if st3_reduce_on() { reduce_unstressed(&g_as_v(&t)) } else { t };
         let t = plus_to_acute(&t, is_known(table, '\u{301}'));
         st3_ending(&t)
     } else { t };
@@ -1175,6 +1217,17 @@ mod tests {
         assert_eq!(reduce_unstressed("яз+ык, по+езд, поезд+а, ёлка, окно, мест+а, пят+ак"), "яз+ык, па+езд, паезд+а, ёлка, окно, мист+а, пит+ак");
         assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
         assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
+    }
+
+    #[test]
+    fn supertonic3_g_as_v() {
+        assert_eq!(g_as_v("ег+о, Ег+о, нег+о, ничег+о, кр+асного, одног+о, сег+одня"),
+                   "ев+о, Ев+о, нев+о, ничев+о, кр+асново, однов+о, сев+одня");
+        assert_eq!(g_as_v("м+ного, стр+ого, д+орого, ит+ого, Ог+о, дорог+ого"),
+                   "м+ного, стр+ого, д+орого, ит+ого, Ог+о, дорог+ово");
+        assert_eq!(g_as_v("дорога, нога, бог"), "дорога, нога, бог");
+        assert_eq!(reduce_unstressed(&g_as_v("ничег+о кр+асного")), "ничив+о кр+аснава");
+        assert_eq!(reduce_unstressed(&g_as_v("ещё одног+о")), "ещё аднав+о");
     }
 
     #[test]
