@@ -306,7 +306,9 @@ object AssetManager {
         VoiceRhythm.load(context)
         loadCommaQuotes(context)
         val st3 = engine(context) == ENGINE_ST3
-        engineKey = if (st3) "st3:" else ""
+        // the teacher has its own loudness and tempo: what was learned for the fast sampler must not
+        // be applied to it (ka3ak78: «звук идёт волной» with the teacher on)
+        engineKey = if (st3) "st3:" else if (teacherOn(context)) "tt:" else ""
         return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
     }
 
