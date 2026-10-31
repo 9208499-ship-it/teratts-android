@@ -353,8 +353,7 @@ object AccentDictionaryManager {
     }
 
     /**
-     * Only the letter ё from the dictionary, no stress marks: «веселыми» → «весёлыми». For Supertonic 3
-     * reading by itself — it places stress itself, but reads е where ё is meant.
+     * Only the letter ё from the dictionary, no stress marks: «веселыми» → «весёлыми».
      */
     fun restoreYo(text: String): String {
         val bin = binaryDict

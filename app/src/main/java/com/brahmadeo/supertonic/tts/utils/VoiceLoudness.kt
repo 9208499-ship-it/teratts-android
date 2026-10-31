@@ -31,7 +31,7 @@ object VoiceLoudness {
     fun setEnabled(context: Context, on: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
 
-    // per model: the same voice is louder or quieter in TeraTTS and in Supertonic 3
+    // per model: the same voice is louder or quieter in TeraTTS and in Shtorm
     private fun key(voicePath: String) = AssetManager.engineKey + File(voicePath).name
 
     private fun load(context: Context) {

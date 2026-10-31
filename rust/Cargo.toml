@@ -9,7 +9,8 @@ xnnpack = ["ort/xnnpack"]
 
 [dependencies]
 # ONNX Runtime
-ort = { version = "2.0.0-rc.11", features = ["load-dynamic", "ndarray", "xnnpack"] }
+ort = { version = "2.0.0-rc.11", features = ["load-dynamic", "ndarray", "xnnpack", "half"] }
+half = "2"
 
 # Array processing (like NumPy)
 ndarray = { version = "0.17.2", features = ["rayon"] }

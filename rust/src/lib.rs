@@ -22,28 +22,8 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseS
     crate::tera::set_noise_scale(scale);
 }
 
-/// Supertonic 3's denoising steps (quality setting: 5 / 8 / 12).
-#[no_mangle]
-pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Steps(
-    _env: JNIEnv,
-    _class: JClass,
-    steps: jint,
-) {
-    crate::tera::set_st3_steps(steps);
-}
-
-/// Supertonic 3: unstressed vowels written as they sound (on/off).
-#[no_mangle]
-pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Reduce(
-    _env: JNIEnv,
-    _class: JClass,
-    on: jni::sys::jboolean,
-) {
-    crate::tera::set_st3_reduce(on != 0);
-}
-
 /// "Voice repair" for TeraTTS: voice file name → a native TeraTTS voice whose rhythm (style_dp)
-/// it borrows. A Supertonic 3 voice keeps its timbre (style_ttl) but its own style_dp makes TeraTTS's
+/// it borrows. A Supertonic voice keeps its timbre (style_ttl) but its own style_dp makes TeraTTS's
 /// duration predictor skip words (azimutspb, TeraTTS-GUI). Lines "file\tdonor path".
 static VOICE_RHYTHM: once_cell::sync::Lazy<std::sync::Mutex<(String, std::collections::HashMap<String, String>)>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new((String::new(), std::collections::HashMap::new())));
@@ -88,16 +68,6 @@ fn with_rhythm(mut style: Style, style_path: &str) -> Style {
     style
 }
 
-/// Supertonic 3: how stress is given (0 plain text, 1 marks, 2 marks + as it sounds).
-#[no_mangle]
-pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setSt3Stress(
-    _env: JNIEnv,
-    _class: JClass,
-    mode: jni::sys::jint,
-) {
-    crate::tera::set_st3_stress(mode.clamp(0, 2) as u8);
-}
-
 /// Pause after a paragraph, seconds (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setParagraphPause(
@@ -116,6 +86,7 @@ mod cores;
 mod tera;
 mod homo;
 mod stretch;
+mod pocket;
 mod thermal;
 
 use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech, Style};
@@ -259,7 +230,18 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
 
     engine.thermal.update(buffer_seconds, engine.last_rtf);
 
-    let style = if style_path.contains(';') {
+    // Shtorm: the voice is a recording (.wav); a TeraTTS voice file asked for is said in the
+    // default Shtorm voice — Kotlin normally sends the right one
+    let style = if engine.tts.kind == helper::ModelKind::Pocket {
+        let voice = style_path.split(';').next().unwrap_or("").to_string();
+        engine.tts.voice_path = if voice.ends_with(".wav") && std::path::Path::new(&voice).exists() {
+            voice
+        } else {
+            log::warn!("Shtorm: no recording {voice}, the default voice instead");
+            std::path::Path::new(&voice).parent().map(|d| d.join("ru_m5.wav").to_string_lossy().into_owned()).unwrap_or_default()
+        };
+        Style { ttl: ndarray::Array3::zeros((1, 50, 256)), dp: ndarray::Array3::zeros((1, 8, 16)) }
+    } else if style_path.contains(';') {
         let parts: Vec<&str> = style_path.split(';').collect();
         if parts.len() == 3 {
             let p1 = parts[0];

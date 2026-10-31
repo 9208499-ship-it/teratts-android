@@ -74,7 +74,8 @@ object RolePrefs {
     /** All installed voice files, sorted — without the ones the user removed from the list. */
     fun availableVoices(context: Context): List<String> {
         val hidden = hiddenVoices(context)
-        return voicesDir(context).listFiles { _, n -> n.endsWith(".json") }?.map { it.name }
+        val ext = AssetManager.voiceExtension(context)
+        return voicesDir(context).listFiles { _, n -> n.endsWith(ext) }?.map { it.name }
             ?.filter { it !in hidden }?.sorted() ?: emptyList()
     }
 

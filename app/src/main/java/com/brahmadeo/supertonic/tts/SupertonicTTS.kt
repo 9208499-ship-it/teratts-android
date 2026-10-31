@@ -26,9 +26,6 @@ object SupertonicTTS {
     private external fun reset(ptr: Long)
     private external fun setPauseScale(scale: Float)
     private external fun setNoiseScale(scale: Float)
-    private external fun setSt3Steps(steps: Int)
-    @Volatile private var st3StepsAvailable = true
-    private external fun setSt3Stress(mode: Int)
     private external fun setVoiceRhythm(table: String)
     private external fun setCommaQuotes(on: Boolean)
     @Volatile private var rhythmAvailable = true
@@ -206,17 +203,6 @@ object SupertonicTTS {
         try {
             setPauseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.pauseScale)
             setNoiseScale(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.noiseScale)
-            // an engine library from an older build has no such function: never crash on it
-            if (st3StepsAvailable) {
-                try {
-                    setSt3Steps(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Steps)
-                    setSt3Stress(com.brahmadeo.supertonic.tts.utils.AssetManager.st3Stress)
-                }
-                catch (e: UnsatisfiedLinkError) {
-                    st3StepsAvailable = false
-                    Log.e("SupertonicTTS", "engine library without setSt3Steps — an old build of the engine got into the APK")
-                }
-            }
             if (rhythmAvailable) {
                 try {
                     setVoiceRhythm(com.brahmadeo.supertonic.tts.utils.VoiceRhythm.table)
@@ -225,7 +211,9 @@ object SupertonicTTS {
                 catch (e: UnsatisfiedLinkError) { rhythmAvailable = false }
             }
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
-            val data = synthesize(nativePtr, text, lang, stylePath, speed, bufferDuration, steps, gain)
+            // the voice in the form the running model needs (Shtorm: a recording, TeraTTS: a voice file)
+            val voice = com.brahmadeo.supertonic.tts.utils.AssetManager.voiceForEngine(stylePath)
+            val data = synthesize(nativePtr, text, lang, voice, speed, bufferDuration, steps, gain)
             return if (data.isNotEmpty()) data else null
         } catch (e: Exception) {
             Log.e("SupertonicTTS", "Native synthesis exception: ${e.message}")

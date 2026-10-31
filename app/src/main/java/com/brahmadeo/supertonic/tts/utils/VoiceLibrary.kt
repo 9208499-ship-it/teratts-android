@@ -59,8 +59,8 @@ object VoiceLibrary {
 
     /** What a voice is called in the lists: the library ones by name and manner, others by file name. */
     fun label(file: String): String {
-        val f = if (file.endsWith(".json")) file else "$file.json"
-        return NAMES[f] ?: file.removeSuffix(".json")
+        val f = if (file.endsWith(".json")) file else "${file.removeSuffix(".wav")}.json"
+        return NAMES[f] ?: file.removeSuffix(".json").removeSuffix(".wav")
     }
 
     @Volatile private var done = false

@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private lateinit var ebookParser: EbookParser
 
-    // Data — Supertonic 3 supports 31 languages + an "na" fallback for unknown.
+    // Data — the languages of the voice list
     private val languages = mapOf(
         R.string.lang_russian to "ru",
         R.string.lang_english to "en"
@@ -199,7 +199,7 @@ class MainActivity : ComponentActivity() {
         // Wipe v1/v2 leftovers from prior versions of the app so we don't waste storage.
         AssetManager.cleanupOldVersions(this)
 
-        // Single unified model (Supertonic 3): download on first launch, initialize otherwise.
+        // TeraTTS: download on first launch, initialize otherwise.
         if (!AssetManager.isReady(this)) {
             startDownload()
         } else {
@@ -618,15 +618,25 @@ class MainActivity : ComponentActivity() {
 
         // Check dynamic dir for default listing
         val voiceDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
+        // the voices of the chosen model: voice files (.json) for TeraTTS, recordings (.wav) for Shtorm
+        val ext = AssetManager.voiceExtension(this)
         if (voiceDir.exists()) {
             val hidden = com.brahmadeo.supertonic.tts.utils.RolePrefs.hiddenVoices(this)
-            val files = voiceDir.listFiles { _, name -> name.endsWith(".json") }
+            val files = voiceDir.listFiles { _, name -> name.endsWith(ext) }
             files?.forEach { file ->
                 if (!voiceResources.containsKey(file.name) && file.name !in hidden) {
                     val friendlyName = com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(file.name)
                     viewModel.voiceFiles[friendlyName] = file.name
                 }
             }
+        }
+        // the chosen voice in this model's form (ru_m5.json ↔ ru_m5.wav), or its default voice
+        val chosen = viewModel.selectedVoiceFile.value
+        if (viewModel.voiceFiles.isNotEmpty() && chosen !in viewModel.voiceFiles.values) {
+            val stem = chosen.substringBeforeLast('.')
+            val fallback = if (ext == ".wav") AssetManager.SHTORM_DEFAULT_VOICE else AssetManager.DEFAULT_VOICE_FILE
+            viewModel.selectedVoiceFile.value = listOf("$stem$ext", fallback).firstOrNull { it in viewModel.voiceFiles.values }
+                ?: viewModel.voiceFiles.values.sorted().first()
         }
     }
 

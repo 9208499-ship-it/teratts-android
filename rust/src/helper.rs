@@ -648,49 +648,36 @@ impl HomoRuntime {
     }
 }
 
-/// Fewest denoising steps Supertonic 3 is run with (measured against 32 steps: 3 steps clip and
-/// hiss, 5 are clean; 8 are a little closer still).
-pub const MIN_ST3_STEPS: usize = 5;
-
-/// Which model the four graphs are: TeraTTSv2 (a distilled sampler, one call) or
-/// Supertonic 3 (Supertone's multilingual model: a vector estimator called step by step).
+/// Which model the engine runs: TeraTTSv2 (four graphs, the distilled sampler in one call) or
+/// Shtorm PocketTTS RU (frame by frame, see pocket.rs).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ModelKind {
     Tera,
-    Supertonic3,
+    Pocket,
 }
 
-pub struct TextToSpeech {
-    pub kind: ModelKind,
-    homo: Option<HomoRuntime>,
+struct TeraGraphs {
     text_processor: UnicodeProcessor,
     dp_ort: Session,
     text_enc_ort: Session,
     sampler_ort: Session,
     vocoder_ort: Session,
+}
+
+pub struct TextToSpeech {
+    pub kind: ModelKind,
+    homo: Option<HomoRuntime>,
+    tera: Option<TeraGraphs>,
+    pocket: Option<crate::pocket::Pocket>,
+    /// Shtorm: the voice recording to speak with (set before each call).
+    pub voice_path: String,
+    /// Output rate of the engine — TeraTTS's 44.1 kHz for both (Shtorm's 24 kHz is converted).
     pub sample_rate: i32,
 }
 
 impl TextToSpeech {
-    pub fn new(
-        kind: ModelKind,
-        homo: Option<HomoRuntime>,
-        text_processor: UnicodeProcessor,
-        dp_ort: Session,
-        text_enc_ort: Session,
-        sampler_ort: Session,
-        vocoder_ort: Session,
-    ) -> Self {
-        TextToSpeech {
-            kind,
-            homo,
-            text_processor,
-            dp_ort,
-            text_enc_ort,
-            sampler_ort,
-            vocoder_ort,
-            sample_rate: tera::SAMPLE_RATE,
-        }
+    fn new(kind: ModelKind, homo: Option<HomoRuntime>, tera: Option<TeraGraphs>, pocket: Option<crate::pocket::Pocket>) -> Self {
+        TextToSpeech { kind, homo, tera, pocket, voice_path: String::new(), sample_rate: tera::SAMPLE_RATE }
     }
 
     /// One utterance through the TeraTTS graphs (spec: teratts.py `_generate_latent`).
@@ -704,9 +691,6 @@ impl TextToSpeech {
         total_step: usize,
         speed: f32,
     ) -> Result<(Vec<f32>, Vec<f32>)> {
-        let st3 = self.kind == ModelKind::Supertonic3;
-        // output names: TeraTTS's graphs call every output "output", Supertone's name them
-        let (enc_out, dp_out, voc_out) = if st3 { ("text_emb", "duration", "wav_tts") } else { ("output", "output", "output") };
         if text_list.len() != 1 {
             anyhow::bail!("TeraTTS runtime synthesizes one utterance at a time");
         }
@@ -723,14 +707,32 @@ impl TextToSpeech {
             }
         }
 
-        // 1. Text → token ids (with '+' for the encoder, without for durations)
-        let (ids, dids) = {
-            let table = self.text_processor.table();
-            let Some(model_text) = tera::prepare_with(&source, &lang, table, st3) else {
+        if self.kind == ModelKind::Pocket {
+            // Shtorm: stress as U+0301; it speaks at its own pace — the reading speed is a
+            // pitch-preserving stretch of the finished audio
+            let Some(text) = tera::prepare_pocket(&source, &lang) else {
                 return Ok((Vec::new(), vec![0.0]));
             };
-            // Supertonic 3 reads the same text for both (its stress marks are part of the text)
-            let dur_text = if st3 { model_text.clone() } else { tera::strip_stress(&model_text) };
+            let voice = self.voice_path.clone();
+            let pocket = self.pocket.as_mut().ok_or_else(|| anyhow::anyhow!("Shtorm not loaded"))?;
+            let raw = pocket.say(&text, &voice)?;
+            let wav = crate::pocket::resample(&raw, crate::pocket::POCKET_RATE, tera::SAMPLE_RATE as u32);
+            let mut wav = tera::trim_edges(&wav, 0.02, 0.10);
+            tera::fade_out(&mut wav);
+            let wav = crate::stretch::time_stretch(&wav, speed, tera::SAMPLE_RATE as u32);
+            let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
+            return Ok((wav, vec![kept]));
+        }
+        let _ = total_step; // TeraTTS: 8 steps inside the sampler
+        let g = self.tera.as_mut().ok_or_else(|| anyhow::anyhow!("TeraTTS not loaded"))?;
+
+        // 1. Text → token ids (with '+' for the encoder, without for durations)
+        let (ids, dids) = {
+            let table = g.text_processor.table();
+            let Some(model_text) = tera::prepare(&source, &lang, table) else {
+                return Ok((Vec::new(), vec![0.0]));
+            };
+            let dur_text = tera::strip_stress(&model_text);
             (tera::token_ids(&model_text, table)?, tera::token_ids(&dur_text, table)?)
         };
         let (n_ids, n_dids) = (ids.len(), dids.len());
@@ -743,80 +745,46 @@ impl TextToSpeech {
         let style_dp_value = Value::from_array(style.dp.clone())?;
 
         // 2. Text encoder
-        let enc_outputs = self.text_enc_ort.run(ort::inputs!{
+        let enc_outputs = g.text_enc_ort.run(ort::inputs!{
             "text_ids" => &ids_value,
             "style_ttl" => &style_ttl_value,
             "text_mask" => &mask_value
         })?;
-        let (emb_shape, emb_data) = enc_outputs[enc_out].try_extract_tensor::<f32>()?;
+        let (emb_shape, emb_data) = enc_outputs["output"].try_extract_tensor::<f32>()?;
         let text_emb = Array3::from_shape_vec(
             (emb_shape[0] as usize, emb_shape[1] as usize, emb_shape[2] as usize),
             emb_data.to_vec(),
         )?;
+        drop(enc_outputs);
 
         // 3. Duration (seconds)
-        let dp_outputs = self.dp_ort.run(ort::inputs!{
+        let dp_outputs = g.dp_ort.run(ort::inputs!{
             "text_ids" => &dids_value,
             "style_dp" => &style_dp_value,
             "text_mask" => &dmask_value
         })?;
-        let raw = dp_outputs[dp_out].try_extract_tensor::<f32>()?.1[0];
+        let raw = dp_outputs["output"].try_extract_tensor::<f32>()?.1[0];
+        drop(dp_outputs);
         // TeraTTS stretches a lone short reply («Да.», «Хорошо.») to about a second: cap it
-        let natural = if st3 { raw / tera::SPEED } else { tera::cap_short_reply(raw / tera::SPEED, &source) };
+        let natural = tera::cap_short_reply(raw / tera::SPEED, &source);
         let emb_value = Value::from_array(text_emb)?;
-        // Supertonic 3: a piece that comes out cut at the end is voiced again, a little slower
-        // (a longer predicted length), at most twice
-        let mut attempt = 0;
-        loop {
-        let duration = natural / speed.max(0.1) * 1.15f32.powi(attempt);
+        let duration = natural / speed.max(0.1);
         if !duration.is_finite() || duration <= 0.0 {
             anyhow::bail!("duration predictor returned {raw}");
         }
 
         // 4. Sampler: N(0,1) noise → latent in one call
-        // a little more room than predicted: the end of the phrase is not squeezed or cut
         let frames = tera::latent_len(duration + tera::TAIL_ROOM_S);
         // lowered "temperature": the sampler starts from calmer noise, which makes the model's
-        // known fault — a word skipped or said twice — much rarer (the old Supertonic path had
-        // 0.667 for the same reason; the TeraTTS path used full 1.0)
-        // Supertonic 3: Supertone's own noise 1.0 (calm noise is TeraTTS's thing: below ~0.6 Supertonic 3
-        // sounds metallic, and even 0.667 is clearly worse than 1.0 — measured against 32 steps)
-        let scale = if st3 { tera::st3_noise_scale(tera::noise_scale()) } else { tera::noise_scale() };
-        let normal = Normal::new(0.0f32, scale).unwrap();
+        // known fault — a word skipped or said twice — much rarer
+        let normal = Normal::new(0.0f32, tera::noise_scale()).unwrap();
         let mut rng = rand::thread_rng();
         let noise = Array3::<f32>::from_shape_fn((1, tera::LATENT_CHANNELS, frames), |_| normal.sample(&mut rng));
         let noise_value = Value::from_array(noise)?;
         let lmask_value = Value::from_array(Array3::<f32>::ones((1, 1, frames)))?;
-        let latent = if st3 {
-            // Supertonic 3: the vector estimator, step by step (Supertone's helper.py `_infer`)
-            // its own quality setting (5 / 8 / 12), not the app's step count: that is 3 by default
-            // (TeraTTS ignores it — its sampler has 8 inside), and Supertonic 3 at 3 steps overshoots
-            let _ = total_step;
-            let steps = tera::st3_steps().max(MIN_ST3_STEPS);
-            let total_value = Value::from_array(Array::from_elem(1, steps as f32))?;
-            let mut xt_value = noise_value;
-            let emb_value = &emb_value;
-            for step in 0..steps {
-                let step_value = Value::from_array(Array::from_elem(1, step as f32))?;
-                let out = self.sampler_ort.run(ort::inputs!{
-                    "noisy_latent" => &xt_value,
-                    "text_emb" => emb_value,
-                    "style_ttl" => &style_ttl_value,
-                    "text_mask" => &mask_value,
-                    "latent_mask" => &lmask_value,
-                    "current_step" => &step_value,
-                    "total_step" => &total_value
-                })?;
-                let (shape, data) = out["denoised_latent"].try_extract_tensor::<f32>()?;
-                let next = Array3::from_shape_vec((shape[0] as usize, shape[1] as usize, shape[2] as usize), data.to_vec())?;
-                drop(out);
-                xt_value = Value::from_array(next)?;
-            }
-            let (shape, data) = xt_value.try_extract_tensor::<f32>()?;
-            Array3::from_shape_vec((shape[0] as usize, shape[1] as usize, shape[2] as usize), data.to_vec())?
-        } else {
+        let latent = {
             let guidance_value = Value::from_array(Array::from_elem(1, tera::GUIDANCE))?;
-            let sampler_outputs = self.sampler_ort.run(ort::inputs!{
+            let sampler_outputs = g.sampler_ort.run(ort::inputs!{
                 "initial_latent" => &noise_value,
                 "text_emb" => &emb_value,
                 "style_ttl" => &style_ttl_value,
@@ -833,30 +801,16 @@ impl TextToSpeech {
 
         // 5. Vocoder, cut where the speech really ends (not before the predicted duration)
         let latent_value = Value::from_array(latent)?;
-        let vocoder_outputs = self.vocoder_ort.run(ort::inputs!{
+        let vocoder_outputs = g.vocoder_ort.run(ort::inputs!{
             "latent" => &latent_value
         })?;
-        let wav_all = vocoder_outputs[voc_out].try_extract_tensor::<f32>()?.1;
-        if st3 {
-            if attempt < 2 && tera::st3_needs_retry(wav_all) {
-                attempt += 1;
-                log::info!("Supertonic 3: piece cut at the end, voiced again ({attempt})");
-                continue;
-            }
-            // cut by the sound, not by the predicted length (that is what swallowed last words)
-            let mut wav = tera::trim_edges(wav_all, 0.05, 0.12);
-            tera::fade_out(&mut wav);
-            let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
-            return Ok((wav, vec![kept]));
-        }
+        let wav_all = vocoder_outputs["output"].try_extract_tensor::<f32>()?.1;
         let predicted = (duration * tera::SAMPLE_RATE as f32).round() as usize;
         let keep = tera::speech_end(wav_all, predicted);
         let mut wav = wav_all[..keep].to_vec();
         tera::fade_out(&mut wav);
         let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
-
-        return Ok((wav, vec![kept]));
-        }
+        Ok((wav, vec![kept]))
     }
 
     pub fn call<F>(
@@ -870,9 +824,8 @@ impl TextToSpeech {
         mut callback: F,
     ) -> Result<(Vec<f32>, f32)> 
     where F: FnMut(usize, usize, Option<&[f32]>) -> bool {
-        // Supertonic 3 repeats and drops words more the longer a piece is (SuperClonica measured
-        // 3360 Russian draws: up to 160 characters ~0.06 %, 200 — 1.1 %, 290 — 4.2 %)
-        let max_len = if self.kind == ModelKind::Supertonic3 { tera::ST3_MAX_CHUNK_CHARS } else { tera::MAX_CHUNK_CHARS };
+        // Shtorm: pieces of at most 150 characters (its volume sags on longer ones)
+        let max_len = if self.kind == ModelKind::Pocket { crate::pocket::POCKET_MAX_CHUNK_CHARS } else { tera::MAX_CHUNK_CHARS };
         let sr = self.sample_rate as f32;
         // Pauses follow the reading speed: at 2× a colon pause is half as long.
         let scale = tera::pause_scale() / speed.max(0.1);
@@ -1096,7 +1049,7 @@ pub fn load_and_mix_voice_styles(path1: &str, path2: &str, alpha: f32) -> Result
 }
 
 /// Session options shared by every model (threads, no spinning, XNNPACK if asked).
-fn session_builder(level: GraphOptimizationLevel, use_xnnpack: bool, ort_threads: usize, _xnn_threads: usize)
+pub(crate) fn session_builder(level: GraphOptimizationLevel, use_xnnpack: bool, ort_threads: usize, _xnn_threads: usize)
     -> Result<ort::session::builder::SessionBuilder> {
     #[allow(unused_mut)]
     let mut builder = Session::builder()?
@@ -1220,29 +1173,19 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
         log::info!("Using CPU for inference with {} threads", ort_threads);
     }
 
-    // Supertonic 3 (Supertone's multilingual model) has a vector estimator instead of the sampler
-    let kind = if Path::new(onnx_dir).join("vector_estimator.onnx").exists() { ModelKind::Supertonic3 } else { ModelKind::Tera };
-    if kind == ModelKind::Supertonic3 {
-        // the engine's frame and latent sizes are TeraTTS's; Supertonic 3 shares them (v2 layout)
-        let c = load_cfgs(onnx_dir)?;
-        let frame = (c.ae.base_chunk_size * c.ttl.chunk_compress_factor) as usize;
-        let channels = (c.ttl.latent_dim * c.ttl.chunk_compress_factor) as usize;
-        if c.ae.sample_rate != tera::SAMPLE_RATE || frame != tera::SAMPLES_PER_FRAME || channels != tera::LATENT_CHANNELS {
-            anyhow::bail!("Supertonic 3 layout not supported: rate {} frame {} channels {}", c.ae.sample_rate, frame, channels);
-        }
-    }
+    // Shtorm PocketTTS RU: its own folder (flow_lm_main.onnx …)
+    let kind = if crate::pocket::is_pocket_dir(onnx_dir) { ModelKind::Pocket } else { ModelKind::Tera };
     log::info!("model: {:?}", kind);
     let dp_path = format!("{}/duration_predictor.onnx", onnx_dir);
     let text_enc_path = format!("{}/text_encoder.onnx", onnx_dir);
-    let sampler_path = if kind == ModelKind::Supertonic3 { format!("{}/vector_estimator.onnx", onnx_dir) }
-        else { format!("{}/{}", onnx_dir, tera::tera_sampler_file(onnx_dir)) };
+    let sampler_path = format!("{}/{}", onnx_dir, tera::tera_sampler_file(onnx_dir));
     let vocoder_path = format!("{}/vocoder.onnx", onnx_dir);
 
     // The four models and the homograph resolver load side by side: each load (reading the
     // file, optimising the graph) is mostly one core's work, and the phone has several —
     // one after another they made the cold start several seconds long.
     let started = std::time::Instant::now();
-    // the homograph resolver lives next to TeraTTS's models; Supertonic 3's folder is beside them
+    // the homograph resolver lives next to TeraTTS's models; Shtorm's folder is beside them
     let homo_dir = {
         let own = Path::new(onnx_dir).join("homo");
         let beside = Path::new(onnx_dir).parent().map(|p| p.join("onnx").join("homo"));
@@ -1256,29 +1199,39 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
             r
         }
     };
+    let load_homo = |hd: std::path::PathBuf| {
+        if !hd.join("homo_encoder.onnx").exists() {
+            log::info!("No homograph resolver at {}", hd.display());
+            return None;
+        }
+        let t = std::time::Instant::now();
+        match HomoRuntime::load(&hd, 1) {
+            Ok(h) => {
+                log::info!("Homograph resolver loaded: {} ms", t.elapsed().as_millis());
+                Some(h)
+            }
+            Err(e) => {
+                log::warn!("Homograph resolver unavailable: {e:?}");
+                None
+            }
+        }
+    };
+    if kind == ModelKind::Pocket {
+        let (pocket, homo) = std::thread::scope(|s| {
+            let hd = homo_dir.clone();
+            let ho = s.spawn(move || load_homo(hd));
+            (crate::pocket::Pocket::load(onnx_dir, ort_threads), ho.join().ok().flatten())
+        });
+        log::info!("engine models loaded in {} ms", started.elapsed().as_millis());
+        return Ok(TextToSpeech::new(kind, homo, None, Some(pocket?)));
+    }
     let (dp_r, te_r, sm_r, vc_r, homo) = std::thread::scope(|s| {
         let dp = s.spawn(load("duration_predictor", dp_path.clone()));
         let te = s.spawn(load("text_encoder", text_enc_path.clone()));
         let sm = s.spawn(load("sampler", sampler_path.clone()));
         let vc = s.spawn(load("vocoder", vocoder_path.clone()));
         let hd = homo_dir.clone();
-        let ho = s.spawn(move || {
-            if !hd.join("homo_encoder.onnx").exists() {
-                log::info!("No homograph resolver at {}", hd.display());
-                return None;
-            }
-            let t = std::time::Instant::now();
-            match HomoRuntime::load(&hd, 1) {
-                Ok(h) => {
-                    log::info!("Homograph resolver loaded: {} ms", t.elapsed().as_millis());
-                    Some(h)
-                }
-                Err(e) => {
-                    log::warn!("Homograph resolver unavailable: {e:?}");
-                    None
-                }
-            }
-        });
+        let ho = s.spawn(move || load_homo(hd));
         (dp.join(), te.join(), sm.join(), vc.join(), ho.join().ok().flatten())
     });
     let joined = |r: std::thread::Result<Result<Session>>| -> Result<Session> {
@@ -1293,15 +1246,7 @@ pub fn load_text_to_speech(onnx_dir: &str, use_gpu: bool, use_xnnpack: bool, ort
     let unicode_indexer_path = format!("{}/unicode_indexer.json", onnx_dir);
     let text_processor = UnicodeProcessor::new(&unicode_indexer_path)?;
 
-    Ok(TextToSpeech::new(
-        kind,
-        homo,
-        text_processor,
-        dp_ort,
-        text_enc_ort,
-        sampler_ort,
-        vocoder_ort,
-    ))
+    Ok(TextToSpeech::new(kind, homo, Some(TeraGraphs { text_processor, dp_ort, text_enc_ort, sampler_ort, vocoder_ort }), None))
 }
 
 

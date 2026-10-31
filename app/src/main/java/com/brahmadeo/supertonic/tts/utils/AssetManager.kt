@@ -228,129 +228,130 @@ object AssetManager {
         File(context.filesDir, MODEL_VERSION).takeIf { it.exists() }?.deleteRecursively()
     }
 
-    // ---- Supertonic 3 (Supertone, OpenRAIL-M): the second model to choose, downloaded on request ----
+    // ---- Shtorm PocketTTS RU (ArtShtorm, CC BY 4.0; Kyutai Pocket TTS): the second model ----
+    // Speaks in the voice of a short recording (.wav next to the voices); downloaded on request.
 
     private const val PREFS = "SupertonicPrefs"
     private const val KEY_ENGINE = "engine_model"
     const val ENGINE_TERA = "tera"
-    const val ENGINE_ST3 = "st3"
-    /**
-     * Sped up for phones (teratts-st3-optimize.sh: 1×1 convolutions as MatMul — they then use every
-     * core — and the vector estimator in int8), hosted with the app's releases; Supertone's own
-     * files are the fallback (same inputs and outputs, so any mix works).
-     */
-    private const val ST3_FAST_URL = "https://github.com/9208499-ship-it/teratts-android/releases/download/models-st3-v1"
-    private val ST3_URLS = listOf(
-        ST3_FAST_URL,
-        "https://huggingface.co/Supertone/supertonic-3/resolve/main/onnx",
-        "https://huggingface.co/supertone-oss-archive/supertonic-3/resolve/aafc6e32416a594460b32413efc49d7fe4ce6d46/onnx"
+    const val ENGINE_SHTORM = "shtorm"
+    /** The model files (the same export MyTTS uses), hosted with the app's releases. */
+    private const val SHTORM_URL = "https://github.com/9208499-ship-it/teratts-android/releases/download/models-shtorm-v1"
+    private class Remote(val name: String, val size: Long, val sha: String)
+    private val SHTORM_FILES = listOf(
+        Remote("flow_lm_flow.onnx", 39081890L, "5b47a1593b8bc43941f539497b729bb995335b3077e863f315275287d2a2edba"),
+        Remote("flow_lm_main.onnx", 302364167L, "1c26f5046b68a30d6f4894e486ea5f4619c3b8fd961114da4d0faaf1a3fcbaac"),
+        Remote("mimi_decoder.onnx", 41410972L, "c5aa9130f66b6100d57044094cc08665fb129944e77f92fe4a1a601992194331"),
+        Remote("mimi_encoder.onnx", 39282087L, "9a40beeac20e2d4d1ee9d1af2007c02960fb4b01bec6a46cd9b94cfb396e2c5a"),
+        Remote("text_conditioner.onnx", 16388309L, "48f14f835e891798a29abd76838e512b2453b0cb2dc2892779e47e2b4a3e5cf6"),
+        Remote("tokenizer.model", 316834L, "95d0b8e61951408c7744e09fb5b87ff8e318612b0c8168cc593ea0a812f34f81")
     )
-    private const val ST3_FAST_MARK = ".fast"
-
-    private val ST3_FILES = listOf("tts.json", "unicode_indexer.json", "duration_predictor.onnx", "text_encoder.onnx",
-        "vocoder.onnx", "vector_estimator.onnx")
+    /** Recordings of TeraTTS's own voices for Shtorm to speak in (made by TeraTTS itself). */
+    val SHTORM_VOICES = listOf("ru_m5", "ru_f1", "ru_m1", "ru_f2")
+    const val SHTORM_DEFAULT_VOICE = "ru_m5.wav"
 
     /** Prefix for what is measured per voice (tempo, loudness): the same voice differs between the models. */
     @Volatile var engineKey: String = ""
         private set
 
-    private fun st3Dir(context: Context) = File(context.filesDir, "$MODEL_VERSION/st3")
+    private fun shtormDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/shtorm")
+    private fun voiceDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/voice_styles")
 
-    fun st3Ready(context: Context) = ST3_FILES.all { File(st3Dir(context), it).let { f -> f.exists() && f.length() > 0 } }
+    fun shtormReady(context: Context) = SHTORM_FILES.all { File(shtormDir(context), it.name).length() == it.size }
 
-    /** Downloaded from the sped-up set (every model file); false — Supertone's original files, slower. */
-    fun st3Fast(context: Context) = File(st3Dir(context), ST3_FAST_MARK).exists()
+    fun shtormSizeMb(context: Context): Long =
+        (shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
 
-    /** Replaces Supertonic 3's original files with the sped-up ones (deleted, downloaded again). */
-    suspend fun upgradeSt3(context: Context, onProgress: (Float) -> Unit) {
-        withContext(Dispatchers.IO) {
-            st3Dir(context).listFiles()?.forEach { if (it.name.endsWith(".onnx") || it.name.endsWith(".opt")) it.delete() }
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, false).apply()
-        }
-        downloadSt3(context, onProgress)
-    }
-
-    /** The model chosen in Settings (TeraTTS unless Supertonic 3 is chosen and downloaded). */
+    /** The model chosen in Settings (TeraTTS unless Shtorm is chosen and downloaded). */
     fun engine(context: Context): String {
-        val e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ENGINE, ENGINE_TERA) ?: ENGINE_TERA
-        return if (e == ENGINE_ST3 && st3Ready(context)) ENGINE_ST3 else ENGINE_TERA
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val e = p.getString(KEY_ENGINE, ENGINE_TERA) ?: ENGINE_TERA
+        if (e == "st3") dropSupertonic3(context)
+        return if (e == ENGINE_SHTORM && shtormReady(context)) ENGINE_SHTORM else ENGINE_TERA
     }
 
     fun setEngine(context: Context, engine: String) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_ENGINE, engine).apply()
 
-    /** Supertonic 3's quality: denoising steps 5 / 8 (Supertone's default) / 12. Read on every phrase. */
-    @Volatile var st3Steps: Int = 8
-        private set
-    private const val KEY_ST3_STEPS = "st3_steps"
-
-    /** Supertonic 3 stress: 0 — plain text, it places stress itself; 1 — marks; 2 — marks + as it sounds. */
-    @Volatile var st3Stress: Int = 0
-        private set
-    private const val KEY_ST3_STRESS = "st3_stress"
-
-    fun setSt3Stress(context: Context, mode: Int) {
-        st3Stress = mode.coerceIn(0, 2)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ST3_STRESS, st3Stress).apply()
-    }
-
-    fun setSt3Steps(context: Context, steps: Int) {
-        st3Steps = steps.coerceIn(5, 16)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ST3_STEPS, st3Steps).apply()
+    /** Supertonic 3 was the second model in 1.6.21–1.7.x: its files (≈400 MB) go, TeraTTS takes over. */
+    private fun dropSupertonic3(context: Context) {
+        File(context.filesDir, "$MODEL_VERSION/st3").takeIf { it.exists() }?.deleteRecursively()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_ENGINE, ENGINE_TERA).apply()
     }
 
     /** The folder of the model to start the engine with — every engine start goes through here. */
     fun modelDir(context: Context): File {
-        st3Steps = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STEPS, 8).coerceIn(5, 16)
-        st3Stress = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ST3_STRESS, 0).coerceIn(0, 2)
         VoiceRhythm.load(context)
         loadCommaQuotes(context)
-        val st3 = engine(context) == ENGINE_ST3
+        val shtorm = engine(context) == ENGINE_SHTORM
         // the teacher has its own loudness and tempo: what was learned for the fast sampler must not
         // be applied to it (ka3ak78: «звук идёт волной» with the teacher on)
-        engineKey = if (st3) "st3:" else if (teacherOn(context)) "tt:" else ""
-        return if (st3) st3Dir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
+        engineKey = if (shtorm) "shtorm:" else if (teacherOn(context)) "tt:" else ""
+        return if (shtorm) shtormDir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
     }
 
-    /** Downloads Supertonic 3 (~400 MB; what is there already is not downloaded again). */
-    suspend fun downloadSt3(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
-        val dir = st3Dir(context).apply { mkdirs() }
-        val lengths = HashMap<String, Long>()
-        for (f in ST3_FILES) if (!File(dir, f).exists()) lengths[f] = contentLength(f)
-        val total = lengths.values.sum().coerceAtLeast(1L)
-        var done = 0L
-        // the sped-up set only if every model file came from it (the marker tells the settings)
-        var allFast = File(dir, ST3_FAST_MARK).exists() || ST3_FILES.none { it.endsWith(".onnx") && File(dir, it).exists() }
-        for (f in ST3_FILES) {
-            val target = File(dir, f)
-            if (target.exists() && target.length() > 0) continue
-            var last: Exception? = null
-            for (base in ST3_URLS) {
-                try {
-                    fetchCounting("$base/$f", target) { n -> onProgress(((done + n).toFloat() / total).coerceIn(0f, 1f)) }
-                    if (base != ST3_FAST_URL && f.endsWith(".onnx")) allFast = false
-                    last = null
-                    break
-                } catch (e: Exception) { last = e }
-            }
-            last?.let { throw it }
-            done += target.length()
+    /** Is the engine (as last started) Shtorm? */
+    val shtormActive: Boolean get() = engineKey.startsWith("shtorm")
+
+    /** Voice files the current model speaks with: recordings (.wav) for Shtorm, voice files (.json) for TeraTTS. */
+    fun voiceExtension(context: Context) = if (engine(context) == ENGINE_SHTORM) ".wav" else ".json"
+
+    /**
+     * The voice for the model that runs: the same name in its form (ru_m5.json ↔ ru_m5.wav) if there
+     * is one, else the default voice of that model. A mix ("a;b;0.5") is TeraTTS's only.
+     */
+    fun voiceForEngine(path: String): String {
+        if (path.isEmpty()) return path
+        val first = path.substringBefore(';')
+        val f = File(first)
+        val dir = f.parentFile ?: return path
+        val stem = f.name.substringBeforeLast('.')
+        return if (shtormActive) {
+            listOf(f.takeIf { it.name.endsWith(".wav") }, File(dir, "$stem.wav"), File(dir, SHTORM_DEFAULT_VOICE))
+                .firstOrNull { it != null && it.isFile }?.path ?: first
+        } else {
+            if (first.endsWith(".json")) return path
+            listOf(File(dir, "$stem.json"), File(dir, DEFAULT_VOICE_2_FILE)).firstOrNull { it.isFile }?.path ?: path
         }
-        val mark = File(dir, ST3_FAST_MARK)
-        if (allFast) mark.writeText("models-st3-v1") else mark.delete()
+    }
+
+    /** Downloads Shtorm (≈440 MB, checked) and the recordings of TeraTTS's voices for it. */
+    suspend fun downloadShtorm(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        val dir = shtormDir(context).apply { mkdirs() }
+        val missing = SHTORM_FILES.filter { File(dir, it.name).length() != it.size }
+        val total = missing.sumOf { it.size }.coerceAtLeast(1L)
+        var done = 0L
+        for (f in missing) {
+            val target = File(dir, f.name)
+            fetchCounting("$SHTORM_URL/${f.name}", target) { n -> onProgress(((done + n).toFloat() / total).coerceIn(0f, 0.97f)) }
+            if (target.length() != f.size || sha256(target) != f.sha) {
+                target.delete()
+                throw java.io.IOException("файл ${f.name} повреждён, попробуйте ещё раз")
+            }
+            done += f.size
+        }
+        val voices = voiceDir(context).apply { mkdirs() }
+        for (v in SHTORM_VOICES) {
+            val target = File(voices, "$v.wav")
+            if (target.length() > 1000) continue
+            fetchCounting("$SHTORM_URL/$v.wav", target) { }
+        }
         onProgress(1f)
     }
 
-    private fun contentLength(f: String): Long {
-        for (base in ST3_URLS) {
-            try {
-                val c = URL("$base/$f").openConnection() as java.net.HttpURLConnection
-                c.requestMethod = "HEAD"; c.instanceFollowRedirects = true
-                val n = c.contentLengthLong; c.disconnect()
-                if (n > 0) return n
-            } catch (_: Exception) { }
+    /** Frees the space Shtorm takes (back to TeraTTS); recorded voices stay. */
+    fun deleteShtorm(context: Context) {
+        setEngine(context, ENGINE_TERA)
+        shtormDir(context).deleteRecursively()
+    }
+
+    private fun sha256(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(1 shl 16)
+            while (true) { val r = input.read(buf); if (r < 0) break; md.update(buf, 0, r) }
         }
-        return 0L
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun fetchCounting(url: String, target: File, onBytes: (Long) -> Unit) {
@@ -410,12 +411,7 @@ object AssetManager {
         val file = File(dir, TEACHER_FILE)
         if (file.length() != TEACHER_SIZE) {
             fetchCounting(TEACHER_URL, file) { n -> onProgress((n.toFloat() / TEACHER_SIZE).coerceIn(0f, 0.99f)) }
-            val md = java.security.MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { input ->
-                val buf = ByteArray(1 shl 16)
-                while (true) { val r = input.read(buf); if (r < 0) break; md.update(buf, 0, r) }
-            }
-            val sha = md.digest().joinToString("") { "%02x".format(it) }
+            val sha = sha256(file)
             if (file.length() != TEACHER_SIZE || sha != TEACHER_SHA) {
                 file.delete(); throw java.io.IOException("файл «учителя» повреждён, попробуйте ещё раз")
             }
@@ -430,56 +426,9 @@ object AssetManager {
         File(teraDir(context), TEACHER_FILE).delete()
     }
 
-    /** Frees the space Supertonic 3 takes (back to TeraTTS). */
-    fun deleteSt3(context: Context) {
-        setEngine(context, ENGINE_TERA)
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, false).apply()
-        st3Dir(context).deleteRecursively()
-    }
-
-    // ---- Supertonic 3's precision: the main part (vector estimator) in 32 bits or in 8 ----
-    // The engine loads vector_estimator.onnx; the other variant waits beside it under its own
-    // name, so switching back and forth is two renames (the 8-bit one is downloaded once, 66 MB).
-
-    private const val KEY_ST3_INT8 = "st3_int8"
-    private const val VE = "vector_estimator.onnx"
-    private const val VE_FP32 = "vector_estimator_fp32.onnx"
-    private const val VE_INT8 = "vector_estimator_int8.onnx"
-
-    /** 8 bits chosen (faster on weak phones, slightly less exact sound). */
-    fun st3Int8(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ST3_INT8, false)
-
-    /** Switches the precision; downloads the 8-bit part the first time. The engine must be restarted after. */
-    suspend fun setSt3Int8(context: Context, on: Boolean, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
-        if (st3Int8(context) == on) return@withContext
-        val dir = st3Dir(context)
-        val active = File(dir, VE)
-        val wanted = File(dir, if (on) VE_INT8 else VE_FP32)
-        if (!wanted.exists() || wanted.length() == 0L) {
-            // only the sped-up release has it (Supertone has no 8-bit model; the 32-bit one is in both)
-            val urls = if (on) listOf("$ST3_FAST_URL/$VE_INT8") else ST3_URLS.map { "$it/$VE" }
-            var last: Exception? = null
-            for (u in urls) {
-                try { fetchCounting(u, wanted) { n -> onProgress((n / 70e6f).coerceIn(0f, 0.99f)) }; last = null; break }
-                catch (e: Exception) { last = e }
-            }
-            last?.let { throw it }
-        }
-        val aside = File(dir, if (on) VE_FP32 else VE_INT8)
-        aside.delete()
-        if (active.exists() && !active.renameTo(aside)) throw java.io.IOException("rename failed: $active")
-        if (!wanted.renameTo(active)) throw java.io.IOException("rename failed: $wanted")
-        // the graph the engine optimised for the other variant must not be taken for this one
-        File(dir, "$VE.opt").delete()
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ST3_INT8, on).apply()
-        onProgress(1f)
-    }
-
-    fun st3SizeMb(context: Context): Long =
-        (st3Dir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
-
     /** Remove Supertonic model directories left by earlier installs. */
     fun cleanupOldVersions(context: Context) {
+        engine(context) // drops Supertonic 3's files if it was the chosen model
         listOf("v1", "v2", "v3").forEach { old ->
             val dir = File(context.filesDir, old)
             if (dir.exists()) {

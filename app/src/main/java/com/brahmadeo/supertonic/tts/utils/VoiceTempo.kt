@@ -33,7 +33,7 @@ object VoiceTempo {
     fun setEnabled(context: Context, on: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
 
-    // per model: the same voice is faster or slower in TeraTTS and in Supertonic 3
+    // per model: the same voice is faster or slower in TeraTTS and in Shtorm
     private fun key(voicePath: String) = AssetManager.engineKey + File(voicePath).name
 
     private fun load(context: Context) {
@@ -53,7 +53,7 @@ object VoiceTempo {
         val prefix = AssetManager.engineKey
         val v = tempos.keys.filter { k ->
             val name = k.removePrefix(prefix)
-            k.startsWith(prefix) && !name.startsWith("st3:") &&
+            k.startsWith(prefix) && !name.contains(":") &&
                 (name.startsWith("ru_") || name.startsWith("eng_") || name.startsWith("st3_") || name.startsWith("lib_")) && measured(k) != null
         }.mapNotNull { measured(it) }.sorted()
         if (v.size < 3) return null

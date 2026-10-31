@@ -27,43 +27,14 @@ pub const SPEED: f32 = 1.05;
 /// Settings slider "стабильность ↔ выразительность", 0.4…1.0, default 0.667.
 static NOISE_SCALE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3F2A_C083); // 0.667
 
-/// Supertonic 3's starting noise: Supertone's own 1.0, whatever the stability slider says. Measured
-/// against 32 steps on three voices: 8 steps at 1.0 — distance 1.35, at 0.667 — 1.89; below ~0.6 it
-/// sounds metallic. (The slider is TeraTTS's: its distilled sampler likes calm noise.)
-pub fn st3_noise_scale(_slider: f32) -> f32 {
-    1.0
+pub fn set_noise_scale(v: f32) {
+    let v = if v.is_finite() { v.clamp(0.3, 1.2) } else { 0.667 };
+    NOISE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Supertonic 3's denoising steps (Settings → Голосовая модель → Качество): 5 fast, 8 Supertone's
-/// default, 12 high. Measured distance to 32 steps (noise 1.0): 5 — 1.84, 8 — 1.35, 12 — 1.03.
-static ST3_STEPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(8);
-
-pub fn set_st3_steps(n: i32) {
-    ST3_STEPS.store((n.clamp(5, 16)) as usize, std::sync::atomic::Ordering::Relaxed);
+pub fn noise_scale() -> f32 {
+    f32::from_bits(NOISE_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed))
 }
-
-pub fn st3_steps() -> usize {
-    ST3_STEPS.load(std::sync::atomic::Ordering::Relaxed)
-}
-
-/// Supertonic 3 hardly hears stress marks (measured: the marked syllable came out stronger in 50–54 %
-/// of minimal pairs — chance), but it reads letters: unstressed vowels written as they sound give it
-/// no full vowel to stress but the right one (an ear test: «стрилки́ застыли» right, «стре́лки» wrong).
-/// How Supertonic 3 gets stress: 0 — it places stress itself (it knows ordinary words from their
-/// spelling); only words that still carry a mark — the user's dictionary, a stress-marked book,
-/// homographs resolved by context — get a hint: the mark plus unstressed vowels as they sound
-/// (the app then leaves out the bulk stress dictionary); 1 — a mark ´ on every marked word;
-/// 2 — the mark plus vowels as they sound on every marked word, and «его» as «ево».
-static ST3_STRESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-pub fn set_st3_stress(mode: u8) {
-    ST3_STRESS.store(mode.min(2), std::sync::atomic::Ordering::Relaxed);
-}
-
-pub fn st3_stress() -> u8 {
-    ST3_STRESS.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// TeraTTS's duration predictor gives every utterance of up to four vowels about the same
 /// 0.9–1.2 s («Да.» as long as «Иди сюда!»), so a lone short reply comes out stretched 2–3×.
 /// Such replies get at most 0.35 s + 0.2 s per vowel (ordinary speech is 0.15–0.18 s per vowel);
@@ -76,122 +47,10 @@ pub fn cap_short_reply(seconds: f32, text: &str) -> f32 {
     seconds.min(0.35 + 0.2 * vowels as f32)
 }
 
-pub fn set_st3_reduce(on: bool) {
-    set_st3_stress(if on { 2 } else { 1 });
-}
-
-/// Words where the «г» of a final -ого/-его is a real «г» (the root, not the ending).
-const ST3_G_KEEP: &[&str] = &[
-    "много", "немного", "премного", "строго", "нестрого", "дорого", "недорого", "задорого",
-    "убого", "полого", "отлого", "итого", "ого", "лего", "эго", "того-то",
-];
-
-/// «г» read as «в» where Russian says so: the endings -ого/-его («его» → «ево», «красного» →
-/// «красново», «ничего» → «ничево») and «сегодня». Supertonic 3 reads the letter as written.
-pub fn g_as_v(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut word: Vec<char> = Vec::new();
-    let flush = |word: &mut Vec<char>, out: &mut String| {
-        let letters: Vec<(usize, char)> = word.iter().copied().enumerate()
-            .filter(|(_, c)| c.is_alphabetic())
-            .map(|(i, c)| (i, c.to_lowercase().next().unwrap_or(c)))
-            .collect();
-        let plain: String = letters.iter().map(|(_, c)| *c).collect();
-        let n = letters.len();
-        let mut at: Option<usize> = None;
-        if n >= 3 && (plain.ends_with("ого") || plain.ends_with("его")) && !ST3_G_KEEP.contains(&plain.as_str()) {
-            at = Some(letters[n - 2].0);
-        } else if plain.starts_with("сегодн") {
-            at = Some(letters[2].0);
-        }
-        if let Some(i) = at {
-            word[i] = if word[i].is_uppercase() { 'В' } else { 'в' };
-        }
-        out.extend(word.iter());
-        word.clear();
-    };
-    for c in text.chars() {
-        if c.is_alphabetic() || c == '+' || c == '\u{301}' {
-            word.push(c);
-        } else {
-            flush(&mut word, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut word, &mut out);
-    out
-}
-
-/// Unstressed vowels as they sound, in words that carry a stress mark ('+' before the vowel):
-/// о → а everywhere unstressed («мол+око» → «мал+ако»); е, я → и before the stress after a consonant
-/// («стрелк+и» → «стрилк+и»), and after the stress inside the word («из+ученных» → «из+учинных»,
-/// «п+амять» → «п+амить»; not at the end: «м+оре»). Not touched: ё, е/я at the start of a word or after a vowel or ь/ъ
-/// (heard as «йи»: «язык», «поезд+а»), words without a mark, Latin.
-pub fn reduce_unstressed(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut word: Vec<char> = Vec::new();
-    let flush = |word: &mut Vec<char>, out: &mut String| {
-        if word.contains(&'+') {
-            let mut after = false;
-            let mut i = 0;
-            while i < word.len() {
-                let c = word[i];
-                if c == '+' && i + 1 < word.len() {
-                    out.push('+');
-                    out.push(word[i + 1]);
-                    after = true;
-                    i += 2;
-                    continue;
-                }
-                let low = c.to_lowercase().next().unwrap_or(c);
-                let prev = if i > 0 { word[i - 1].to_lowercase().next().unwrap_or(' ') } else { ' ' };
-                let after_consonant = i > 0 && prev.is_alphabetic() && !"аеёиоуыэюяьъ".contains(prev);
-                let next_consonant = word.get(i + 1)
-                    .map(|n| n.is_alphabetic() && !"аеёиоуыэюяьъАЕЁИОУЫЭЮЯЬЪ".contains(*n))
-                    .unwrap_or(false);
-                let to = match low {
-                    'о' => Some('а'),
-                    'е' | 'я' if !after && after_consonant => Some('и'),
-                    'е' | 'я' if after && after_consonant && next_consonant => Some('и'),
-                    _ => None,
-                };
-                match to {
-                    Some(t) => out.push(if c.is_uppercase() { t.to_uppercase().next().unwrap_or(t) } else { t }),
-                    None => out.push(c),
-                }
-                i += 1;
-            }
-        } else {
-            out.extend(word.iter());
-        }
-        word.clear();
-    };
-    for c in text.chars() {
-        if c.is_alphabetic() || c == '+' || c == '\u{301}' {
-            word.push(c);
-        } else {
-            flush(&mut word, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut word, &mut out);
-    out
-}
-
-pub fn set_noise_scale(v: f32) {
-    let v = if v.is_finite() { v.clamp(0.3, 1.2) } else { 0.667 };
-    NOISE_SCALE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
-}
-
-pub fn noise_scale() -> f32 {
-    f32::from_bits(NOISE_SCALE_BITS.load(std::sync::atomic::Ordering::Relaxed))
-}
 /// Baked into the distilled sampler; the graph still takes the input.
 pub const GUIDANCE: f32 = 3.0;
 /// The model was trained on ≤25 s utterances; ~200 chars keeps well inside.
 pub const MAX_CHUNK_CHARS: usize = 200;
-/// Supertonic 3: pieces of at most 160 characters (longer ones are split at sentences, commas, words).
-pub const ST3_MAX_CHUNK_CHARS: usize = 160;
 
 /// int8 sampler: the Loop unrolled, 1x1 Conv1d -> MatMul, MatMul quantized to int8
 /// (tools/tera_graph_tools.py). ~3.5x faster on ARM with i8mm, 256 MB -> 72 MB.
@@ -967,11 +826,53 @@ pub fn spell_signs(s: &str, base: &str) -> String {
 /// Full front-end: returns the exact string for the text encoder (with '+'),
 /// or None if nothing speakable is left.
 pub fn prepare(text: &str, lang: &str, table: &[i64]) -> Option<String> {
-    prepare_with(text, lang, table, false)
+    let (t, base) = common_front(text, lang);
+    let t = if COMMA_QUOTES.load(std::sync::atomic::Ordering::Relaxed) { comma_quotes(&t) } else { t };
+    let t = skip_unknown(&t, table);
+    let t = COMMA_RUN.replace_all(&t, ",");
+    let t = WS.replace_all(&t, " ").trim().to_string();
+    if !has_word(&t) {
+        return None;
+    }
+    Some(wrap_tags(&t, base).nfkd().collect())
 }
 
-/// Stress for Supertonic 3: it marks stress with U+0301 after the vowel, not '+' before it.
-/// Without the acute in its vocabulary the marks are dropped (a '+' would be read aloud).
+/// What both models share: signs and digits spelled, stress as '+', dashes as pauses.
+fn common_front(text: &str, lang: &str) -> (String, &'static str) {
+    let t: String = text.nfc().collect();
+    let t = t.replace(['<', '>'], " ");
+    let base = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
+    let t = spell_signs(&t, base);
+    let t = acute_to_plus(&t);
+    let t = clean_plus(&t);
+    let t = dashes_to_pauses(&t);
+    let t = add_punct_spaces(&t);
+    let t = add_number_spaces(&t);
+    let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
+    (spell_leftover_digits(&t, base), base)
+}
+
+/// Front-end for Shtorm: stress as U+0301 after the vowel, plain Unicode (its tokenizer does
+/// NFKC). It knows Russian letters only: Latin left over (English words are transcribed in
+/// Kotlin before) is dropped; None if nothing speakable is left.
+pub fn prepare_pocket(text: &str, lang: &str) -> Option<String> {
+    if lang.to_lowercase().starts_with("en") {
+        return None;
+    }
+    let (t, _) = common_front(text, lang);
+    let t = plus_to_acute(&t, true);
+    let t: String = t.chars().filter(|c| !c.is_ascii_alphabetic()).collect();
+    let t = COMMA_RUN.replace_all(&t, ",");
+    let t = WS.replace_all(&t, " ").trim().to_string();
+    let t = t.trim_start_matches(|c: char| ",;:".contains(c) || c.is_whitespace()).to_string();
+    if !t.chars().any(|c| matches!(c, 'А'..='я' | 'Ё' | 'ё')) {
+        return None;
+    }
+    Some(t)
+}
+
+/// Stress for Shtorm: U+0301 after the vowel (what it was trained on), not '+' before it.
+/// With [keep] false the marks are only dropped.
 pub fn plus_to_acute(s: &str, keep: bool) -> String {
     let ch: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + 8);
@@ -979,7 +880,7 @@ pub fn plus_to_acute(s: &str, keep: bool) -> String {
     while i < ch.len() {
         if ch[i] == '+' && i + 1 < ch.len() && RU_VOWELS.contains(ch[i + 1]) {
             out.push(ch[i + 1]);
-            // ё is stressed by itself; with a mark over it Supertonic 3 reads a stressed е
+            // ё is stressed by itself: no mark over it
             if keep && !matches!(ch[i + 1], 'ё' | 'Ё') { out.push('\u{301}'); }
             i += 2;
             continue;
@@ -990,47 +891,8 @@ pub fn plus_to_acute(s: &str, keep: bool) -> String {
     out
 }
 
-/// The end Supertonic 3 is given after every piece of text: ". -" — the model then leaves room
-/// after the last word instead of cutting it (SuperClonica's study on 1584 voice previews: 6 cut
-/// endings instead of 14, no stray syllables). Words without vowels ("Хм") get "!" instead.
-pub fn st3_ending(t: &str) -> String {
-    let body = t.trim_end().trim_end_matches(|c: char| " ,:;-'".contains(c));
-    if !body.chars().any(char::is_alphanumeric) {
-        return t.to_string();
-    }
-    let vowelless = !body.to_lowercase().chars().any(|c| "аеёиоуыэюяaeiouy".contains(c))
-        && body.chars().all(|c| !c.is_alphabetic() || c.is_ascii() || ('\u{400}'..'\u{530}').contains(&c));
-    format!("{}{}", body, if vowelless { "!" } else { ". -" })
-}
-
-/// Supertonic 3's piece came out cut: the voice still sounds in the last 15 ms (as loud as
-/// within 19 dB of its speech), or there is almost no sound at all — it is voiced again,
-/// a little slower (SuperClonica's `rerender_reason`).
-pub fn st3_needs_retry(wav: &[f32]) -> bool {
-    let peak = wav.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-    if wav.is_empty() || peak < 0.03 {
-        return true;
-    }
-    let hop = 441usize; // 10 ms
-    let n = wav.len() / hop;
-    if n < 3 {
-        return false;
-    }
-    let rms: Vec<f32> = (0..n).map(|i| {
-        let w = &wav[i * hop..(i + 1) * hop];
-        (w.iter().map(|x| x * x).sum::<f32>() / hop as f32).sqrt()
-    }).collect();
-    let max = rms.iter().cloned().fold(0.0f32, f32::max);
-    let mut loud: Vec<f32> = rms.iter().cloned().filter(|&r| r > max * 0.1).collect();
-    loud.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let reference = loud[((loud.len() as f32 - 1.0) * 0.9).round() as usize].max(1e-9);
-    let k = (SAMPLE_RATE as usize * 15 / 1000).min(wav.len());
-    let tail = (wav[wav.len() - k..].iter().map(|x| x * x).sum::<f32>() / k as f32).sqrt();
-    20.0 * (tail / reference + 1e-12).log10() > -19.0
-}
-
-/// Supertonic 3 leaves a lot of silence around the speech (0.25–0.6 s before, more after):
-/// cut by the sound itself — from [lead] s before the first audible 5 ms to [tail] s after the
+/// Leaves only the speech with a little room around it (Shtorm says a few frames after it signals
+/// the end): cut by the sound itself — from [lead] s before the first audible 5 ms to [tail] s after the
 /// last (audible: within 45 dB of the peak, so the decay of the last word is kept).
 pub fn trim_edges(wav: &[f32], lead: f32, tail: f32) -> Vec<f32> {
     let hop = 220usize; // 5 ms
@@ -1055,41 +917,6 @@ pub fn trim_edges(wav: &[f32], lead: f32, tail: f32) -> Vec<f32> {
     let f = out.len().min(220);
     for i in 0..f { out[i] *= i as f32 / f as f32; }
     out
-}
-
-/// [prepare] for either model: TeraTTSv2 (stress as '+'), or Supertonic 3 ([st3]: stress as
-/// U+0301, a period at the end if there is no punctuation — as Supertone's own front-end does).
-pub fn prepare_with(text: &str, lang: &str, table: &[i64], st3: bool) -> Option<String> {
-    let t: String = text.nfc().collect();
-    let t = t.replace(['<', '>'], " ");
-    let base0 = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
-    let t = spell_signs(&t, base0);
-    let t = acute_to_plus(&t);
-    let t = clean_plus(&t);
-    let t = dashes_to_pauses(&t);
-    let t = add_punct_spaces(&t);
-    let t = add_number_spaces(&t);
-    let base = if lang.to_lowercase().starts_with("en") { "en" } else { "ru" };
-    let t = if base == "ru" { latin_caps_to_russian(&t) } else { t };
-    let t = spell_leftover_digits(&t, base);
-    let t = if st3 {
-        let mode = st3_stress();
-        let t = match mode {
-            1 => t,
-            2 => reduce_unstressed(&g_as_v(&t)),
-            _ => reduce_unstressed(&t),
-        };
-        let t = plus_to_acute(&t, is_known(table, '\u{301}'));
-        st3_ending(&t)
-    } else { t };
-    let t = if !st3 && COMMA_QUOTES.load(std::sync::atomic::Ordering::Relaxed) { comma_quotes(&t) } else { t };
-    let t = skip_unknown(&t, table);
-    let t = COMMA_RUN.replace_all(&t, ",");
-    let t = WS.replace_all(&t, " ").trim().to_string();
-    if !has_word(&t) {
-        return None;
-    }
-    Some(wrap_tags(&t, base).nfkd().collect())
 }
 
 /// The duration predictor sees the text without stress marks.
@@ -1273,14 +1100,14 @@ mod tests {
     }
 
     #[test]
-    fn supertonic3_reduce() {
-        assert_eq!(reduce_unstressed("Стр+елки час+ов, а стрелк+и заст+ыли"), "Стр+елки час+ов, а стрилк+и заст+ыли");
-        assert_eq!(reduce_unstressed("молок+о, хорош+о, гор+ода, гол+ова"), "малак+о, хараш+о, гар+ода, гал+ова");
-        // е/я at the start or after a vowel are «йи»; ё and unmarked words untouched
-        assert_eq!(reduce_unstressed("яз+ык, по+езд, поезд+а, ёлка, окно, мест+а, пят+ак"), "яз+ык, па+езд, паезд+а, ёлка, окно, мист+а, пит+ак");
-        assert_eq!(reduce_unstressed("З+амок, Окн+о"), "З+амак, Акн+о");
-        assert_eq!(reduce_unstressed("Hello w+orld"), "Hello w+orld");
-        assert_eq!(reduce_unstressed("из+ученных, в+ечер, п+амять, м+оре, д+елаем"), "из+учинных, в+ечир, п+амить, м+оре, д+елаем");
+    fn pocket_front_end() {
+        assert_eq!(plus_to_acute("Зам+ок и молок+о, вес+ёлыми", true), "Замо\u{301}к и молоко\u{301}, весёлыми");
+        assert_eq!(plus_to_acute("Зам+ок, C+", false), "Замок, C");
+        assert_eq!(prepare_pocket("Стр+елки — 12 часов!", "ru").unwrap(), "Стре\u{301}лки, двенадцать часов!");
+        assert_eq!(prepare_pocket("Замо́к", "ru").unwrap(), "Замо\u{301}к");
+        assert_eq!(prepare_pocket("Hello world", "en"), None);
+        // Latin left after the transcription is dropped, not spelled as unknown pieces
+        assert_eq!(prepare_pocket("слово x-ray", "ru").unwrap(), "слово -");
     }
 
     #[test]
@@ -1300,71 +1127,6 @@ mod tests {
         assert_eq!(cap_short_reply(0.4, "Да."), 0.4);
         assert_eq!(cap_short_reply(1.9, "Хорошо, он вернулся домой."), 1.9);
         assert_eq!(cap_short_reply(0.8, "Хм…"), 0.8);
-    }
-
-    #[test]
-    fn supertonic3_g_as_v() {
-        assert_eq!(g_as_v("ег+о, Ег+о, нег+о, ничег+о, кр+асного, одног+о, сег+одня"),
-                   "ев+о, Ев+о, нев+о, ничев+о, кр+асново, однов+о, сев+одня");
-        assert_eq!(g_as_v("м+ного, стр+ого, д+орого, ит+ого, Ог+о, дорог+ого"),
-                   "м+ного, стр+ого, д+орого, ит+ого, Ог+о, дорог+ово");
-        assert_eq!(g_as_v("дорога, нога, бог"), "дорога, нога, бог");
-        assert_eq!(reduce_unstressed(&g_as_v("ничег+о кр+асного")), "ничив+о кр+аснава");
-        assert_eq!(reduce_unstressed(&g_as_v("ещё одног+о")), "ещё аднав+о");
-    }
-
-    #[test]
-    fn supertonic3_noise() {
-        assert_eq!(st3_noise_scale(0.4), 1.0);
-        assert_eq!(st3_noise_scale(0.667), 1.0);
-        assert_eq!(st3_steps(), 8);
-        set_st3_steps(3); assert_eq!(st3_steps(), 5);
-        set_st3_steps(12); assert_eq!(st3_steps(), 12);
-        set_st3_steps(8);
-    }
-
-    #[test]
-    fn supertonic3_endings() {
-        assert_eq!(st3_ending("Привет, мир"), "Привет, мир. -");
-        assert_eq!(st3_ending("Как дела?"), "Как дела?. -");
-        assert_eq!(st3_ending("Ну и ладно, - "), "Ну и ладно. -");
-        assert_eq!(st3_ending("Хм"), "Хм!");
-        assert_eq!(st3_ending("..."), "...");
-        // cut: loud to the very end; whole: quiet tail
-        let sr = SAMPLE_RATE as usize;
-        let tone = |n: usize| (0..n).map(|i| (i as f32 * 0.05).sin() * 0.5).collect::<Vec<f32>>();
-        let mut whole = tone(sr / 2); whole.extend(vec![0.0f32; sr / 10]);
-        assert!(st3_needs_retry(&tone(sr / 2)));
-        assert!(!st3_needs_retry(&whole));
-        assert!(st3_needs_retry(&vec![0.001f32; sr]));
-        // trimming: 0.4 s silence, 0.5 s sound, 0.6 s silence → ~0.05 + 0.5 + 0.12
-        let mut x = vec![0.0f32; sr * 4 / 10]; x.extend(tone(sr / 2)); x.extend(vec![0.0f32; sr * 6 / 10]);
-        let t = trim_edges(&x, 0.05, 0.12);
-        let secs = t.len() as f32 / sr as f32;
-        assert!((secs - 0.67).abs() < 0.02, "{secs}");
-    }
-
-    #[test]
-    fn supertonic3_front_end() {
-        assert_eq!(plus_to_acute("Зам+ок и молок+о", true), "Замо\u{301}к и молоко\u{301}");
-        assert_eq!(plus_to_acute("Зам+ок, C+", false), "Замок, C");
-        assert_eq!(plus_to_acute("вес+ёлыми, Ч+ёрных", true), "весёлыми, Чёрных");
-        let mut table = vec![-1i64; 65536];
-        for (i, c) in "замокЗи. <>/ru".chars().enumerate() { table[c as usize] = i as i64 + 1; }
-        // no acute in the vocabulary: marks dropped, the ending added
-        table['-' as usize] = 97;
-        assert_eq!(prepare_with("Зам+ок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
-        table[0x301] = 99;
-        // by default a word that still carries a mark gets it, with vowels as they sound
-        let nfkd: String = "<ru>Замо\u{301}к. -</ru>".nfkd().collect();
-        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
-        assert_eq!(prepare_with("Замок", "ru", &table, true).unwrap(), "<ru>Замок. -</ru>");
-        set_st3_stress(1);
-        assert_eq!(prepare_with("Замо́к", "ru", &table, true).unwrap(), nfkd);
-        set_st3_stress(0);
-        // TeraTTS unchanged
-        table['+' as usize] = 98;
-        assert_eq!(prepare("Замо́к", "ru", &table).unwrap(), "<ru>Зам+ок</ru>");
     }
 
     #[test]

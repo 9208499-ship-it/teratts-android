@@ -359,11 +359,7 @@ class TextNormalizer {
                 t = RussianCaps.fix(t) { AccentDictionaryManager.has(it) }
                 t = russianNumbers.normalize(t)
             }
-            // Supertonic 3 placing stress itself: no bulk stress (it knows ordinary words from their
-            // spelling and reads better without marks); the user's rules above still mark their words
-            val st3Itself = AssetManager.engineKey.startsWith(AssetManager.ENGINE_ST3) && AssetManager.st3Stress == 0
-            t = if (!st3Itself) AccentDictionaryManager.apply(t, lowerLang)
-                else if (lowerLang.startsWith("ru")) AccentDictionaryManager.restoreYo(t) else t
+            t = AccentDictionaryManager.apply(t, lowerLang)
             // capitalised words inside a sentence ("Тень", "Тени") are read as foreign names
             if (lowerLang.startsWith("ru")) RussianCaps.lowerNames(t) else t
         } else {

@@ -632,8 +632,8 @@ private fun SpeedTestRow() {
 }
 
 /**
- * The voice model: TeraTTS (Russian, bundled) or Supertonic 3 (Supertone's new multilingual
- * model, downloaded here on request). The engine restarts with the chosen one.
+ * The voice model: TeraTTS (Russian, bundled) or Shtorm PocketTTS RU (speaks in the voice of a
+ * short recording; downloaded here on request). The engine restarts with the chosen one.
  */
 @Composable
 private fun EngineSection() {
@@ -641,11 +641,7 @@ private fun EngineSection() {
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
     val scope = rememberCoroutineScope()
     var engine by remember { mutableStateOf(assets.engine(context)) }
-    var ready by remember { mutableStateOf(assets.st3Ready(context)) }
-    var fast by remember { mutableStateOf(assets.st3Fast(context)) }
-    var int8 by remember { mutableStateOf(assets.st3Int8(context)) }
-    var st3Steps by remember { mutableStateOf(assets.st3Steps) }
-    var st3Stress by remember { mutableStateOf(assets.st3Stress) }
+    var ready by remember { mutableStateOf(assets.shtormReady(context)) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
     var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
@@ -658,13 +654,13 @@ private fun EngineSection() {
         } catch (_: Exception) { }
     }
     fun choose(e: String) {
-        if (e == assets.ENGINE_ST3 && !ready) {
+        if (e == assets.ENGINE_SHTORM && !ready) {
             if (progress != null) return
             error = null; progress = 0f
             scope.launch {
                 try {
-                    assets.downloadSt3(context) { p -> scope.launch { progress = p } }
-                    ready = assets.st3Ready(context); fast = assets.st3Fast(context)
+                    assets.downloadShtorm(context) { p -> scope.launch { progress = p } }
+                    ready = assets.shtormReady(context)
                     if (ready) { assets.setEngine(context, e); engine = e; restart() }
                 } catch (ex: Exception) {
                     error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
@@ -673,14 +669,15 @@ private fun EngineSection() {
             }
             return
         }
+        if (engine == e) return
         assets.setEngine(context, e); engine = e; restart()
     }
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Text(stringResource(AppR.string.engine_title), style = MaterialTheme.typography.titleSmall)
         for ((id, title, desc) in listOf(
             Triple(assets.ENGINE_TERA, stringResource(AppR.string.engine_tera), stringResource(AppR.string.engine_tera_desc)),
-            Triple(assets.ENGINE_ST3, stringResource(AppR.string.engine_st3), stringResource(
-                if (ready) AppR.string.engine_st3_desc_ready else AppR.string.engine_st3_desc_download))
+            Triple(assets.ENGINE_SHTORM, stringResource(AppR.string.engine_shtorm), stringResource(
+                if (ready) AppR.string.engine_shtorm_desc_ready else AppR.string.engine_shtorm_desc_download))
         )) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -739,88 +736,14 @@ private fun EngineSection() {
                 }
             }
         }
-        // Supertonic 3's quality: denoising steps (5 fast, 8 Supertone's default, 12 high)
-        if (ready && engine == assets.ENGINE_ST3) {
-            Text(stringResource(AppR.string.engine_st3_quality), style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp))
-            for ((n, label) in listOf(5 to stringResource(AppR.string.engine_st3_q5), 8 to stringResource(AppR.string.engine_st3_q8),
-                    12 to stringResource(AppR.string.engine_st3_q12))) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable { st3Steps = n; assets.setSt3Steps(context, n) }
-                ) {
-                    RadioButton(selected = st3Steps == n, onClick = null)
-                    Text(label, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        // Supertonic 3's stress: plain text (it places stress itself), marks, or marks + as it sounds
-        if (ready && engine == assets.ENGINE_ST3) {
-            Text(stringResource(AppR.string.engine_st3_reduce), style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp))
-            for ((m, label) in listOf(0 to stringResource(AppR.string.engine_st3_stress0), 1 to stringResource(AppR.string.engine_st3_stress1),
-                    2 to stringResource(AppR.string.engine_st3_stress2))) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable { st3Stress = m; assets.setSt3Stress(context, m) }
-                ) {
-                    RadioButton(selected = st3Stress == m, onClick = null)
-                    Text(label, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        // Supertonic 3's precision: 32 bits (exact) or 8 (faster on weak phones)
-        if (ready && fast && engine == assets.ENGINE_ST3) {
-            Text(stringResource(AppR.string.engine_st3_precision), style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp))
-            for ((on, label) in listOf(false to stringResource(AppR.string.engine_st3_fp32), true to stringResource(AppR.string.engine_st3_int8))) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable(enabled = progress == null) {
-                        if (int8 == on) return@clickable
-                        error = null; progress = 0f
-                        scope.launch {
-                            try {
-                                assets.setSt3Int8(context, on) { p -> scope.launch { progress = p } }
-                                int8 = assets.st3Int8(context)
-                                restart()
-                            } catch (ex: Exception) {
-                                error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
-                            }
-                            progress = null
-                        }
-                    }
-                ) {
-                    RadioButton(selected = int8 == on, onClick = null)
-                    Text(label, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
         progress?.let { p ->
             Text(stringResource(AppR.string.engine_downloading, (p * 100).toInt()), style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        // downloaded before the sped-up files were there (1.6.21): offer them
-        if (ready && !fast && progress == null) {
-            TextButton(onClick = {
-                error = null; progress = 0f
-                scope.launch {
-                    try {
-                        assets.upgradeSt3(context) { p -> scope.launch { progress = p } }
-                        ready = assets.st3Ready(context); fast = assets.st3Fast(context)
-                        if (engine == assets.ENGINE_ST3) restart()
-                    } catch (ex: Exception) {
-                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
-                        ready = assets.st3Ready(context)
-                    }
-                    progress = null
-                }
-            }) { Text(stringResource(AppR.string.engine_st3_upgrade)) }
-        }
-        if (ready && engine != assets.ENGINE_ST3 && progress == null) {
-            TextButton(onClick = { assets.deleteSt3(context); ready = false }) {
-                Text(stringResource(AppR.string.engine_st3_delete, assets.st3SizeMb(context)))
+        if (ready && engine != assets.ENGINE_SHTORM && progress == null) {
+            TextButton(onClick = { assets.deleteShtorm(context); ready = false }) {
+                Text(stringResource(AppR.string.engine_shtorm_delete, assets.shtormSizeMb(context)))
             }
         }
     }
@@ -881,7 +804,7 @@ private fun MusicSection() {
     }
 }
 
-/** Your own voice: a Supertonic .json or the two TeraTTS .npy files, added to the voice list. */
+/** Your own voice: a recording (for Shtorm), a Supertonic .json or the two TeraTTS .npy files. */
 @Composable
 private fun ImportVoiceRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -891,7 +814,7 @@ private fun ImportVoiceRow() {
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         val msg = try {
             val name = com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
-            context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))
+            context.getString(AppR.string.voice_import_done, name.removeSuffix(".json").removeSuffix(".wav"))
         } catch (e: Exception) {
             context.getString(AppR.string.voice_import_failed, e.message ?: "?")
         }
