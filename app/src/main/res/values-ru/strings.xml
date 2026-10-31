@@ -340,7 +340,7 @@
     <string name="voice_import_done">Голос добавлен: %1$s</string>
     <string name="voice_import_failed">Голос не добавлен: %1$s</string>
     <string name="noise_scale_title">Стабильность ↔ выразительность</string>
-    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается. Только для TeraTTS: у Supertonic 3 свои настройки (Голосовая модель → Качество Supertonic 3).</string>
+    <string name="noise_scale_desc">Влево — ровнее: реже пропускает и повторяет слова, интонация чуть спокойнее. Вправо — живее, как задумано моделью, но чаще запинается. Только для TeraTTS.</string>
     <string name="noise_scale_stable">ровно</string>
     <string name="noise_scale_lively">живо</string>
     <string name="speed_test_title">Тест скорости</string>
@@ -390,12 +390,12 @@
     <string name="engine_shtorm_desc_download">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 440 МБ</string>
     <string name="engine_shtorm_desc_ready">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи. Свою запись добавьте через «Импорт голоса». Скачана</string>
     <string name="engine_shtorm_delete">Удалить Shtorm (%1$d МБ)</string>
-    <string name="engine_downloading">Скачивание Supertonic 3: %1$d %%</string>
+    <string name="engine_downloading">Скачивание: %1$d %%</string>
     <string name="engine_download_failed">Не скачалось: %1$s. Проверьте интернет и нажмите ещё раз — скачанное не потеряется</string>
     <string name="voice_rhythm_label">Починка голоса для TeraTTS (если пропускает слова)</string>
     <string name="voice_rhythm_own">Свой ритм</string>
     <string name="voice_rhythm_as">Ритм как у %1$s</string>
-    <string name="voice_rhythm_desc">Голос сделан не для TeraTTS (Supertonic 3, Superclonica) — ритм речи можно взять у родного голоса: тембр останется этим, слова перестанут пропадать. На Supertonic 3 не влияет</string>
+    <string name="voice_rhythm_desc">Голос сделан не для TeraTTS (Supertonic, Superclonica) — ритм речи можно взять у родного голоса: тембр останется этим, слова перестанут пропадать</string>
     <string name="tera_comma_quotes">Замена запятых</string>
     <string name="tera_comma_quotes_desc">Запятая читается как короткая пауза без «запятой» интонации — звучит естественнее (из TeraTTS-GUI от azimutspb). Только для TeraTTS</string>
     <string name="tera_teacher">«Учитель» — полная модель TeraTTS</string>
@@ -403,5 +403,4 @@
     <string name="tera_teacher_desc_download">Местами чище звук, но примерно в 3 раза медленнее. Включение скачает 256 МБ (один раз)</string>
     <string name="tera_teacher_delete">Удалить «учителя» (256 МБ)</string>
     <string name="voice_tera_only_note">· для TeraTTS</string>
-    <string name="voice_tera_only_warning">Этот голос сделан для TeraTTS — в Supertonic 3 он звучит металлически. Для Supertonic 3 сделайте его заново в блокноте с MODEL=\"st3\"</string>
 </resources>
