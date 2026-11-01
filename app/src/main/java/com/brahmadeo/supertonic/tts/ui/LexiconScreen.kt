@@ -631,6 +631,17 @@ private fun SpeedTestRow() {
     }
 }
 
+/** The model chosen on this screen, shared by the model section and the check of an imported voice. */
+private val engineShown = mutableStateOf("")
+
+/** Starts the engine again with the chosen model (in the background, reading waits for it). */
+private fun restartEngine(context: android.content.Context) {
+    try {
+        context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
+            .setAction("RESET_ENGINE"))
+    } catch (_: Exception) { }
+}
+
 /**
  * The voice model: TeraTTS (Russian, bundled) or Shtorm PocketTTS RU (speaks in the voice of a
  * short recording; downloaded here on request). The engine restarts with the chosen one.
@@ -640,19 +651,16 @@ private fun EngineSection() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
     val scope = rememberCoroutineScope()
-    var engine by remember { mutableStateOf(assets.engine(context)) }
+    remember { engineShown.value = assets.engine(context); 0 }
+    var engine by engineShown
     var ready by remember { mutableStateOf(assets.shtormReady(context)) }
+    var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
     var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
     var progress by remember { mutableStateOf<Float?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    fun restart() {
-        try {
-            context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
-                .setAction("RESET_ENGINE"))
-        } catch (_: Exception) { }
-    }
+    fun restart() = restartEngine(context)
     fun choose(e: String) {
         if (e == assets.ENGINE_SHTORM && !ready) {
             if (progress != null) return
@@ -736,6 +744,29 @@ private fun EngineSection() {
                 }
             }
         }
+        // Shtorm: liveliness — the noise of each frame (takes effect from the next phrase)
+        if (engine == assets.ENGINE_SHTORM) {
+            Text(stringResource(AppR.string.shtorm_liveliness_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(AppR.string.shtorm_liveliness_desc, "%.2f".format(liveliness)),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(AppR.string.noise_scale_stable), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = liveliness,
+                    onValueChange = { liveliness = Math.round(it * 20f) / 20f },
+                    onValueChangeFinished = { com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormLiveliness(context, liveliness) },
+                    valueRange = 0.1f..0.7f,
+                    steps = 11,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                Text(stringResource(AppR.string.noise_scale_lively), style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = {
+                liveliness = 0.3f
+                com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormLiveliness(context, 0.3f)
+            }, enabled = liveliness != 0.3f) { Text(stringResource(AppR.string.shtorm_liveliness_reset)) }
+        }
         progress?.let { p ->
             Text(stringResource(AppR.string.engine_downloading, (p * 100).toInt()), style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
@@ -808,18 +839,22 @@ private fun MusicSection() {
 @Composable
 private fun ImportVoiceRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
+    var checking by remember { mutableStateOf<String?>(null) }
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         val msg = try {
             val name = com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
-            context.getString(AppR.string.voice_import_done, name.removeSuffix(".json").removeSuffix(".wav"))
+            // a recording: listen to it at once, another piece of it can be taken
+            if (name.endsWith(".wav")) { checking = name; null }
+            else context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))
         } catch (e: Exception) {
             context.getString(AppR.string.voice_import_failed, e.message ?: "?")
         }
-        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        msg?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
     }
+    checking?.let { name -> VoiceCheckDialog(name) { checking = null } }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
@@ -837,6 +872,98 @@ private fun ImportVoiceRow() {
             )
         }
     }
+}
+
+private const val VOICE_CHECK_PHRASE =
+    "Здравствуйте! Так этот голос будет читать ваши книги. Он улыбнулся, кивнул и, не говоря ни слова, вышел из комнаты."
+
+/**
+ * A voice made from a recording: listen to it in Shtorm, take another piece of the recording
+ * (start, middle, end) if this one did not come out well, or delete it.
+ */
+@Composable
+private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
+    val vi = com.brahmadeo.supertonic.tts.utils.VoiceImport
+    val scope = rememberCoroutineScope()
+    remember { if (engineShown.value.isEmpty()) engineShown.value = assets.engine(context); 0 }
+    var engine by engineShown
+    var part by remember { mutableStateOf(vi.PART_START) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val label = name.removeSuffix(".wav")
+    fun play() {
+        val path = java.io.File(context.filesDir, "${assets.MODEL_VERSION}/voice_styles/$name").absolutePath
+        try {
+            context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
+                .setAction(com.brahmadeo.supertonic.tts.service.PlaybackService.ACTION_PREVIEW)
+                .putExtra("text", VOICE_CHECK_PHRASE).putExtra("voice", path).putExtra("speed", 1f))
+        } catch (_: Exception) { }
+    }
+    fun close() { vi.done(); onClose() }
+    LaunchedEffect(name) { if (engine == assets.ENGINE_SHTORM) play() }
+    AlertDialog(
+        onDismissRequest = { close() },
+        title = { Text(stringResource(AppR.string.voice_check_title, label)) },
+        text = {
+            Column {
+                if (engine == assets.ENGINE_SHTORM) {
+                    Text(stringResource(AppR.string.voice_check_desc), style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    Text(stringResource(AppR.string.voice_check_need_shtorm), style = MaterialTheme.typography.bodyMedium)
+                    if (assets.shtormReady(context)) {
+                        TextButton(onClick = {
+                            assets.setEngine(context, assets.ENGINE_SHTORM); engine = assets.ENGINE_SHTORM
+                            restartEngine(context); play()
+                        }) { Text(stringResource(AppR.string.voice_check_use_shtorm)) }
+                    }
+                }
+                if (vi.canRecut(name)) {
+                    Text(stringResource(AppR.string.voice_check_part), style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((p, title) in listOf(vi.PART_START to stringResource(AppR.string.voice_part_start),
+                                vi.PART_MIDDLE to stringResource(AppR.string.voice_part_middle),
+                                vi.PART_END to stringResource(AppR.string.voice_part_end))) {
+                            FilterChip(
+                                selected = part == p,
+                                enabled = !busy,
+                                onClick = {
+                                    if (part != p) {
+                                        busy = true; error = null
+                                        scope.launch {
+                                            try {
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vi.recut(context, name, p) }
+                                                part = p
+                                                if (engine == assets.ENGINE_SHTORM) play()
+                                            } catch (e: Exception) {
+                                                error = context.getString(AppR.string.voice_import_failed, e.message ?: "?")
+                                            }
+                                            busy = false
+                                        }
+                                    }
+                                },
+                                label = { Text(title) }
+                            )
+                        }
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            Row {
+                if (engine == assets.ENGINE_SHTORM) {
+                    TextButton(onClick = { play() }, enabled = !busy) { Text(stringResource(AppR.string.voice_check_play)) }
+                }
+                TextButton(onClick = { close() }) { Text(stringResource(AppR.string.voice_check_done)) }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { vi.delete(context, name); close() }) { Text(stringResource(AppR.string.voice_check_delete)) }
+        }
+    )
 }
 
 /** Reading crashes in another reader: the log the developer needs, sent by hand. */

@@ -26,6 +26,19 @@ pub const POCKET_RATE: u32 = 24_000;
 /// Text per call, characters (the author: 120–180; longer pieces fade in volume).
 pub const POCKET_MAX_CHUNK_CHARS: usize = 150;
 
+/// Liveliness from the settings slider: the noise of each frame (0.3 as MyTTS; lower is steadier,
+/// higher is livelier but stumbles more).
+static TEMPERATURE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3E99_999A); // 0.3
+
+pub fn set_temperature(v: f32) {
+    let v = if v.is_finite() { v.clamp(0.05, 1.0) } else { 0.3 };
+    TEMPERATURE_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn temperature() -> f32 {
+    f32::from_bits(TEMPERATURE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 // ---- SentencePiece BPE ----------------------------------------------------------------------
 
 /// SentencePiece BPE (model type 2) as `spm.encode` does it: NFKC, spaces as '▁' with one in
@@ -416,6 +429,15 @@ pub fn resample(x: &[f32], from: u32, to: u32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperature_is_clamped() {
+        set_temperature(2.0);
+        assert_eq!(temperature(), 1.0);
+        set_temperature(f32::NAN);
+        assert!((temperature() - 0.3).abs() < 1e-6);
+        set_temperature(0.3);
+    }
 
     #[test]
     fn prepare_like_upstream() {

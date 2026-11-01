@@ -22,6 +22,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseS
     crate::tera::set_noise_scale(scale);
 }
 
+/// Shtorm's liveliness: the noise of each frame (settings slider).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketTemperature(
+    _env: JNIEnv,
+    _class: JClass,
+    value: jfloat,
+) {
+    crate::pocket::set_temperature(value);
+}
+
 /// "Voice repair" for TeraTTS: voice file name → a native TeraTTS voice whose rhythm (style_dp)
 /// it borrows. A Supertonic voice keeps its timbre (style_ttl) but its own style_dp makes TeraTTS's
 /// duration predictor skip words (azimutspb, TeraTTS-GUI). Lines "file\tdonor path".

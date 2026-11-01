@@ -34,6 +34,16 @@ object VoiceLoudness {
     // per model: the same voice is louder or quieter in TeraTTS and in Shtorm
     private fun key(voicePath: String) = AssetManager.engineKey + File(voicePath).name
 
+    /** Drops what was measured for the voice file [name] in every model (its recording changed). */
+    fun forget(context: Context, name: String) {
+        load(context)
+        val gone = (levels.keys + counts.keys).filter { it == name || it.endsWith(":" + name) }.toSet()
+        if (gone.isEmpty()) return
+        val e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        for (k in gone) { levels.remove(k); counts.remove(k); e.remove(k); e.remove(k + "_n") }
+        e.apply()
+    }
+
     private fun load(context: Context) {
         if (loaded) return
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
