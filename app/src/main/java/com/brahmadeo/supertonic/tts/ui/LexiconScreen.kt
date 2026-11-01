@@ -654,7 +654,7 @@ private fun EngineSection() {
     remember { engineShown.value = assets.engine(context); 0 }
     var engine by engineShown
     var ready by remember { mutableStateOf(assets.shtormReady(context)) }
-    var needsInt8 by remember { mutableStateOf(assets.shtormNeedsInt8(context)) }
+    var precision by remember { mutableStateOf(assets.shtormPrecision(context)) }
     var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
     var brightness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormBrightness) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
@@ -795,24 +795,36 @@ private fun EngineSection() {
             LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        // Shtorm of 1.8–1.9.x: the 8-bit main graph — faster, 76 MB, the full one (302 MB) goes
-        if (needsInt8 && progress == null) {
-            TextButton(onClick = {
-                error = null; progress = 0f
-                scope.launch {
-                    try {
-                        assets.downloadShtorm(context) { p -> scope.launch { progress = p } }
-                        needsInt8 = assets.shtormNeedsInt8(context)
-                        if (engine == assets.ENGINE_SHTORM) restart()
-                    } catch (ex: Exception) {
-                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+        // Shtorm's precision: full (32 bits, 302 MB) or faster (8 bits, 76 MB); the other file is
+        // downloaded on choosing it, and the unused one deleted
+        if (ready && engine == assets.ENGINE_SHTORM) {
+            Text(stringResource(AppR.string.shtorm_precision_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            for ((p, label) in listOf("32" to stringResource(AppR.string.shtorm_precision_32), "8" to stringResource(AppR.string.shtorm_precision_8))) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable(enabled = progress == null) {
+                        if (precision == p) return@clickable
+                        error = null; progress = 0f
+                        scope.launch {
+                            try {
+                                assets.setShtormPrecision(context, p) { v -> scope.launch { progress = v } }
+                                restart()
+                            } catch (ex: Exception) {
+                                error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                            }
+                            precision = assets.shtormPrecision(context)
+                            progress = null
+                        }
                     }
-                    progress = null
+                ) {
+                    RadioButton(selected = precision == p, onClick = null)
+                    Text(label, style = MaterialTheme.typography.bodySmall)
                 }
-            }) { Text(stringResource(AppR.string.engine_shtorm_int8)) }
+            }
         }
         if (ready && engine != assets.ENGINE_SHTORM && progress == null) {
-            TextButton(onClick = { assets.deleteShtorm(context); ready = false; needsInt8 = false }) {
+            TextButton(onClick = { assets.deleteShtorm(context); ready = false }) {
                 Text(stringResource(AppR.string.engine_shtorm_delete, assets.shtormSizeMb(context)))
             }
         }

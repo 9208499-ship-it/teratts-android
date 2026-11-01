@@ -390,7 +390,6 @@
     <string name="engine_shtorm_desc_download">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 215 МБ</string>
     <string name="engine_shtorm_desc_ready">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи. Свою запись добавьте через «Импорт голоса». Скачана</string>
     <string name="engine_shtorm_delete">Удалить Shtorm (%1$d МБ)</string>
-    <string name="engine_shtorm_int8">Ускорить Shtorm: докачать 76 МБ (8-битная модель, на слух не отличить; большая удалится, освободится 300 МБ)</string>
     <string name="shtorm_liveliness_title">Живость Shtorm</string>
     <string name="shtorm_liveliness_desc">Влево — ровнее и спокойнее, меньше оговорок. Вправо — живее и выразительнее, но чаще запинается. Сейчас %1$s, обычно 0,30</string>
     <string name="shtorm_liveliness_reset">Вернуть обычную (0,30)</string>
@@ -399,6 +398,9 @@
     <string name="shtorm_brightness_soft">мягче</string>
     <string name="shtorm_brightness_bright">ярче</string>
     <string name="shtorm_brightness_reset">Вернуть обычную (+8 дБ)</string>
+    <string name="shtorm_precision_title">Точность Shtorm</string>
+    <string name="shtorm_precision_32">Полная (32 бита) — 302 МБ</string>
+    <string name="shtorm_precision_8">Быстрее (8 бит) — 76 МБ, на слух не отличить; для слабых телефонов</string>
     <string name="voice_check_title">Голос %1$s</string>
     <string name="voice_check_desc">Послушайте, как он читает. Не нравится — возьмите другой кусок записи, голос переделается сразу.</string>
     <string name="voice_check_need_shtorm">Голос из записи читает модель Shtorm — послушать его можно, когда она выбрана.</string>

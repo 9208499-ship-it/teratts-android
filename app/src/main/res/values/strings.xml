@@ -390,7 +390,6 @@
     <string name="engine_shtorm_desc_download">Russian PocketTTS by ArtShtorm: speaks in the voice of any short recording, places stress well. Downloaded when chosen, about 215 MB</string>
     <string name="engine_shtorm_desc_ready">Russian PocketTTS by ArtShtorm: speaks in the voice of any short recording. Your own recording is added under «Import voice». Downloaded</string>
     <string name="engine_shtorm_delete">Delete Shtorm (%1$d MB)</string>
-    <string name="engine_shtorm_int8">Speed up Shtorm: download 76 MB (8-bit model, sounds the same; the big one is deleted, 300 MB freed)</string>
     <string name="shtorm_liveliness_title">Shtorm liveliness</string>
     <string name="shtorm_liveliness_desc">Left: steadier and calmer, fewer slips. Right: livelier and more expressive, but it stumbles more. Now %1$s, usually 0.30</string>
     <string name="shtorm_liveliness_reset">Back to usual (0.30)</string>
@@ -399,6 +398,9 @@
     <string name="shtorm_brightness_soft">softer</string>
     <string name="shtorm_brightness_bright">brighter</string>
     <string name="shtorm_brightness_reset">Back to usual (+8 dB)</string>
+    <string name="shtorm_precision_title">Shtorm precision</string>
+    <string name="shtorm_precision_32">Full (32-bit) — 302 MB</string>
+    <string name="shtorm_precision_8">Faster (8-bit) — 76 MB, sounds the same; for slow phones</string>
     <string name="voice_check_title">Voice %1$s</string>
     <string name="voice_check_desc">Listen to how it reads. If you don\'t like it, take another piece of the recording: the voice is remade at once.</string>
     <string name="voice_check_need_shtorm">A voice from a recording is read by the Shtorm model: you can listen to it when Shtorm is chosen.</string>

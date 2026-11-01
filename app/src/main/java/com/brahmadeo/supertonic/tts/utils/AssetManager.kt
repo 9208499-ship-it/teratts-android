@@ -263,11 +263,31 @@ object AssetManager {
 
     private fun present(context: Context, f: Remote) = File(shtormDir(context), f.name).length() == f.size
 
-    fun shtormReady(context: Context) = SHTORM_FILES.all { present(context, it) } ||
-        (SHTORM_FILES.filter { it.name != "flow_lm_main_int8.onnx" }.all { present(context, it) } && present(context, SHTORM_MAIN_FP32))
+    private val SHTORM_MAIN_INT8 get() = SHTORM_FILES.first { it.name == "flow_lm_main_int8.onnx" }
+    private val SHTORM_BASE get() = SHTORM_FILES.filter { it.name != "flow_lm_main_int8.onnx" }
+    private const val KEY_PRECISION = "shtorm_precision"
 
-    /** Downloaded before 1.10: the full main graph, the 8-bit one (76 MB) is to be fetched. */
-    fun shtormNeedsInt8(context: Context) = shtormReady(context) && !SHTORM_FILES.all { present(context, it) }
+    /** Shtorm is there: its common files and the main graph in either precision. */
+    fun shtormReady(context: Context) = SHTORM_BASE.all { present(context, it) } &&
+        (present(context, SHTORM_MAIN_INT8) || present(context, SHTORM_MAIN_FP32))
+
+    /**
+     * The precision of Shtorm's main graph: "8" (76 MB, faster, the default — not told apart by ear)
+     * or "32" (302 MB, the full one). As chosen in Settings; not chosen — as downloaded (1.8–1.9.x: 32).
+     */
+    fun shtormPrecision(context: Context): String {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PRECISION, null)
+        if (p == "8" || p == "32") return p
+        return if (present(context, SHTORM_MAIN_FP32) && !present(context, SHTORM_MAIN_INT8)) "32" else "8"
+    }
+
+    private fun shtormMain(precision: String) = if (precision == "32") SHTORM_MAIN_FP32 else SHTORM_MAIN_INT8
+
+    /** Another precision: its main graph is downloaded, the other one deleted (it only takes space). */
+    suspend fun setShtormPrecision(context: Context, precision: String, onProgress: (Float) -> Unit) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PRECISION, precision).apply()
+        downloadShtorm(context, onProgress)
+    }
 
     fun shtormSizeMb(context: Context): Long =
         (shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
@@ -326,12 +346,14 @@ object AssetManager {
     }
 
     /**
-     * Downloads Shtorm (≈215 MB, checked) and the recordings of TeraTTS's voices for it; for a
-     * Shtorm of 1.8–1.9.x only the 8-bit main graph (76 MB), then the full one (302 MB) goes.
+     * Downloads Shtorm (≈215 MB with the 8-bit main graph, ≈440 MB with the full one; checked) and the
+     * recordings of TeraTTS's voices for it. Only what is missing; the main graph of the other
+     * precision is deleted afterwards.
      */
     suspend fun downloadShtorm(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
         val dir = shtormDir(context).apply { mkdirs() }
-        val missing = SHTORM_FILES.filter { File(dir, it.name).length() != it.size }
+        val main = shtormMain(shtormPrecision(context))
+        val missing = (SHTORM_BASE + main).filter { File(dir, it.name).length() != it.size }
         val total = missing.sumOf { it.size }.coerceAtLeast(1L)
         var done = 0L
         for (f in missing) {
@@ -343,8 +365,8 @@ object AssetManager {
             }
             done += f.size
         }
-        // the 8-bit main graph is there: the full one only takes space
-        File(dir, SHTORM_MAIN_FP32.name).takeIf { it.exists() }?.delete()
+        // the chosen main graph is there: the other one only takes space
+        File(dir, (if (main === SHTORM_MAIN_FP32) SHTORM_MAIN_INT8 else SHTORM_MAIN_FP32).name).takeIf { it.exists() }?.delete()
         val voices = voiceDir(context).apply { mkdirs() }
         for (v in SHTORM_VOICES) {
             val target = File(voices, "$v.wav")
