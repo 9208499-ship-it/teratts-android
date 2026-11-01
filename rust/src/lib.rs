@@ -341,6 +341,8 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_synthesiz
             if duration > 0.0 {
                 engine.last_rtf = duration / elapsed;
                 log::info!("Inference RTF: {:.2}x ({}s audio in {}s)", engine.last_rtf, duration, elapsed);
+                // where it ran: a slow phrase next to a fast one shows what the system changed
+                log::info!("Inference where: {}", crate::cores::where_now());
             }
 
             let mut pcm_data = Vec::with_capacity(wav_data.len() * 2);

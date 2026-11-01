@@ -34,6 +34,34 @@ fn set_mask(m: &[u64; WORDS]) -> bool {
     unsafe { libc::syscall(libc::SYS_sched_setaffinity, 0, std::mem::size_of_val(m), m.as_ptr()) == 0 }
 }
 
+/**
+ * Where synthesis may run right now, for the log ("тормоза вечером при выключенном экране"):
+ * the cpuset the system put the app in (top-app / foreground / background…), the CPUs this thread
+ * may use, the CPU it is on and that CPU's clock now / at most (MHz, "?" if the system hides it).
+ */
+pub fn where_now() -> String {
+    let cpuset = std::fs::read_to_string("/proc/self/cpuset").unwrap_or_default().trim().to_string();
+    let status = std::fs::read_to_string("/proc/thread-self/status")
+        .or_else(|_| std::fs::read_to_string("/proc/self/status")).unwrap_or_default();
+    let allowed = status.lines().find(|l| l.starts_with("Cpus_allowed_list:"))
+        .and_then(|l| l.split_whitespace().nth(1)).unwrap_or("?").to_string();
+    let mut cpu: libc::c_uint = 0;
+    // getcpu(2) directly: the libc wrapper is not in every Android libc binding
+    let cpu = if unsafe { libc::syscall(libc::SYS_getcpu, &mut cpu as *mut libc::c_uint, std::ptr::null_mut::<libc::c_uint>(), std::ptr::null_mut::<libc::c_void>()) } == 0 { cpu as i64 } else { -1 };
+    let mhz = |f: &str| std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/cpufreq/{f}")).ok()
+        .and_then(|s| s.trim().parse::<u64>().ok()).map(|k| (k / 1000).to_string()).unwrap_or_else(|| "?".into());
+    format!("cpuset={cpuset} allowed={allowed} cpu={cpu} mhz={}/{}", mhz("scaling_cur_freq"), mhz("scaling_max_freq"))
+}
+
+#[cfg(test)]
+mod where_tests {
+    #[test]
+    fn where_now_reads() {
+        let w = super::where_now();
+        assert!(w.contains("allowed=") && w.contains("cpu="), "{w}");
+    }
+}
+
 /// Pins the current thread to the fast cores until dropped (no-op if none are set).
 pub struct Pin {
     old: Option<[u64; WORDS]>,
