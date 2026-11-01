@@ -599,6 +599,7 @@ class MainActivity : ComponentActivity() {
             }
 
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
+            SupertonicTTS.appContext = applicationContext
             if (SupertonicTTS.initialize(modelPath, libPath)) {
                 withContext(Dispatchers.Main) {
                     viewModel.isInitializing.value = false

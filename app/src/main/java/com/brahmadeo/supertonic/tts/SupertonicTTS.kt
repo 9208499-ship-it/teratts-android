@@ -112,10 +112,14 @@ object SupertonicTTS {
         try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
         val threads = if (fast.isNotEmpty()) fast.size else ortThreads
         Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")
+        val before = taskIds()
         nativePtr = init(modelPath, libPath, threads, xnnThreads)
         try {
             android.os.Process.setThreadPriority(previousPriority)
         } catch (e: Exception) { }
+        // the threads made while loading (ONNX Runtime's workers) and this one: the system is told
+        // how fast they must be (ADPF), so it may raise the clock of the cores they run on
+        if (nativePtr != 0L) openHint((taskIds() - before + tid).toIntArray())
         val success = nativePtr != 0L
         if (success) {
             cachedSampleRate = getSampleRate(nativePtr)
@@ -228,7 +232,19 @@ object SupertonicTTS {
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             // the voice in the form the running model needs (Shtorm: a recording, TeraTTS: a voice file)
             val voice = com.brahmadeo.supertonic.tts.utils.AssetManager.voiceForEngine(stylePath)
-            val data = synthesize(nativePtr, text, lang, voice, speed, bufferDuration, steps, gain)
+            // Shtorm makes speech frame by frame, much of it on this very thread: at the audio priority
+            // it is not pushed aside on the few cores Huawei leaves to the app with the screen off
+            val me = android.os.Process.myTid()
+            val oldPriority = try { android.os.Process.getThreadPriority(me) } catch (e: Exception) { null }
+            try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) } catch (e: Exception) { }
+            hintAddThread(me)
+            val t0 = System.nanoTime()
+            val data = try {
+                synthesize(nativePtr, text, lang, voice, speed, bufferDuration, steps, gain)
+            } finally {
+                oldPriority?.let { p -> try { android.os.Process.setThreadPriority(p) } catch (e: Exception) { } }
+            }
+            reportHint(data.size / 2f / cachedSampleRate.coerceAtLeast(1), System.nanoTime() - t0)
             return if (data.isNotEmpty()) data else null
         } catch (e: Exception) {
             Log.e("SupertonicTTS", "Native synthesis exception: ${e.message}")
@@ -312,8 +328,63 @@ object SupertonicTTS {
         return true
     }
 
+    // ---- telling the system how fast synthesis must be (Android 12+, ADPF) ----
+    /** Set by the services before the engine loads: the performance hint needs a context. */
+    @Volatile var appContext: android.content.Context? = null
+    private var hint: Any? = null              // PerformanceHintManager.Session
+    private val hintTids = java.util.TreeSet<Int>()
+
+    private fun taskIds(): Set<Int> =
+        java.io.File("/proc/self/task").list()?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
+
+    private fun openHint(tids: IntArray) {
+        closeHint()
+        if (android.os.Build.VERSION.SDK_INT < 31 || tids.isEmpty()) return
+        val ctx = appContext ?: return
+        try {
+            val pm = ctx.getSystemService(android.os.PerformanceHintManager::class.java) ?: return
+            hint = pm.createHintSession(tids, 500_000_000L)
+            hintTids.clear(); hintTids.addAll(tids.toList())
+            Log.i("SupertonicTTS", "performance hint: " + (if (hint != null) "on, ${tids.size} threads" else "not supported here"))
+        } catch (e: Throwable) {
+            hint = null
+            Log.w("SupertonicTTS", "performance hint: ${e.message}")
+        }
+    }
+
+    /** The thread that calls synthesis (it changes): added to the hint where Android allows it (14+). */
+    private fun hintAddThread(tid: Int) {
+        if (android.os.Build.VERSION.SDK_INT < 34 || tid in hintTids) return
+        val s = hint as? android.os.PerformanceHintManager.Session ?: return
+        try {
+            // only threads that still live
+            val live = taskIds()
+            hintTids.retainAll(live); hintTids.add(tid)
+            s.setThreads(hintTids.toIntArray())
+        } catch (e: Throwable) { }
+    }
+
+    /** One phrase: it should be ready in half its own length (twice as fast as it is heard). */
+    private fun reportHint(audioSeconds: Float, elapsedNs: Long) {
+        if (android.os.Build.VERSION.SDK_INT < 31 || audioSeconds <= 0f) return
+        val s = hint as? android.os.PerformanceHintManager.Session ?: return
+        try {
+            s.updateTargetWorkDuration((audioSeconds * 0.5f * 1e9f).toLong().coerceAtLeast(10_000_000L))
+            s.reportActualWorkDuration(elapsedNs.coerceAtLeast(1L))
+        } catch (e: Throwable) { }
+    }
+
+    private fun closeHint() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            try { (hint as? android.os.PerformanceHintManager.Session)?.close() } catch (e: Throwable) { }
+        }
+        hint = null
+        hintTids.clear()
+    }
+
     @Synchronized
     fun release() {
+        closeHint()
         if (nativePtr != 0L) {
             Log.i("SupertonicTTS", "Releasing engine: $nativePtr")
             close(nativePtr)

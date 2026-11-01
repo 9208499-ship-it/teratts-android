@@ -50,7 +50,21 @@ pub fn where_now() -> String {
     let cpu = if unsafe { libc::syscall(libc::SYS_getcpu, &mut cpu as *mut libc::c_uint, std::ptr::null_mut::<libc::c_uint>(), std::ptr::null_mut::<libc::c_void>()) } == 0 { cpu as i64 } else { -1 };
     let mhz = |f: &str| std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/cpufreq/{f}")).ok()
         .and_then(|s| s.trim().parse::<u64>().ok()).map(|k| (k / 1000).to_string()).unwrap_or_else(|| "?".into());
-    format!("cpuset={cpuset} allowed={allowed} cpu={cpu} mhz={}/{}", mhz("scaling_cur_freq"), mhz("scaling_max_freq"))
+    // the priority (nice: -20 highest … 19 lowest) of this thread and the span over all the app's threads
+    let me = unsafe { libc::getpriority(libc::PRIO_PROCESS as _, 0) };
+    let mut nices: Vec<i64> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/proc/self/task") {
+        for e in rd.flatten() {
+            if let Ok(st) = std::fs::read_to_string(e.path().join("stat")) {
+                // after "(comm)": state is field 3, nice is field 19
+                if let Some(rest) = st.rsplit_once(')').map(|(_, r)| r) {
+                    if let Some(v) = rest.split_whitespace().nth(16).and_then(|v| v.parse::<i64>().ok()) { nices.push(v); }
+                }
+            }
+        }
+    }
+    let span = match (nices.iter().min(), nices.iter().max()) { (Some(a), Some(b)) => format!("{a}..{b}"), _ => "?".into() };
+    format!("cpuset={cpuset} allowed={allowed} cpu={cpu} mhz={}/{} nice={me} nice_all={span}", mhz("scaling_cur_freq"), mhz("scaling_max_freq"))
 }
 
 #[cfg(test)]

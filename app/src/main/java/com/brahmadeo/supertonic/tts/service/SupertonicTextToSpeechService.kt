@@ -77,6 +77,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
+            SupertonicTTS.appContext = applicationContext
             SupertonicTTS.initialize(modelPath, libPath)
             // Prewarm (see PlaybackService for rationale). Idempotent — if
             // PlaybackService was up first and warmed, this is a no-op.
@@ -467,6 +468,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
+            SupertonicTTS.appContext = applicationContext
             SupertonicTTS.initialize(modelPath, libPath)
         }
 

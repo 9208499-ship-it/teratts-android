@@ -384,6 +384,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // start the engine in the background: on the main thread it froze the app
         engineReady = serviceScope.launch(Dispatchers.IO) {
             com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
+            SupertonicTTS.appContext = applicationContext
             SupertonicTTS.initialize(modelPath, libPath)
         }
         // Prewarm: synthesize a throwaway "." in the background so XNNPACK
@@ -439,6 +440,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 previous?.join()
                 SupertonicTTS.release()
                 com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
+                SupertonicTTS.appContext = applicationContext
                 SupertonicTTS.initialize(modelPath, libPath)
             }
         }
