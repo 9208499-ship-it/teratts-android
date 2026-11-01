@@ -34,6 +34,17 @@ object SupertonicTTS {
     private external fun setFastCores(cores: IntArray)
     private external fun isXnnpackEnabled(): Boolean
 
+    /**
+     * A paused reading keeps the engine (it waits inside a phrase to go on from the very word). Any
+     * other user of the engine — a reader app through the system TTS, the speed test — calls
+     * [requestEngine] first: the paused reading then lets the engine go (its place is kept).
+     */
+    @Volatile var onEngineWanted: (() -> Unit)? = null
+
+    fun requestEngine() {
+        try { onEngineWanted?.invoke() } catch (e: Exception) { Log.w("SupertonicTTS", "requestEngine", e) }
+    }
+
     /** "Fast cores only" (CpuCores): threads = the fast cores, pinned to them. */
     @Volatile var fastCoresOnly = false
 

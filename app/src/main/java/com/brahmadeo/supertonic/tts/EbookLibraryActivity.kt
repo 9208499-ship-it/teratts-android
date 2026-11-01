@@ -41,6 +41,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -154,7 +160,7 @@ class EbookLibraryActivity : ComponentActivity() {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Ebook Library") },
+                    title = { Text(getString(R.string.library_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -171,9 +177,9 @@ class EbookLibraryActivity : ComponentActivity() {
             if (recentBooks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("No recent books", style = MaterialTheme.typography.bodyLarge)
+                        Text(getString(R.string.library_empty), style = MaterialTheme.typography.bodyLarge)
                         Button(onClick = onOpenNew, modifier = Modifier.padding(top = 16.dp)) {
-                            Text("Open your first book")
+                            Text(getString(R.string.library_open_first))
                         }
                     }
                 }
@@ -191,12 +197,42 @@ class EbookLibraryActivity : ComponentActivity() {
                                 val pos = remember(book.path) {
                                     com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookLibraryActivity, java.io.File(book.path).name)
                                 }
-                                Text(if (pos != null && pos.quote.isNotBlank()) "▶ «" + pos.quote.trim().take(60) + "…»"
-                                     else EbookManager.readableTitle(EbookManager.originalName(this@EbookLibraryActivity, book.path))
-                                        ?: book.path.substringAfterLast('/'),
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                // how much of the book is read (its chapters are counted once, then kept)
+                                var share by remember(book.path) {
+                                    mutableStateOf(com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path))
+                                }
+                                LaunchedEffect(book.path) {
+                                    if (share == null && pos != null) {
+                                        com.brahmadeo.supertonic.tts.utils.BookProgress.lengths(ctx, book.path)
+                                        share = com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path)
+                                    }
+                                }
+                                Column {
+                                    Text(if (pos != null && pos.quote.isNotBlank()) "▶ «" + pos.quote.trim().take(60) + "…»"
+                                         else EbookManager.readableTitle(EbookManager.originalName(this@EbookLibraryActivity, book.path))
+                                            ?: book.path.substringAfterLast('/'),
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    share?.let { s ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                            LinearProgressIndicator(progress = { s }, modifier = Modifier.weight(1f).height(3.dp))
+                                            Text(String.format(java.util.Locale.getDefault(), "  %.1f %%", s * 100f),
+                                                style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
                             },
-                            leadingContent = { Icon(Icons.Default.Book, contentDescription = null) },
+                            leadingContent = {
+                                // the book's cover (taken from it once and kept), else a book sign
+                                var cover by remember(book.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                LaunchedEffect(book.path) { cover = com.brahmadeo.supertonic.tts.utils.BookProgress.cover(ctx, book.path) }
+                                Box(modifier = Modifier.width(48.dp).height(68.dp), contentAlignment = Alignment.Center) {
+                                    val c = cover
+                                    if (c != null) androidx.compose.foundation.Image(c.asImageBitmap(), contentDescription = null,
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().clip(MaterialTheme.shapes.extraSmall))
+                                    else Icon(Icons.Default.Book, contentDescription = null)
+                                }
+                            },
                             trailingContent = {
                                 Row {
                                     IconButton(onClick = { onTocClick(book) }) {

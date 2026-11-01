@@ -258,8 +258,12 @@ fn speech_limit_frames(prepared: &str) -> usize {
 
 /// Is [dir] a Shtorm model folder?
 pub fn is_pocket_dir(dir: &str) -> bool {
-    Path::new(dir).join("flow_lm_main.onnx").exists()
+    Path::new(dir).join(format!("{MAIN_INT8}.onnx")).exists() || Path::new(dir).join("flow_lm_main.onnx").exists()
 }
+
+/// The main graph with its weights in 8 bits (dynamic quantization, 76 MB instead of 302): reading
+/// them from memory for every frame is what holds Shtorm back on phones. Not told apart by ear.
+const MAIN_INT8: &str = "flow_lm_main_int8";
 
 impl Pocket {
     pub fn load(dir: &str, threads: usize) -> Result<Self> {
@@ -273,7 +277,8 @@ impl Pocket {
             Ok(s)
         };
         let (encoder, text, main, flow, decoder) = (open("mimi_encoder")?, open("text_conditioner")?,
-            open("flow_lm_main")?, open("flow_lm_flow")?, open("mimi_decoder")?);
+            open(if Path::new(dir).join(format!("{MAIN_INT8}.onnx")).exists() { MAIN_INT8 } else { "flow_lm_main" })?,
+            open("flow_lm_flow")?, open("mimi_decoder")?);
         let main_states = States::of(&main)?;
         let decoder_states = States::of(&decoder)?;
         let bpe = Bpe::load(&Path::new(dir).join("tokenizer.model"))?;

@@ -387,9 +387,10 @@
     <string name="engine_tera">TeraTTS</string>
     <string name="engine_tera_desc">Русская модель, встроенная</string>
     <string name="engine_shtorm">Shtorm (голос по записи)</string>
-    <string name="engine_shtorm_desc_download">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 440 МБ</string>
+    <string name="engine_shtorm_desc_download">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 215 МБ</string>
     <string name="engine_shtorm_desc_ready">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи. Свою запись добавьте через «Импорт голоса». Скачана</string>
     <string name="engine_shtorm_delete">Удалить Shtorm (%1$d МБ)</string>
+    <string name="engine_shtorm_int8">Ускорить Shtorm: докачать 76 МБ (8-битная модель, на слух не отличить; большая удалится, освободится 300 МБ)</string>
     <string name="shtorm_liveliness_title">Живость Shtorm</string>
     <string name="shtorm_liveliness_desc">Влево — ровнее и спокойнее, меньше оговорок. Вправо — живее и выразительнее, но чаще запинается. Сейчас %1$s, обычно 0,30</string>
     <string name="shtorm_liveliness_reset">Вернуть обычную (0,30)</string>
@@ -423,4 +424,15 @@
     <string name="tera_teacher_desc_download">Местами чище звук, но примерно в 3 раза медленнее. Включение скачает 256 МБ (один раз)</string>
     <string name="tera_teacher_delete">Удалить «учителя» (256 МБ)</string>
     <string name="voice_tera_only_note">· для TeraTTS</string>
+    <string name="player_read_here">Читать отсюда</string>
+    <string name="player_who_says">Кто говорит</string>
+    <string name="player_stop_reading">Остановить чтение</string>
+    <string name="player_read_aloud">Читать вслух</string>
+    <string name="player_more">Ещё</string>
+    <string name="player_save_audio">Сохранить в аудиофайл</string>
+    <string name="player_view_phrase">Вид: крупная фраза</string>
+    <string name="player_view_page">Вид: страница</string>
+    <string name="library_title">Библиотека</string>
+    <string name="library_empty">Здесь будут открытые книги</string>
+    <string name="library_open_first">Открыть книгу</string>
 </resources>

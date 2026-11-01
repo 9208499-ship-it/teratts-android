@@ -338,7 +338,21 @@ class PlaybackActivity : ComponentActivity() {
                 }
             }
             SupertonicTheme(voiceFile = currentVoicePath) {
+                // the place in the whole book: its chapters counted once (in the background), then kept
+                var bookLens by remember { mutableStateOf<Map<Int, Int>?>(null) }
+                var chapterIdx by remember { mutableStateOf(-1) }
+                LaunchedEffect(textState.value, isBookState.value) {
+                    if (!isBookState.value) { bookLens = null; return@LaunchedEffect }
+                    chapterIdx = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this@PlaybackActivity)
+                    val path = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackActivity) ?: return@LaunchedEffect
+                    bookLens = com.brahmadeo.supertonic.tts.utils.BookProgress.lengths(this@PlaybackActivity, path)
+                }
+                val lens = bookLens
                 PlaybackScreen(
+                    chapterNumber = lens?.let { com.brahmadeo.supertonic.tts.utils.BookProgress.chapterNumber(it, chapterIdx) },
+                    bookShare = lens?.let { l -> { s: Float -> com.brahmadeo.supertonic.tts.utils.BookProgress.share(l, chapterIdx, s) } },
+                    // ■ stops the voice; the text stays open for reading by eye
+                    onStopReading = { try { playbackService?.stop() } catch (_: Exception) { } },
                     sentences = sentencesState.value,
                     text = textState.value,
                     title = textState.value.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: "",

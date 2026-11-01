@@ -240,7 +240,8 @@ object AssetManager {
     private class Remote(val name: String, val size: Long, val sha: String)
     private val SHTORM_FILES = listOf(
         Remote("flow_lm_flow.onnx", 39081890L, "5b47a1593b8bc43941f539497b729bb995335b3077e863f315275287d2a2edba"),
-        Remote("flow_lm_main.onnx", 302364167L, "1c26f5046b68a30d6f4894e486ea5f4619c3b8fd961114da4d0faaf1a3fcbaac"),
+        // the main graph in 8 bits (1.10): 76 MB instead of 302, faster; not told apart by ear
+        Remote("flow_lm_main_int8.onnx", 76147677L, "1a5cbf7eae70613a032eb5423513c4906203470f0dadee40d74bc6531b87d52a"),
         Remote("mimi_decoder.onnx", 41410972L, "c5aa9130f66b6100d57044094cc08665fb129944e77f92fe4a1a601992194331"),
         Remote("mimi_encoder.onnx", 39282087L, "9a40beeac20e2d4d1ee9d1af2007c02960fb4b01bec6a46cd9b94cfb396e2c5a"),
         Remote("text_conditioner.onnx", 16388309L, "48f14f835e891798a29abd76838e512b2453b0cb2dc2892779e47e2b4a3e5cf6"),
@@ -257,7 +258,16 @@ object AssetManager {
     private fun shtormDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/shtorm")
     private fun voiceDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/voice_styles")
 
-    fun shtormReady(context: Context) = SHTORM_FILES.all { File(shtormDir(context), it.name).length() == it.size }
+    /** The full main graph (32 bits) of 1.8–1.9.x: still works until the 8-bit one is downloaded. */
+    private val SHTORM_MAIN_FP32 = Remote("flow_lm_main.onnx", 302364167L, "1c26f5046b68a30d6f4894e486ea5f4619c3b8fd961114da4d0faaf1a3fcbaac")
+
+    private fun present(context: Context, f: Remote) = File(shtormDir(context), f.name).length() == f.size
+
+    fun shtormReady(context: Context) = SHTORM_FILES.all { present(context, it) } ||
+        (SHTORM_FILES.filter { it.name != "flow_lm_main_int8.onnx" }.all { present(context, it) } && present(context, SHTORM_MAIN_FP32))
+
+    /** Downloaded before 1.10: the full main graph, the 8-bit one (76 MB) is to be fetched. */
+    fun shtormNeedsInt8(context: Context) = shtormReady(context) && !SHTORM_FILES.all { present(context, it) }
 
     fun shtormSizeMb(context: Context): Long =
         (shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
@@ -315,7 +325,10 @@ object AssetManager {
         }
     }
 
-    /** Downloads Shtorm (≈440 MB, checked) and the recordings of TeraTTS's voices for it. */
+    /**
+     * Downloads Shtorm (≈215 MB, checked) and the recordings of TeraTTS's voices for it; for a
+     * Shtorm of 1.8–1.9.x only the 8-bit main graph (76 MB), then the full one (302 MB) goes.
+     */
     suspend fun downloadShtorm(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
         val dir = shtormDir(context).apply { mkdirs() }
         val missing = SHTORM_FILES.filter { File(dir, it.name).length() != it.size }
@@ -330,6 +343,8 @@ object AssetManager {
             }
             done += f.size
         }
+        // the 8-bit main graph is there: the full one only takes space
+        File(dir, SHTORM_MAIN_FP32.name).takeIf { it.exists() }?.delete()
         val voices = voiceDir(context).apply { mkdirs() }
         for (v in SHTORM_VOICES) {
             val target = File(voices, "$v.wav")

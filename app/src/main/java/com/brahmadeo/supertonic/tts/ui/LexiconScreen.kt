@@ -654,6 +654,7 @@ private fun EngineSection() {
     remember { engineShown.value = assets.engine(context); 0 }
     var engine by engineShown
     var ready by remember { mutableStateOf(assets.shtormReady(context)) }
+    var needsInt8 by remember { mutableStateOf(assets.shtormNeedsInt8(context)) }
     var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
@@ -772,8 +773,24 @@ private fun EngineSection() {
             LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        // Shtorm of 1.8–1.9.x: the 8-bit main graph — faster, 76 MB, the full one (302 MB) goes
+        if (needsInt8 && progress == null) {
+            TextButton(onClick = {
+                error = null; progress = 0f
+                scope.launch {
+                    try {
+                        assets.downloadShtorm(context) { p -> scope.launch { progress = p } }
+                        needsInt8 = assets.shtormNeedsInt8(context)
+                        if (engine == assets.ENGINE_SHTORM) restart()
+                    } catch (ex: Exception) {
+                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                    }
+                    progress = null
+                }
+            }) { Text(stringResource(AppR.string.engine_shtorm_int8)) }
+        }
         if (ready && engine != assets.ENGINE_SHTORM && progress == null) {
-            TextButton(onClick = { assets.deleteShtorm(context); ready = false }) {
+            TextButton(onClick = { assets.deleteShtorm(context); ready = false; needsInt8 = false }) {
                 Text(stringResource(AppR.string.engine_shtorm_delete, assets.shtormSizeMb(context)))
             }
         }

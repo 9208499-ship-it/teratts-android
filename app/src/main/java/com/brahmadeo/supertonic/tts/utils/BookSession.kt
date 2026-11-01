@@ -16,7 +16,7 @@ object BookSession {
     private const val KEY_PREFIX = "prefix"
     private const val PREFIX_LEN = 160
     /** Shorter than this is a cover, an image page or a title page: skipped. */
-    private const val MIN_CHAPTER_CHARS = 40
+    internal const val MIN_CHAPTER_CHARS = 40
 
     private fun prefixOf(text: String) = text.trim().take(PREFIX_LEN)
 

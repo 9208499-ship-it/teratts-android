@@ -387,9 +387,10 @@
     <string name="engine_tera">TeraTTS</string>
     <string name="engine_tera_desc">The Russian model, built in</string>
     <string name="engine_shtorm">Shtorm (voice from a recording)</string>
-    <string name="engine_shtorm_desc_download">Russian PocketTTS by ArtShtorm: speaks in the voice of any short recording, places stress well. Downloaded when chosen, about 440 MB</string>
+    <string name="engine_shtorm_desc_download">Russian PocketTTS by ArtShtorm: speaks in the voice of any short recording, places stress well. Downloaded when chosen, about 215 MB</string>
     <string name="engine_shtorm_desc_ready">Russian PocketTTS by ArtShtorm: speaks in the voice of any short recording. Your own recording is added under «Import voice». Downloaded</string>
     <string name="engine_shtorm_delete">Delete Shtorm (%1$d MB)</string>
+    <string name="engine_shtorm_int8">Speed up Shtorm: download 76 MB (8-bit model, sounds the same; the big one is deleted, 300 MB freed)</string>
     <string name="shtorm_liveliness_title">Shtorm liveliness</string>
     <string name="shtorm_liveliness_desc">Left: steadier and calmer, fewer slips. Right: livelier and more expressive, but it stumbles more. Now %1$s, usually 0.30</string>
     <string name="shtorm_liveliness_reset">Back to usual (0.30)</string>
@@ -423,4 +424,15 @@
     <string name="tera_teacher_desc_download">Cleaner sound in places, but about 3 times slower. Switching on downloads 256 MB (once)</string>
     <string name="tera_teacher_delete">Delete the teacher (256 MB)</string>
     <string name="voice_tera_only_note">· for TeraTTS</string>
+    <string name="player_read_here">Read from here</string>
+    <string name="player_who_says">Who says this</string>
+    <string name="player_stop_reading">Stop reading</string>
+    <string name="player_read_aloud">Read aloud</string>
+    <string name="player_more">More</string>
+    <string name="player_save_audio">Save to an audio file</string>
+    <string name="player_view_phrase">View: one big phrase</string>
+    <string name="player_view_page">View: page</string>
+    <string name="library_title">Library</string>
+    <string name="library_empty">Books you open will be here</string>
+    <string name="library_open_first">Open a book</string>
 </resources>

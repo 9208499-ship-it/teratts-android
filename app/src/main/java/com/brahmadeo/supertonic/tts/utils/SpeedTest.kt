@@ -75,6 +75,7 @@ object SpeedTest {
                 progress(app.getString(R.string.speed_test_loading, mode.label))
                 SupertonicTTS.fastCoresOnly = mode.fast
                 SupertonicTTS.useXnnpack = mode.xnn
+                SupertonicTTS.requestEngine()
                 if (!SupertonicTTS.reload(modelPath, libPath)) { results.add(Result(mode, null, loaded = false)); continue }
                 // "Стоп" in the player leaves the engine's cancel flag set until the next reading:
                 // every phrase of the test came back empty ("не запустилось" for all three modes)

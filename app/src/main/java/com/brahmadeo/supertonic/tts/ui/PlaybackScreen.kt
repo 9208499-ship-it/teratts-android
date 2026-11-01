@@ -16,6 +16,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PlayArrow
@@ -191,11 +196,18 @@ fun PlaybackScreen(
     // a double tap on a word of the book page: its stress, for the user's dictionary
     onWordDoubleTap: (String, String?, String?) -> Unit = { _, _, _ -> },
     // search the whole book (null — not a book)
-    onSearch: (() -> Unit)? = null
+    onSearch: (() -> Unit)? = null,
+    // the chapter's number in the book and how many there are ("3/37"), null — not a book / not known yet
+    chapterNumber: Pair<Int, Int>? = null,
+    // the share of the whole book read at a share (0..1) of this chapter, null — not known
+    bookShare: ((Float) -> Float?)? = null,
+    // stop reading aloud but stay with the text (the reader goes on by eye)
+    onStopReading: () -> Unit = onStopClick
 ) {
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val n = sentences.size
     val index = currentIndex.coerceIn(0, (n - 1).coerceAtLeast(0))
     val book = remember(text, sentences) { bookPageOf(text, sentences) }
@@ -258,52 +270,73 @@ fun PlaybackScreen(
     val remainingChars = remember(sentences, index) { sentences.drop(index).sumOf { it.length } }
     val remainingSeconds = (remainingChars / (CHARS_PER_SECOND * sliderSpeed.coerceAtLeast(0.3f))).toInt()
 
+    // As in Moon+ Reader: the text takes the whole screen. Not reading aloud — a tap shows the bars
+    // (title above; below: the place in the book and the buttons, 🔊 first); reading aloud — the
+    // narrow panel of the voice stays below and a tap on the text reads from there.
+    val speaking = isServiceActive || isPlaying
+    var chrome by remember { mutableStateOf(false) }
+    LaunchedEffect(speaking) { if (speaking) chrome = false }
+    // a long press on the text: read from here / who says this
+    var longFor by remember { mutableStateOf<Int?>(null) }
+    val tapText: (Int) -> Unit = { i -> if (speaking) playFrom(i) else chrome = !chrome }
+    // reading by eye: the screen stays on; listening: it may go dark
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(speaking) {
+        view.keepScreenOn = !speaking
+        onDispose { view.keepScreenOn = false }
+    }
+    // the place: share of this chapter (by characters where the text is laid out) and of the whole book
+    val chapterShare = run {
+        val r = book?.ranges?.getOrNull(index)
+        if (n == 0) 0f else if (book != null && r != null) r.first.toFloat() / book.text.length.coerceAtLeast(1) else index.toFloat() / n
+    }
+    val placeLabel = listOfNotNull(
+        chapterNumber?.let { "${it.first}/${it.second}" },
+        (bookShare?.invoke(chapterShare) ?: chapterShare).let { String.format(java.util.Locale.getDefault(), "%.1f %%", it * 100f) }
+    ).joinToString("  ·  ")
+    val startReading: () -> Unit = {
+        if (isServiceActive) onPlayPauseClick()
+        else if (n > 0) playFrom(if (followVoice) index else topVisibleChunk())
+    }
+
+    longFor?.let { i ->
+        AlertDialog(
+            onDismissRequest = { longFor = null },
+            text = { Text(sentences.getOrNull(i)?.take(200) ?: "", style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = { TextButton(onClick = { longFor = null; playFrom(i) }) { Text(stringResource(AppR.string.player_read_here)) } },
+            dismissButton = { TextButton(onClick = { longFor = null; onSentenceLongClick(i) }) { Text(stringResource(AppR.string.player_who_says)) } }
+        )
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        title.ifEmpty { stringResource(AppR.string.playback_now_playing) },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+            if (chrome && !speaking) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            title.ifEmpty { stringResource(AppR.string.playback_now_playing) },
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(AppR.string.back))
+                        }
+                    },
+                    actions = {
+                        PlayerMoreMenu(
+                            showList = showList, onToggleList = { showList = !showList },
+                            onExport = if (!isExporting) onExportClick else null
+                        )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(AppR.string.back))
-                    }
-                },
-                actions = {
-                    if (onSearch != null) {
-                        IconButton(onClick = onSearch) {
-                            Icon(Icons.Default.Search, contentDescription = stringResource(AppR.string.search_title))
-                        }
-                    }
-                    if (onToc != null) {
-                        IconButton(onClick = onToc) {
-                            Icon(Icons.Default.Toc, contentDescription = stringResource(AppR.string.player_toc))
-                        }
-                    }
-                    IconButton(onClick = onCharactersClick) {
-                        Icon(Icons.Default.People, contentDescription = stringResource(AppR.string.characters_title))
-                    }
-                    if (!isPlaying) {
-                        IconButton(onClick = onExportClick, enabled = !isExporting) {
-                            Icon(Icons.Default.Save, contentDescription = "Save")
-                        }
-                    }
-                    if (isServiceActive || isPlaying) {
-                        IconButton(onClick = onStopClick) {
-                            Icon(Icons.Default.Close, contentDescription = "Stop")
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
                 )
-            )
+            }
         }
     ) { paddingValues ->
         Box(
@@ -331,13 +364,13 @@ fun PlaybackScreen(
                                     current = if (p in curParas) index else -1,
                                     fraction = if (p in curParas) currentFraction else -1f,
                                     onLayout = { layouts[p] = it },
-                                    onTap = { i -> playFrom(i) },
-                                    onLongPress = { i -> onSentenceLongClick(i) },
+                                    onTap = { i -> tapText(i) },
+                                    onLongPress = { i -> longFor = i },
                                     onWord = onWordDoubleTap
                                 )
                             }
                         }
-                        if (!followVoice) {
+                        if (!followVoice && speaking) {
                             ExtendedFloatingActionButton(
                                 onClick = { followVoice = true },
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
@@ -353,105 +386,151 @@ fun PlaybackScreen(
                             itemsIndexed(sentences) { i, sentence ->
                                 SentenceItem(text = sentence, isActive = i == currentIndex,
                                     spokenFraction = if (i == currentIndex) currentFraction else -1f, onClick = {
-                                    playFrom(i)
-                                }, onLongClick = { onSentenceLongClick(i) })
+                                    tapText(i)
+                                }, onLongClick = { longFor = i })
                             }
                         }
-                        if (!followVoice) {
+                        if (!followVoice && speaking) {
                             ExtendedFloatingActionButton(
                                 onClick = { followVoice = true },
                                 modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
                             ) { Text(stringResource(AppR.string.player_to_current)) }
                         }
                     } else {
-                        KaraokeText(sentences, index, onClick = { showList = true }, onLongClick = { onSentenceLongClick(index) },
-                            fraction = currentFraction)
+                        KaraokeText(sentences, index, onClick = { if (speaking) showList = true else chrome = !chrome },
+                            onLongClick = { longFor = index }, fraction = currentFraction)
+                    }
+                    // the bars hidden: only the place, small, in the corner (as Moon+ does)
+                    if (!speaking && !chrome) {
+                        Text(
+                            placeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 2.dp)
+                        )
                     }
                 }
 
-                // ---- progress and controls: one compact panel, as in a reader app ----
-                Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(horizontal = 12.dp).padding(top = 2.dp, bottom = 6.dp)) {
-                        var seeking by remember { mutableStateOf<Float?>(null) }
-                        val fraction = if (n > 1) index.toFloat() / (n - 1) else 0f
-                        val shown = (seeking?.let { Math.round(it * (n - 1)) } ?: index)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // ‹ › around the line: the chapter before / after, as in Moon+
-                            if (onPrevChapter != null) {
-                                IconButton(onClick = onPrevChapter, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                        contentDescription = stringResource(AppR.string.player_prev_chapter))
+                if (speaking || chrome) {
+                    // ---- the place and the buttons: one narrow panel ----
+                    Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(horizontal = 12.dp).padding(top = 2.dp, bottom = 6.dp)) {
+                            var seeking by remember { mutableStateOf<Float?>(null) }
+                            val fraction = if (n > 1) index.toFloat() / (n - 1) else 0f
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // ‹ › around the line: the chapter before / after, as in Moon+
+                                if (onPrevChapter != null) {
+                                    IconButton(onClick = onPrevChapter, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                            contentDescription = stringResource(AppR.string.player_prev_chapter))
+                                    }
+                                }
+                                if (speaking) {
+                                    Text(
+                                        "-" + formatTime(remainingSeconds),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Slider(
+                                    value = seeking ?: fraction,
+                                    onValueChange = { seeking = it },
+                                    onValueChangeFinished = {
+                                        seeking?.let { v ->
+                                            if (n > 1) {
+                                                val i = Math.round(v * (n - 1))
+                                                // reading: go on from there; not: just show that place
+                                                if (speaking) playFrom(i) else {
+                                                    followVoice = false
+                                                    onItemClickSilently(i, book, layouts, listState, scope)
+                                                }
+                                            }
+                                        }
+                                        seeking = null
+                                    },
+                                    enabled = n > 1,
+                                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                                )
+                                Text(
+                                    placeLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (onNextChapter != null) {
+                                    IconButton(onClick = onNextChapter, modifier = Modifier.size(36.dp)) {
+                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = stringResource(AppR.string.player_next_chapter))
+                                    }
                                 }
                             }
-                            Text(
-                                "-" + formatTime(remainingSeconds),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Slider(
-                                value = seeking ?: fraction,
-                                onValueChange = { seeking = it },
-                                onValueChangeFinished = {
-                                    seeking?.let { if (n > 1) playFrom(Math.round(it * (n - 1))) }
-                                    seeking = null
-                                },
-                                enabled = n > 1,
-                                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                            )
-                            Text(
-                                "${shown + 1}/$n",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (onNextChapter != null) {
-                                IconButton(onClick = onNextChapter, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                        contentDescription = stringResource(AppR.string.player_next_chapter))
-                                }
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            SpeedButton(sliderSpeed, onChange = { sliderSpeed = it }, onDone = { onSpeedChange(sliderSpeed) })
-                            SkipButton(
-                                icon = Icons.Default.SkipPrevious,
-                                description = stringResource(AppR.string.player_prev),
-                                enabled = index > 0,
-                                onClick = { playFrom((index - 1).coerceAtLeast(0)) },
-                                onLongClick = { playFrom((index - 5).coerceAtLeast(0)) }
-                            )
-                            FilledIconButton(
-                                onClick = {
-                                    if (!isPlaying && showList && !followVoice && n > 0) {
-                                        // scrolled by hand: start from the top phrase on screen
-                                        playFrom(topVisibleChunk())
-                                    } else onPlayPauseClick()
-                                },
-                                shape = CircleShape,
-                                modifier = Modifier.size(60.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    modifier = Modifier.size(34.dp)
-                                )
-                            }
-                            SkipButton(
-                                icon = Icons.Default.SkipNext,
-                                description = stringResource(AppR.string.player_next),
-                                enabled = index < n - 1,
-                                onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
-                                onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
-                            )
-                            SleepButton(sleepLeft, onSleepTimer)
-                            IconButton(onClick = { showList = !showList }) {
-                                Icon(
-                                    if (showList) Icons.Default.Subject else Icons.AutoMirrored.Filled.List,
-                                    contentDescription = stringResource(AppR.string.player_toggle_list)
-                                )
+                                if (speaking) {
+                                    // the voice: stop (stay with the text), phrase back, play/pause, phrase on, speed, sleep, more
+                                    IconButton(onClick = onStopReading) {
+                                        Icon(Icons.Default.Stop, contentDescription = stringResource(AppR.string.player_stop_reading))
+                                    }
+                                    SkipButton(
+                                        icon = Icons.Default.SkipPrevious,
+                                        description = stringResource(AppR.string.player_prev),
+                                        enabled = index > 0,
+                                        onClick = { playFrom((index - 1).coerceAtLeast(0)) },
+                                        onLongClick = { playFrom((index - 5).coerceAtLeast(0)) }
+                                    )
+                                    FilledIconButton(
+                                        onClick = {
+                                            if (!isPlaying && showList && !followVoice && n > 0) {
+                                                // scrolled by hand: start from the top phrase on screen
+                                                playFrom(topVisibleChunk())
+                                            } else onPlayPauseClick()
+                                        },
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(56.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = if (isPlaying) "Pause" else "Play",
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                    }
+                                    SkipButton(
+                                        icon = Icons.Default.SkipNext,
+                                        description = stringResource(AppR.string.player_next),
+                                        enabled = index < n - 1,
+                                        onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
+                                        onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
+                                    )
+                                    SpeedButton(sliderSpeed, onChange = { sliderSpeed = it }, onDone = { onSpeedChange(sliderSpeed) })
+                                    SleepButton(sleepLeft, onSleepTimer)
+                                    PlayerMoreMenu(
+                                        showList = showList, onToggleList = { showList = !showList },
+                                        onToc = onToc, onSearch = onSearch, onCharacters = onCharactersClick,
+                                        onExport = null, horizontal = true
+                                    )
+                                } else {
+                                    // the reader: read aloud, contents, search, characters, sleep timer
+                                    IconButton(onClick = startReading) {
+                                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = stringResource(AppR.string.player_read_aloud),
+                                            tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    if (onToc != null) {
+                                        IconButton(onClick = onToc) {
+                                            Icon(Icons.Default.Toc, contentDescription = stringResource(AppR.string.player_toc))
+                                        }
+                                    }
+                                    if (onSearch != null) {
+                                        IconButton(onClick = onSearch) {
+                                            Icon(Icons.Default.Search, contentDescription = stringResource(AppR.string.search_title))
+                                        }
+                                    }
+                                    IconButton(onClick = onCharactersClick) {
+                                        Icon(Icons.Default.People, contentDescription = stringResource(AppR.string.characters_title))
+                                    }
+                                    SleepButton(sleepLeft, onSleepTimer)
+                                }
                             }
                         }
                     }
@@ -522,6 +601,56 @@ fun PlaybackScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Shows phrase [i] at the top of the screen without reading it (the progress line while reading by eye). */
+private fun onItemClickSilently(
+    i: Int, book: BookPage?, layouts: Map<Int, TextLayoutResult>,
+    listState: androidx.compose.foundation.lazy.LazyListState, scope: kotlinx.coroutines.CoroutineScope
+) {
+    scope.launch {
+        if (book == null) { listState.scrollToItem(i); return@launch }
+        val r = book.ranges.getOrNull(i)
+        val p = r?.let { book.paraAt(it.first) } ?: book.paraOfChunk.getOrNull(i) ?: return@launch
+        val lay = layouts[p]
+        val y = if (r != null && lay != null) {
+            val len = lay.layoutInput.text.length
+            lay.getLineTop(lay.getLineForOffset((r.first - book.paragraphs[p].first).coerceIn(0, (len - 1).coerceAtLeast(0)))).toInt()
+        } else 0
+        listState.scrollToItem(p, y)
+    }
+}
+
+/**
+ * "More": contents, search, characters (when not on the panel), saving to an audio file, and the
+ * big-phrase view instead of the page.
+ */
+@Composable
+private fun PlayerMoreMenu(
+    showList: Boolean,
+    onToggleList: () -> Unit,
+    onToc: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
+    onCharacters: (() -> Unit)? = null,
+    onExport: (() -> Unit)?,
+    horizontal: Boolean = false
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(if (horizontal) Icons.Default.MoreHoriz else Icons.Default.MoreVert, contentDescription = stringResource(AppR.string.player_more))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            onToc?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.player_toc)) }, onClick = { open = false; f() }) }
+            onSearch?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.search_title)) }, onClick = { open = false; f() }) }
+            onCharacters?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.characters_title)) }, onClick = { open = false; f() }) }
+            onExport?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.player_save_audio)) }, onClick = { open = false; f() }) }
+            DropdownMenuItem(
+                text = { Text(stringResource(if (showList) AppR.string.player_view_phrase else AppR.string.player_view_page)) },
+                onClick = { open = false; onToggleList() }
+            )
         }
     }
 }

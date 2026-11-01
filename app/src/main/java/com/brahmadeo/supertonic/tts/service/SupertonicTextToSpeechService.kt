@@ -538,6 +538,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 // latency the next utterance will add anyway)
                 if (index == units.lastIndex) toSynthesize += "\u2063"
 
+                // a reading paused in the app holds the engine: it lets it go now
+                SupertonicTTS.requestEngine()
                 // a slow voice (made from a recording) as fast as the others — as in the app's player
                 SupertonicTTS.generateAudio(
                     toSynthesize, requestedLang, stylePath,
