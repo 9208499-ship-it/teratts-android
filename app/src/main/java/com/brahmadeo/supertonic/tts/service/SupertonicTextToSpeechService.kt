@@ -127,29 +127,46 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         return onIsLanguageAvailable(lang, country, variant)
     }
 
+    /**
+     * The voice file for a voice name a reader asks for ("ru_m5", "my_Папа"; older names may carry
+     * .json or .wav): in the chosen model's form first — a recording (.wav) for Shtorm, a voice file
+     * (.json) for TeraTTS. Shtorm voices used to be looked up as "my_Папа.wav.json" and were never found.
+     */
+    private fun voiceFileFor(name: String): String {
+        val stem = File(name).name.removeSuffix(".json").removeSuffix(".wav")
+        val dir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
+        val ext = AssetManager.voiceExtension(this)
+        return listOf("$stem$ext", "$stem.json", "$stem.wav").firstOrNull { File(dir, it).isFile } ?: "$stem$ext"
+    }
+
     override fun onLoadVoice(voiceName: String?): Int {
         if (voiceName == null) return TextToSpeech.ERROR
         if (!voiceName.contains("-supertonic-")) return TextToSpeech.ERROR
-        val styleName = voiceName.substringAfter("-supertonic-")
-        val file = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles/$styleName.json")
+        val file = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles/" + voiceFileFor(voiceName.substringAfter("-supertonic-")))
         return if (file.exists()) TextToSpeech.SUCCESS else TextToSpeech.ERROR
     }
 
     override fun onGetDefaultVoiceNameFor(lang: String?, country: String?, variant: String?): String {
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
         val selected = prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
-        val voiceName = if (selected.endsWith(".json")) selected.substringBeforeLast(".") else selected
+        val voiceName = selected.removeSuffix(".json").removeSuffix(".wav")
         val prefix = normalizeLanguage(lang)
         return "$prefix-supertonic-$voiceName"
     }
 
     override fun onGetVoices(): List<Voice> {
         val voicesList = mutableListOf<Voice>()
-        // built-in voices first, then anything else in the voice folder (custom voices like my_voice.json)
+        // the voices of the chosen model: TeraTTS — bundled ones first, then anything else in the
+        // voice folder (custom voices like my_voice.json); Shtorm — the recordings (.wav), without
+        // the bundled ones that are not ticked
         val styleDir = File(filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
-        val onDisk = styleDir.listFiles { _, n -> n.endsWith(".json") }
-            ?.map { it.name.removeSuffix(".json") }?.sorted() ?: emptyList()
-        val voiceNames = (AssetManager.VOICES + AssetManager.SUPERTONIC_VOICES.map { "st3_$it" } + onDisk).distinct()
+        val ext = AssetManager.voiceExtension(this)
+        val onDisk = styleDir.listFiles { _, n -> n.endsWith(ext) }
+            ?.map { it.name }?.filter { !com.brahmadeo.supertonic.tts.utils.ShtormVoices.isOff(this, it) }
+            ?.map { it.removeSuffix(ext) }?.sorted() ?: emptyList()
+        val voiceNames = if (ext == ".json")
+            (AssetManager.VOICES + AssetManager.SUPERTONIC_VOICES.map { "st3_$it" } + onDisk).distinct()
+        else onDisk.ifEmpty { listOf(AssetManager.SHTORM_DEFAULT_VOICE.removeSuffix(".wav")) }
         if (!AssetManager.isReady(this)) return voicesList
 
         ANDROID_LOCALE_TRIPLES.forEach { (twoLetter, _, _) ->
@@ -420,9 +437,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         val prefs = attributionContext.getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
 
         val voiceFile = if (requestedVoice != null && requestedVoice.contains("-supertonic-")) {
-            val fileName = requestedVoice.substringAfter("-supertonic-")
-            // Sanitize fileName to prevent path traversal
-            File(fileName).name + ".json"
+            // the file name is sanitized there (File.name: no path traversal)
+            voiceFileFor(requestedVoice.substringAfter("-supertonic-"))
         } else {
             prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"
         }
