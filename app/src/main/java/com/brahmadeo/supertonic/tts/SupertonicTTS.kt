@@ -27,6 +27,7 @@ object SupertonicTTS {
     private external fun setPauseScale(scale: Float)
     private external fun setNoiseScale(scale: Float)
     private external fun setPocketTemperature(value: Float)
+    private external fun setPocketBrightness(value: Float)
     private external fun setVoiceRhythm(table: String)
     private external fun setCommaQuotes(on: Boolean)
     @Volatile private var rhythmAvailable = true
@@ -220,6 +221,7 @@ object SupertonicTTS {
                     setVoiceRhythm(com.brahmadeo.supertonic.tts.utils.VoiceRhythm.table)
                     setCommaQuotes(com.brahmadeo.supertonic.tts.utils.AssetManager.commaQuotes)
                     setPocketTemperature(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness)
+                    setPocketBrightness(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormBrightness)
                 }
                 catch (e: UnsatisfiedLinkError) { rhythmAvailable = false }
             }

@@ -52,6 +52,10 @@ object PunctuationPrefs {
     @Volatile var shtormLiveliness: Float = 0.3f
         private set
 
+    /** Shtorm's brightness: dB added above 3 kHz (0 … 12, default 8 — its codec softens the highs). */
+    @Volatile var shtormBrightness: Float = 8f
+        private set
+
     @Volatile var tightQuestionExclamation: Boolean = false
         private set
     @Volatile var strengthenIntonation: Boolean = false
@@ -78,6 +82,7 @@ object PunctuationPrefs {
         pauseScale = p.getFloat(KEY_PAUSE_SCALE, 1.0f)
         noiseScale = p.getFloat("noise_scale", 0.667f)
         shtormLiveliness = p.getFloat("shtorm_liveliness", 0.3f)
+        shtormBrightness = p.getFloat("shtorm_brightness", 8f)
         paragraphPause = p.getFloat(KEY_PARAGRAPH_PAUSE, 0.9f)
         // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
         // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
@@ -129,6 +134,13 @@ object PunctuationPrefs {
         shtormLiveliness = value.coerceIn(0.1f, 0.7f)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putFloat("shtorm_liveliness", shtormLiveliness)
+            .apply()
+    }
+
+    fun setShtormBrightness(context: Context, value: Float) {
+        shtormBrightness = value.coerceIn(0f, 12f)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putFloat("shtorm_brightness", shtormBrightness)
             .apply()
     }
 

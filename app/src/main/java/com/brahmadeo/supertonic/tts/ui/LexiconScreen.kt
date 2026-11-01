@@ -656,6 +656,7 @@ private fun EngineSection() {
     var ready by remember { mutableStateOf(assets.shtormReady(context)) }
     var needsInt8 by remember { mutableStateOf(assets.shtormNeedsInt8(context)) }
     var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
+    var brightness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormBrightness) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
     var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
@@ -767,6 +768,27 @@ private fun EngineSection() {
                 liveliness = 0.3f
                 com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormLiveliness(context, 0.3f)
             }, enabled = liveliness != 0.3f) { Text(stringResource(AppR.string.shtorm_liveliness_reset)) }
+            // brightness: the highs Shtorm's codec softens, given back (from the next phrase)
+            Text(stringResource(AppR.string.shtorm_brightness_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(AppR.string.shtorm_brightness_desc, brightness.toInt()),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(AppR.string.shtorm_brightness_soft), style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = brightness,
+                    onValueChange = { brightness = Math.round(it).toFloat() },
+                    onValueChangeFinished = { com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormBrightness(context, brightness) },
+                    valueRange = 0f..12f,
+                    steps = 11,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                )
+                Text(stringResource(AppR.string.shtorm_brightness_bright), style = MaterialTheme.typography.labelSmall)
+            }
+            TextButton(onClick = {
+                brightness = 8f
+                com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormBrightness(context, 8f)
+            }, enabled = brightness != 8f) { Text(stringResource(AppR.string.shtorm_brightness_reset)) }
         }
         progress?.let { p ->
             Text(stringResource(AppR.string.engine_downloading, (p * 100).toInt()), style = MaterialTheme.typography.bodySmall)

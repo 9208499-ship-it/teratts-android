@@ -99,7 +99,7 @@ object VoiceImport {
                         out.write(bytes)
                         codec.releaseOutputBuffer(o, false)
                         if (info.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
-                        if (out.size() > rate * channels * 4 * 40) break // 40 s is plenty
+                        if (out.size() > rate * channels * 4 * 120) break // 2 min: start, middle and end to choose from
                     }
                 }
             } finally {
@@ -110,17 +110,36 @@ object VoiceImport {
                 else FloatArray(raw.remaining() / 2) { raw.short / 32768f }
             val ch = channels.coerceAtLeast(1)
             val mono = FloatArray(samples.size / ch) { i -> var a = 0f; for (c in 0 until ch) a += samples[i * ch + c]; a / ch }
-            if (rate == RATE) return mono
-            // linear resampling is enough for a voice sample
-            val n = (mono.size.toLong() * RATE / rate).toInt()
-            return FloatArray(n) { i ->
-                val t = i.toDouble() * rate / RATE
-                val k = t.toInt().coerceAtMost(mono.size - 1)
-                val f = (t - k).toFloat()
-                mono[k] * (1 - f) + mono[(k + 1).coerceAtMost(mono.size - 1)] * f
-            }
+            // a proper resampler: the straight-line one used before dulled the highs and let what
+            // lies above 12 kHz fold back as hiss — and Shtorm copies the sample's sound as it is
+            return resample(mono, rate, RATE)
         } finally {
             ex.release()
+        }
+    }
+
+    /** Band-limited (windowed-sinc) resampling, as the engine does it. */
+    private fun resample(x: FloatArray, from: Int, to: Int): FloatArray {
+        if (from == to || x.isEmpty()) return x
+        val ratio = to.toDouble() / from
+        val cutoff = minOf(ratio, 1.0) * 0.95
+        val half = 16
+        val span = Math.ceil(half / cutoff).toInt()
+        val nOut = Math.round(x.size * ratio).toInt()
+        return FloatArray(nOut) { n ->
+            val t = n / ratio
+            val c = Math.floor(t).toInt()
+            var acc = 0.0
+            var norm = 0.0
+            for (k in (c - span + 1)..(c + span)) {
+                val arg = (t - k) * cutoff
+                if (Math.abs(arg) >= half) continue
+                val sinc = if (Math.abs(arg) < 1e-9) 1.0 else Math.sin(Math.PI * arg) / (Math.PI * arg)
+                val h = sinc * (0.5 + 0.5 * Math.cos(Math.PI * arg / half))
+                norm += h
+                if (k >= 0 && k < x.size) acc += x[k] * h
+            }
+            if (Math.abs(norm) > 1e-9) (acc / norm).toFloat() else 0f
         }
     }
 

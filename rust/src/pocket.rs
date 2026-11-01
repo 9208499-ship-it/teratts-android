@@ -39,6 +39,46 @@ pub fn temperature() -> f32 {
     f32::from_bits(TEMPERATURE_BITS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// Brightness from the settings slider: dB added above ~3 kHz. Shtorm's codec (24 kHz) softens the
+/// highs, and an own voice came out "глуховато"; +8 dB gave it back its clarity (tolyos, by ear).
+static BRIGHTNESS_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x4100_0000); // 8.0
+
+pub fn set_brightness(db: f32) {
+    let v = if db.is_finite() { db.clamp(0.0, 12.0) } else { 8.0 };
+    BRIGHTNESS_BITS.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn brightness() -> f32 {
+    f32::from_bits(BRIGHTNESS_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// A high shelf (RBJ cookbook, S = 1): [gain_db] above [f0] Hz, the lows as they are.
+pub fn high_shelf(x: &mut [f32], gain_db: f32, f0: f32, fs: f32) {
+    if gain_db.abs() < 0.05 || x.is_empty() { return; }
+    let a = 10f64.powf(gain_db as f64 / 40.0);
+    let w0 = 2.0 * std::f64::consts::PI * f0 as f64 / fs as f64;
+    let (cw, sw) = (w0.cos(), w0.sin());
+    let alpha = sw / 2.0 * 2f64.sqrt();
+    let sa = 2.0 * a.sqrt() * alpha;
+    let b0 = a * ((a + 1.0) + (a - 1.0) * cw + sa);
+    let b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cw);
+    let b2 = a * ((a + 1.0) + (a - 1.0) * cw - sa);
+    let a0 = (a + 1.0) - (a - 1.0) * cw + sa;
+    let a1 = 2.0 * ((a - 1.0) - (a + 1.0) * cw);
+    let a2 = (a + 1.0) - (a - 1.0) * cw - sa;
+    let (b0, b1, b2, a1, a2) = (b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0);
+    let (mut x1, mut x2, mut y1, mut y2) = (0f64, 0f64, 0f64, 0f64);
+    for v in x.iter_mut() {
+        let xi = *v as f64;
+        let y = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1; x1 = xi; y2 = y1; y1 = y;
+        *v = y as f32;
+    }
+    // the lifted highs must not clip: a phrase whose peaks went over is brought down as a whole
+    let peak = x.iter().fold(0f32, |m, v| m.max(v.abs()));
+    if peak > 0.98 { let k = 0.98 / peak; for v in x.iter_mut() { *v *= k; } }
+}
+
 // ---- SentencePiece BPE ----------------------------------------------------------------------
 
 /// SentencePiece BPE (model type 2) as `spm.encode` does it: NFKC, spaces as '▁' with one in
@@ -470,6 +510,27 @@ mod tests {
         assert_eq!(speech_limit_frames("Она открыла окно посмотрела на улицу и тихо вздохнула."), 74);
         assert_eq!(speech_limit_frames("        Ну?"), speech_limit_frames("Ну?"));
         assert_eq!(speech_limit_frames("Он у\u{301}шёл."), speech_limit_frames("Он ушёл."));
+    }
+
+    #[test]
+    fn high_shelf_lifts_the_highs_only() {
+        let fs = 24_000f32;
+        // quiet tones (0.1): the lifted 9 kHz one stays below the clip guard
+        let tone = |f: f32| -> Vec<f32> { (0..fs as usize).map(|i| 0.1 * (2.0 * std::f32::consts::PI * f * i as f32 / fs).sin()).collect() };
+        let rms = |x: &[f32]| -> f32 { let t = &x[4000..]; 10.0 * (t.iter().map(|v| v * v).sum::<f32>() / t.len() as f32).sqrt() * 2f32.sqrt() };
+        let mut low = tone(200.0);
+        high_shelf(&mut low, 8.0, 3000.0, fs);
+        assert!((rms(&low) - 1.0).abs() < 0.05, "200 Hz kept: {}", rms(&low));
+        let mut high = tone(9000.0);
+        high_shelf(&mut high, 8.0, 3000.0, fs);
+        let db = 20.0 * rms(&high).log10();
+        assert!((db - 8.0).abs() < 1.0, "9 kHz lifted by 8 dB: {db}");
+        // a loud one is brought down as a whole, not clipped
+        let mut loud: Vec<f32> = tone(9000.0).iter().map(|v| v * 9.0).collect();
+        high_shelf(&mut loud, 8.0, 3000.0, fs);
+        assert!(loud.iter().all(|v| v.abs() <= 0.981));
+        set_brightness(f32::NAN);
+        assert_eq!(brightness(), 8.0);
     }
 
     #[test]

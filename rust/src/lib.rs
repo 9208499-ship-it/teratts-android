@@ -22,6 +22,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseS
     crate::tera::set_noise_scale(scale);
 }
 
+/// Shtorm's brightness: dB added above 3 kHz (settings slider).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketBrightness(
+    _env: JNIEnv,
+    _class: JClass,
+    value: jfloat,
+) {
+    crate::pocket::set_brightness(value);
+}
+
 /// Shtorm's liveliness: the noise of each frame (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketTemperature(

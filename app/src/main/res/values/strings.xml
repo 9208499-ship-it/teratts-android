@@ -394,6 +394,11 @@
     <string name="shtorm_liveliness_title">Shtorm liveliness</string>
     <string name="shtorm_liveliness_desc">Left: steadier and calmer, fewer slips. Right: livelier and more expressive, but it stumbles more. Now %1$s, usually 0.30</string>
     <string name="shtorm_liveliness_reset">Back to usual (0.30)</string>
+    <string name="shtorm_brightness_title">Shtorm brightness</string>
+    <string name="shtorm_brightness_desc">The model softens the high frequencies a little and the voice sounds muffled. The slider gives the clarity back: now +%1$d dB, usually +8</string>
+    <string name="shtorm_brightness_soft">softer</string>
+    <string name="shtorm_brightness_bright">brighter</string>
+    <string name="shtorm_brightness_reset">Back to usual (+8 dB)</string>
     <string name="voice_check_title">Voice %1$s</string>
     <string name="voice_check_desc">Listen to how it reads. If you don\'t like it, take another piece of the recording: the voice is remade at once.</string>
     <string name="voice_check_need_shtorm">A voice from a recording is read by the Shtorm model: you can listen to it when Shtorm is chosen.</string>

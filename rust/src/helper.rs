@@ -716,7 +716,9 @@ impl TextToSpeech {
             let voice = self.voice_path.clone();
             let pocket = self.pocket.as_mut().ok_or_else(|| anyhow::anyhow!("Shtorm not loaded"))?;
             pocket.temperature = crate::pocket::temperature();
-            let raw = pocket.say(&text, &voice)?;
+            let mut raw = pocket.say(&text, &voice)?;
+            // brightness: Shtorm's codec softens the highs (settings slider, dB above 3 kHz)
+            crate::pocket::high_shelf(&mut raw, crate::pocket::brightness(), 3000.0, crate::pocket::POCKET_RATE as f32);
             let wav = crate::pocket::resample(&raw, crate::pocket::POCKET_RATE, tera::SAMPLE_RATE as u32);
             let mut wav = tera::trim_edges(&wav, 0.02, 0.10);
             tera::fade_out(&mut wav);

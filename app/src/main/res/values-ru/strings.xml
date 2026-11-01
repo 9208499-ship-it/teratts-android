@@ -394,6 +394,11 @@
     <string name="shtorm_liveliness_title">Живость Shtorm</string>
     <string name="shtorm_liveliness_desc">Влево — ровнее и спокойнее, меньше оговорок. Вправо — живее и выразительнее, но чаще запинается. Сейчас %1$s, обычно 0,30</string>
     <string name="shtorm_liveliness_reset">Вернуть обычную (0,30)</string>
+    <string name="shtorm_brightness_title">Яркость Shtorm</string>
+    <string name="shtorm_brightness_desc">Модель немного смягчает верхние частоты, голос звучит глуховато. Ползунок возвращает чёткость: сейчас +%1$d дБ, обычно +8</string>
+    <string name="shtorm_brightness_soft">мягче</string>
+    <string name="shtorm_brightness_bright">ярче</string>
+    <string name="shtorm_brightness_reset">Вернуть обычную (+8 дБ)</string>
     <string name="voice_check_title">Голос %1$s</string>
     <string name="voice_check_desc">Послушайте, как он читает. Не нравится — возьмите другой кусок записи, голос переделается сразу.</string>
     <string name="voice_check_need_shtorm">Голос из записи читает модель Shtorm — послушать его можно, когда она выбрана.</string>
