@@ -314,18 +314,34 @@ fun MainScreen(
                             onOptionSelected = { name -> onLangChange(languages[name] ?: "en") }
                         )
 
+                        val ctx = androidx.compose.ui.platform.LocalContext.current
+                        val shtormVoices = com.brahmadeo.supertonic.tts.utils.ShtormVoices
                         DropdownSelector(
                             label = stringResource(AppR.string.voice_style_label),
                             options = voices.keys.toList().sorted(),
                             selectedOption = voices.entries.find { it.value == selectedVoiceFile }?.key ?: "",
-                            onOptionSelected = { name -> onVoiceChange(voices[name] ?: "ru_f1.json") },
-                            // ✕ next to every voice but the one in use
-                            deletable = { name -> voices[name] != null && voices[name] != selectedVoiceFile && voices.size > 1 },
+                            onOptionSelected = { name ->
+                                val file = voices[name] ?: "ru_f1.json"
+                                // a grey (unticked) Shtorm voice chosen as the main one: it is in use now
+                                if (shtormVoices.isOff(ctx, file)) shtormVoices.setOn(ctx, file, true)
+                                onVoiceChange(file)
+                            },
+                            // ✕ next to every voice but the one in use (Shtorm's bundled ones have a tick instead)
+                            deletable = { name -> voices[name] != null && voices[name] != selectedVoiceFile && voices.size > 1 &&
+                                !shtormVoices.bundled(voices[name] ?: "") },
                             onDelete = { name -> voices[name]?.let(onVoiceDelete) },
+                            // Shtorm: the bundled recordings (made by TeraTTS) are grey until ticked
+                            dimmed = { name -> voices[name]?.let { shtormVoices.isOff(ctx, it) } == true },
+                            dimmedNote = stringResource(AppR.string.voice_off_note),
+                            checkable = { name -> voices[name]?.let { shtormVoices.bundled(it) } == true },
+                            checked = { name -> voices[name]?.let { !shtormVoices.isOff(ctx, it) } == true },
+                            checkEnabled = { name -> voices[name] != selectedVoiceFile },
+                            onCheck = { name, on -> voices[name]?.let { shtormVoices.setOn(ctx, it, on) } },
                             footer = if (hiddenVoiceCount > 0) stringResource(AppR.string.voice_restore, hiddenVoiceCount) else null,
                             onFooter = onRestoreVoices
                         )
                         VoiceRhythmSelector(selectedVoiceFile)
+                        VoiceGenderSelector(selectedVoiceFile)
 
                         // voice mixing is not offered: with reading by roles every character has
                         // a voice of its own, and a mixed narrator only confused things
@@ -544,6 +560,30 @@ private fun VoiceRhythmSelector(voiceFile: String) {
     }
 }
 
+/** Gender of an own voice (my_…): without it the voice is not given to characters in reading by roles. */
+@Composable
+private fun VoiceGenderSelector(voiceFile: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (voiceFile.isEmpty() || com.brahmadeo.supertonic.tts.utils.RolePrefs.isBundled(voiceFile)) return
+    val genders = com.brahmadeo.supertonic.tts.utils.VoiceGender
+    var g by remember(voiceFile) { mutableStateOf(genders.get(context, voiceFile)) }
+    val names = listOf("" to stringResource(AppR.string.voice_gender_none), "m" to stringResource(AppR.string.voice_gender_m),
+        "f" to stringResource(AppR.string.voice_gender_f))
+    Column {
+        DropdownSelector(
+            label = stringResource(AppR.string.voice_gender_label),
+            options = names.map { it.second },
+            selectedOption = names.firstOrNull { it.first == g }?.second ?: names[0].second,
+            onOptionSelected = { label ->
+                g = names.firstOrNull { it.second == label }?.first ?: ""
+                genders.set(context, voiceFile, g)
+            }
+        )
+        Text(stringResource(AppR.string.voice_gender_desc), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
 @Composable
 fun DropdownSelector(
     label: String,
@@ -554,10 +594,16 @@ fun DropdownSelector(
     onDelete: (String) -> Unit = {},
     dimmed: (String) -> Boolean = { false },
     dimmedNote: String = "",
+    checkable: (String) -> Boolean = { false },
+    checked: (String) -> Boolean = { false },
+    checkEnabled: (String) -> Boolean = { true },
+    onCheck: (String, Boolean) -> Unit = { _, _ -> },
     footer: String? = null,
     onFooter: () -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    // bumped by a tick: the items read it, so they are drawn again with the new state
+    var ticks by remember { mutableIntStateOf(0) }
     var confirm by remember { mutableStateOf<String?>(null) }
     confirm?.let { name ->
         AlertDialog(
@@ -590,6 +636,7 @@ fun DropdownSelector(
             options.forEach { option ->
                 DropdownMenuItem(
                     text = {
+                        ticks
                         if (dimmed(option)) Text("$option $dimmedNote",
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                         else Text(option)
@@ -598,7 +645,16 @@ fun DropdownSelector(
                         onOptionSelected(option)
                         expanded = false
                     },
-                    trailingIcon = if (deletable(option)) {
+                    trailingIcon = if (checkable(option)) {
+                        {
+                            ticks
+                            Checkbox(
+                                checked = checked(option),
+                                enabled = checkEnabled(option),
+                                onCheckedChange = { on -> onCheck(option, on); ticks++ }
+                            )
+                        }
+                    } else if (deletable(option)) {
                         {
                             IconButton(onClick = { expanded = false; confirm = option }) {
                                 Icon(androidx.compose.material.icons.Icons.Filled.Close,

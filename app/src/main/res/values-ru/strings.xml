@@ -404,6 +404,12 @@
     <string name="voice_check_play">Ещё раз</string>
     <string name="voice_check_done">Готово</string>
     <string name="voice_check_delete">Удалить</string>
+    <string name="voice_off_note">— не используется, отметьте ✓</string>
+    <string name="voice_gender_label">Пол голоса (для чтения по ролям)</string>
+    <string name="voice_gender_none">Не указан</string>
+    <string name="voice_gender_m">Мужской</string>
+    <string name="voice_gender_f">Женский</string>
+    <string name="voice_gender_desc">Свой голос с указанным полом раздаётся персонажам этого пола — раньше встроенных.</string>
     <string name="engine_downloading">Скачивание: %1$d %%</string>
     <string name="engine_download_failed">Не скачалось: %1$s. Проверьте интернет и нажмите ещё раз — скачанное не потеряется</string>
     <string name="voice_rhythm_label">Починка голоса для TeraTTS (если пропускает слова)</string>

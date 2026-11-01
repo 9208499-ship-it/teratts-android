@@ -23,11 +23,15 @@ object CharacterVoices {
     private fun prefs(context: Context, base: String, scope: String) =
         context.getSharedPreferences(name(base, scope), Context.MODE_PRIVATE)
 
-    private fun isMale(v: String) = Regex("""(^|_)m\d""").containsMatchIn(v) || v.startsWith("st3_M")
-    private fun isFemale(v: String) = Regex("""(^|_)f\d""").containsMatchIn(v) || v.startsWith("st3_F")
-    // Russian voices first, then TeraTTS's English ones (multilingual: they read Russian
-    // without an accent), then Supertonic's; own voices (no m/f in the name) are not handed out
+    // bundled voices carry the gender in the name (ru_m5, ru_f1); own ones get it by hand (VoiceGender)
+    private fun isMale(v: String) = VoiceGender.of(v)?.let { it == "m" }
+        ?: (Regex("""(^|_)m\d""").containsMatchIn(v) || v.startsWith("st3_M"))
+    private fun isFemale(v: String) = VoiceGender.of(v)?.let { it == "f" }
+        ?: (Regex("""(^|_)f\d""").containsMatchIn(v) || v.startsWith("st3_F"))
+    // the user's own voices first (with a gender set), then the Russian ones, then TeraTTS's
+    // English ones (multilingual: they read Russian without an accent), then Supertonic's
     private fun rank(v: String) = when {
+        !RolePrefs.isBundled(v) -> -1
         v.startsWith("ru_") -> 0
         v.startsWith("eng_") -> 1
         v.startsWith("st3_") -> 2

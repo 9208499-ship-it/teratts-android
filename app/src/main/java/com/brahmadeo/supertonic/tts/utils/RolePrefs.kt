@@ -73,10 +73,12 @@ object RolePrefs {
 
     /** All installed voice files, sorted — without the ones the user removed from the list. */
     fun availableVoices(context: Context): List<String> {
+        VoiceGender.load(context)
         val hidden = hiddenVoices(context)
         val ext = AssetManager.voiceExtension(context)
+        // Shtorm: the bundled recordings that are not ticked are not offered either
         return voicesDir(context).listFiles { _, n -> n.endsWith(ext) }?.map { it.name }
-            ?.filter { it !in hidden }?.sorted() ?: emptyList()
+            ?.filter { it !in hidden && !ShtormVoices.isOff(context, it) }?.sorted() ?: emptyList()
     }
 
     /** Bundled voices the user removed from the list (✕): they are not offered and not given to characters. */
@@ -86,12 +88,15 @@ object RolePrefs {
     private fun bundled(file: String) =
         file.startsWith("ru_") || file.startsWith("eng_") || file.startsWith("st3_") || file.startsWith("lib_")
 
+    /** One of the voices that come with the app (not imported by the user). */
+    fun isBundled(file: String) = bundled(file)
+
     /**
      * Removes a voice from the lists. One of the user's own (imported) voices is deleted; a bundled
      * one is only hidden — its file would be put back on the next start — and can be returned.
      */
     fun removeVoice(context: Context, file: String) {
-        if (!bundled(file)) { File(voicesDir(context), file).delete(); return }
+        if (!bundled(file)) { File(voicesDir(context), file).delete(); VoiceGender.set(context, file, ""); return }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putStringSet(KEY_HIDDEN, hiddenVoices(context) + file).apply()
     }
@@ -100,7 +105,27 @@ object RolePrefs {
     fun restoreVoices(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_HIDDEN).apply()
 
-    /** Absolute style path for a voice file, or null if it is not installed. */
+    /** Absolute style path for a voice file (in the running model's form, see [forEngine]), or null if it is not installed. */
     fun pathOf(context: Context, file: String): String? =
-        File(voicesDir(context), file).takeIf { it.exists() }?.absolutePath
+        File(voicesDir(context), forEngine(context, file)).takeIf { it.exists() }?.absolutePath
+
+    /**
+     * [file] as the chosen model has it (ru_m5.json ↔ ru_m5.wav). A voice the model has not got, or
+     * a bundled Shtorm recording that is not ticked, gives way to an available voice of the same
+     * gender (own voices first) — so roles set up for TeraTTS keep their gender with Shtorm.
+     */
+    fun forEngine(context: Context, file: String): String {
+        if (file.isEmpty()) return file
+        val dir = voicesDir(context)
+        val ext = AssetManager.voiceExtension(context)
+        val same = if (file.endsWith(ext)) file else file.substringBeforeLast('.') + ext
+        if (File(dir, same).exists() && !ShtormVoices.isOff(context, same)) return same
+        VoiceGender.load(context)
+        val female = CharacterVoices.isFemaleVoice(file)
+        val male = CharacterVoices.isMaleVoice(file)
+        val pool = availableVoices(context).filter { !it.contains("whisper") }
+        val pick = pool.filter { (!female && !male) || (female && CharacterVoices.isFemaleVoice(it)) || (male && CharacterVoices.isMaleVoice(it)) }
+            .sortedBy { if (bundled(it)) 1 else 0 }.firstOrNull() ?: pool.firstOrNull()
+        return pick ?: if (File(dir, same).exists()) same else file
+    }
 }

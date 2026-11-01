@@ -404,6 +404,12 @@
     <string name="voice_check_play">Again</string>
     <string name="voice_check_done">Done</string>
     <string name="voice_check_delete">Delete</string>
+    <string name="voice_off_note">— not used, tick it ✓</string>
+    <string name="voice_gender_label">Voice gender (for reading by roles)</string>
+    <string name="voice_gender_none">Not set</string>
+    <string name="voice_gender_m">Male</string>
+    <string name="voice_gender_f">Female</string>
+    <string name="voice_gender_desc">An own voice with its gender set is given to characters of that gender, before the bundled ones.</string>
     <string name="engine_downloading">Downloading: %1$d %%</string>
     <string name="engine_download_failed">Download failed: %1$s. Check the connection and tap again — what is downloaded is kept</string>
     <string name="voice_rhythm_label">Voice repair for TeraTTS (if it skips words)</string>

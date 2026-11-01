@@ -890,6 +890,7 @@ private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
     remember { if (engineShown.value.isEmpty()) engineShown.value = assets.engine(context); 0 }
     var engine by engineShown
     var part by remember { mutableStateOf(vi.PART_START) }
+    var gender by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceGender.get(context, name)) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val label = name.removeSuffix(".wav")
@@ -947,6 +948,22 @@ private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
                                 label = { Text(title) }
                             )
                         }
+                    }
+                }
+                // the gender: without it the voice is not given to characters (reading by roles)
+                Text(stringResource(AppR.string.voice_gender_label), style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((g, title) in listOf("m" to stringResource(AppR.string.voice_gender_m),
+                            "f" to stringResource(AppR.string.voice_gender_f))) {
+                        FilterChip(
+                            selected = gender == g,
+                            onClick = {
+                                gender = if (gender == g) "" else g
+                                com.brahmadeo.supertonic.tts.utils.VoiceGender.set(context, name, gender)
+                            },
+                            label = { Text(title) }
+                        )
                     }
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

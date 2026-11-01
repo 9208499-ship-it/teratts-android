@@ -207,7 +207,7 @@ object VoiceImport {
     /** Removes an imported voice (it did not come out well). */
     fun delete(context: Context, name: String) {
         File(dir(context), name).delete()
-        VoiceLoudness.forget(context, name); VoiceTempo.forget(context, name)
+        VoiceLoudness.forget(context, name); VoiceTempo.forget(context, name); VoiceGender.set(context, name, "")
         if (last?.second?.name == name) last = null
     }
 
@@ -227,7 +227,7 @@ object VoiceImport {
             val f = target(context, audio.first, ".wav")
             writeWav(f, clip)
             // a voice of the same name may have been deleted: what was measured for it does not apply
-            VoiceLoudness.forget(context, f.name); VoiceTempo.forget(context, f.name)
+            VoiceLoudness.forget(context, f.name); VoiceTempo.forget(context, f.name); VoiceGender.set(context, f.name, "")
             last = x to f
             return f.name
         }

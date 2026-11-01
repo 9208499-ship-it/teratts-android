@@ -249,6 +249,13 @@ pub struct Pocket {
     pub eos_threshold: f32,
 }
 
+/// The frames a phrase may take when read normally: its letters at 11 a second (book prose is
+/// read at 13–25) plus a second, 12.5 frames a second.
+fn speech_limit_frames(prepared: &str) -> usize {
+    let letters = prepared.trim().chars().filter(|&c| c != '\u{301}').count();
+    ((letters as f32 / 11.0 + 1.0) * 12.5).ceil() as usize
+}
+
 /// Is [dir] a Shtorm model folder?
 pub fn is_pocket_dir(dir: &str) -> bool {
     Path::new(dir).join("flow_lm_main.onnx").exists()
@@ -330,23 +337,54 @@ impl Pocket {
         let cond_voice = self.voice(voice)?;
         // at most what the text could need (upstream: 3 tokens a second + 2 s), 12.5 frames a second
         let max_frames = (((n as f32 / 3.0) + 2.0) * 12.5).ceil() as usize;
+        let limit = speech_limit_frames(&prepared).min(max_frames);
 
-        self.main_states.reset()?;
+        // Now and then the end-of-speech signal comes close but does not cross the threshold:
+        // the model then fills the time left by repeating the last words. Read normally, a phrase
+        // ends well before [limit] (book prose: 13–25 letters a second); if it has not, it is
+        // said again with other noise — that one almost always ends. The second try is taken
+        // as it is (no worse than before).
+        let mut latents = Vec::new();
+        for attempt in 0..2 {
+            let cap = if attempt == 0 { limit + eos_extra + 1 } else { max_frames };
+            let (l, ended) = self.generate(&cond_voice, &emb, n, cap, eos_extra)?;
+            latents = l;
+            if ended { break; }
+            if attempt == 0 {
+                log::info!("Shtorm: no end of speech in {:.1} s, saying it again: {}", limit as f32 / 12.5,
+                    text.chars().take(60).collect::<String>());
+            }
+        }
+        // the decoder, 15 frames at a time (as the streaming runtime does)
         self.decoder_states.reset()?;
+        let frames = latents.len() / 32;
+        let mut audio = Vec::with_capacity(frames * 1920);
+        for start in (0..frames).step_by(15) {
+            let k = (frames - start).min(15);
+            let chunk = latents[start * 32..(start + k) * 32].to_vec();
+            let out = self.decoder_states.run(&mut self.decoder, vec![("latent".into(), f32_tensor(vec![1, k, 32], chunk)?)])?;
+            audio.extend_from_slice(&out[0]);
+        }
+        Ok(audio)
+    }
+
+    /// The latent frames of one try, at most [cap]; true if the model ended the speech itself.
+    fn generate(&mut self, voice: &Array3<f32>, emb: &[f32], n: usize, cap: usize, eos_extra: usize) -> Result<(Vec<f32>, bool)> {
+        self.main_states.reset()?;
         let empty_seq = || f32_tensor(vec![1, 0, 32], Vec::new());
         // voice, then text, into the transformer's memory
-        let vf = cond_voice.shape()[1];
+        let vf = voice.shape()[1];
         self.main_states.run(&mut self.main, vec![("sequence".into(), empty_seq()?),
-            ("text_embeddings".into(), f32_tensor(vec![1, vf, 1024], cond_voice.into_raw_vec_and_offset().0)?)])?;
+            ("text_embeddings".into(), f32_tensor(vec![1, vf, 1024], voice.iter().copied().collect())?)])?;
         self.main_states.run(&mut self.main, vec![("sequence".into(), empty_seq()?),
-            ("text_embeddings".into(), f32_tensor(vec![1, n, 1024], emb)?)])?;
+            ("text_embeddings".into(), f32_tensor(vec![1, n, 1024], emb.to_vec())?)])?;
 
         let normal = Normal::new(0.0f32, self.temperature.max(0.0).sqrt()).unwrap();
         let mut rng = rand::thread_rng();
         let mut prev = vec![f32::NAN; 32]; // the first frame starts from "nothing"
-        let mut latents: Vec<f32> = Vec::with_capacity(max_frames * 32);
+        let mut latents: Vec<f32> = Vec::with_capacity(cap * 32);
         let (mut eos, mut extra) = (false, 0usize);
-        for _ in 0..max_frames {
+        for _ in 0..cap {
             let out = self.main_states.run(&mut self.main, vec![("sequence".into(), f32_tensor(vec![1, 1, 32], prev.clone())?),
                 ("text_embeddings".into(), f32_tensor(vec![1, 0, 1024], Vec::new())?)])?;
             let (cond, eos_logit) = (&out[0], out[1][0]);
@@ -367,16 +405,7 @@ impl Pocket {
             prev = x.iter().zip(&dir).map(|(a, d)| a + d).collect();
             latents.extend_from_slice(&prev);
         }
-        // the decoder, 15 frames at a time (as the streaming runtime does)
-        let frames = latents.len() / 32;
-        let mut audio = Vec::with_capacity(frames * 1920);
-        for start in (0..frames).step_by(15) {
-            let k = (frames - start).min(15);
-            let chunk = latents[start * 32..(start + k) * 32].to_vec();
-            let out = self.decoder_states.run(&mut self.decoder, vec![("latent".into(), f32_tensor(vec![1, k, 32], chunk)?)])?;
-            audio.extend_from_slice(&out[0]);
-        }
-        Ok(audio)
+        Ok((latents, eos))
     }
 }
 
@@ -429,6 +458,14 @@ pub fn resample(x: &[f32], from: u32, to: u32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speech_limit() {
+        // 54 characters: 4.9 s + 1 s → 74 frames; stress marks and the padding do not count
+        assert_eq!(speech_limit_frames("Она открыла окно посмотрела на улицу и тихо вздохнула."), 74);
+        assert_eq!(speech_limit_frames("        Ну?"), speech_limit_frames("Ну?"));
+        assert_eq!(speech_limit_frames("Он у\u{301}шёл."), speech_limit_frames("Он ушёл."));
+    }
 
     #[test]
     fn temperature_is_clamped() {

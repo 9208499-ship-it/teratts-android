@@ -638,6 +638,9 @@ class MainActivity : ComponentActivity() {
             viewModel.selectedVoiceFile.value = listOf("$stem$ext", fallback).firstOrNull { it in viewModel.voiceFiles.values }
                 ?: viewModel.voiceFiles.values.sorted().first()
         }
+        // the main voice is in use: a grey Shtorm recording chosen as it is ticked
+        val sel = viewModel.selectedVoiceFile.value
+        if (com.brahmadeo.supertonic.tts.utils.ShtormVoices.isOff(this, sel)) com.brahmadeo.supertonic.tts.utils.ShtormVoices.setOn(this, sel, true)
     }
 
     private fun generateAndPlay(text: String) {
