@@ -62,21 +62,29 @@ fun LexiconScreen(
     onPreRollSentencesChange: (Int) -> Unit,
     onAddClick: () -> Unit,
     onEditClick: (LexiconItem) -> Unit,
-    onDeleteClick: (LexiconItem) -> Unit
+    onDeleteClick: (LexiconItem) -> Unit,
+    // opened right at a page ("voice" from the reader's panel): back leaves the settings
+    initialPage: String? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    // the settings by topic, as in Moon+ Reader: a list of sections, each opens its page
+    var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialPage) }
+    val back: () -> Unit = { if (page != null && initialPage == null) page = null else onBackClick() }
+    androidx.activity.compose.BackHandler(enabled = page != null && initialPage == null) { page = null }
+    val pages = settingsPages()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(AppR.string.lexicon_title)) },
+                title = { Text(pages.firstOrNull { it.key == page }?.title ?: stringResource(AppR.string.lexicon_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = back) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(AppR.string.back))
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showMenu = true }) {
+                    // the dictionaries' menu belongs to the page of stress
+                    if (page == "stress") IconButton(onClick = { showMenu = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = stringResource(AppR.string.more))
                     }
                     DropdownMenu(
@@ -134,7 +142,7 @@ fun LexiconScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
+            if (page == "stress") ExtendedFloatingActionButton(
                 onClick = onAddClick,
                 icon = { Icon(Icons.Default.Add, stringResource(AppR.string.add_term_button)) },
                 text = { Text(stringResource(AppR.string.add_term_button)) },
@@ -142,12 +150,92 @@ fun LexiconScreen(
             )
         }
     ) { paddingValues ->
+        if (page == null) {
+            // the sections
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(paddingValues), contentPadding = PaddingValues(vertical = 8.dp)) {
+                items(pages) { pg ->
+                    ListItem(
+                        headlineContent = { Text(pg.title) },
+                        supportingContent = { Text(pg.desc, style = MaterialTheme.typography.bodySmall) },
+                        leadingContent = { Icon(pg.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable { page = pg.key }
+                    )
+                }
+            }
+            return@Scaffold
+        }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
             contentPadding = PaddingValues(bottom = 88.dp)
         ) {
+          when (page) {
+          "voice" -> {
+            item { MainVoiceRow() }
+            item { EngineSection() }
+            item { ImportVoiceRow() }
+            item { NoiseScaleRow() }
+          }
+          "reading" -> {
+            item { PauseScaleRow() }
+            item { ParagraphPauseRow() }
+            item {
+                Text(
+                    text = stringResource(AppR.string.section_punctuation),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
+                )
+            }
+            item {
+                PunctuationToggleRow(
+                    title = stringResource(AppR.string.punct_tight_qe_title),
+                    description = stringResource(AppR.string.punct_tight_qe_desc),
+                    checked = tightQuestionExclamation,
+                    onToggle = onTightQuestionToggle
+                )
+            }
+            item {
+                PunctuationToggleRow(
+                    title = stringResource(AppR.string.punct_tight_cp_title),
+                    description = stringResource(AppR.string.punct_tight_cp_desc),
+                    checked = tightCommasAndPeriods,
+                    onToggle = onTightCommasPeriodsToggle
+                )
+            }
+            item { EnglishWordsRow() }
+            item { MusicSection() }
+            item {
+                Text(
+                    text = stringResource(AppR.string.section_playback),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                )
+            }
+            item { ChunkModeRow(chunkMode = chunkMode, onChange = onChunkModeChange) }
+            item {
+                PreRollRow(
+                    enabled = preRollEnabled,
+                    sentences = preRollSentences,
+                    onToggle = onPreRollToggle,
+                    onSentencesChange = onPreRollSentencesChange
+                )
+            }
+          }
+          "roles" -> { item { RolesSection() } }
+          "perf" -> {
+            item { KeepReadyRow() }
+            item { FastCoresRow() }
+            item { SpeedTestRow() }
+          }
+          "about" -> {
+            item { AboutRow() }
+            item { SendLogRow() }
+          }
+          else -> {
+            // "stress": the dictionaries and the user's own rules
             if (accentDictBanner != null) {
                 item {
                     Surface(
@@ -259,83 +347,6 @@ fun LexiconScreen(
                 }
             }
 
-            // Punctuation experiments. Each toggle is independent; default OFF
-            // preserves the legacy stabilisation rules. Section header sets the
-            // shared context so the four switches read as a single feature.
-            item {
-                Text(
-                    text = stringResource(AppR.string.section_punctuation),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
-                )
-            }
-
-            item {
-                PunctuationToggleRow(
-                    title = stringResource(AppR.string.punct_tight_qe_title),
-                    description = stringResource(AppR.string.punct_tight_qe_desc),
-                    checked = tightQuestionExclamation,
-                    onToggle = onTightQuestionToggle
-                )
-            }
-
-
-
-            item {
-                PunctuationToggleRow(
-                    title = stringResource(AppR.string.punct_tight_cp_title),
-                    description = stringResource(AppR.string.punct_tight_cp_desc),
-                    checked = tightCommasAndPeriods,
-                    onToggle = onTightCommasPeriodsToggle
-                )
-            }
-
-            item { EnglishWordsRow() }
-            item { ImportVoiceRow() }
-            item { SendLogRow() }
-            item { KeepReadyRow() }
-            item { FastCoresRow() }
-            item { EngineSection() }
-            item { SpeedTestRow() }
-            item { RolesSection() }
-            item { MusicSection() }
-            item { NoiseScaleRow() }
-            item { PauseScaleRow() }
-            item { ParagraphPauseRow() }
-
-
-            // ─── Playback section ────────────────────────────────────────
-            // Independent of Lexicon/Punctuation — controls how text is
-            // chunked before synthesis and whether AudioTrack waits for a
-            // pre-roll buffer before starting playback. Both default to the
-            // legacy behavior (DEFAULT chunk size, pre-roll off) so existing
-            // users see no change unless they opt in.
-            item {
-                Text(
-                    text = stringResource(AppR.string.section_playback),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                )
-            }
-
-            item {
-                ChunkModeRow(
-                    chunkMode = chunkMode,
-                    onChange = onChunkModeChange
-                )
-            }
-
-            item {
-                PreRollRow(
-                    enabled = preRollEnabled,
-                    sentences = preRollSentences,
-                    onToggle = onPreRollToggle,
-                    onSentencesChange = onPreRollSentencesChange
-                )
-            }
-
             if (rules.isEmpty()) {
                 item {
                     Box(
@@ -372,8 +383,59 @@ fun LexiconScreen(
                     }
                 }
             }
+          }
+          }
         }
     }
+}
+
+/** A section of the settings: its key, title, what is in it, its sign. */
+private class SettingsPage(val key: String, val title: String, val desc: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
+@Composable
+private fun settingsPages() = listOf(
+    SettingsPage("voice", stringResource(AppR.string.settings_voice), stringResource(AppR.string.settings_voice_desc),
+        androidx.compose.material.icons.Icons.Default.RecordVoiceOver),
+    SettingsPage("reading", stringResource(AppR.string.settings_reading), stringResource(AppR.string.settings_reading_desc),
+        androidx.compose.material.icons.Icons.Default.Tune),
+    SettingsPage("stress", stringResource(AppR.string.settings_stress), stringResource(AppR.string.settings_stress_desc),
+        androidx.compose.material.icons.Icons.Default.Spellcheck),
+    SettingsPage("roles", stringResource(AppR.string.settings_roles), stringResource(AppR.string.settings_roles_desc),
+        androidx.compose.material.icons.Icons.Default.People),
+    SettingsPage("perf", stringResource(AppR.string.settings_perf), stringResource(AppR.string.settings_perf_desc),
+        androidx.compose.material.icons.Icons.Default.Speed),
+    SettingsPage("about", stringResource(AppR.string.settings_about), stringResource(AppR.string.settings_about_desc),
+        androidx.compose.material.icons.Icons.Default.Info)
+)
+
+/** The main voice (the narrator unless roles say otherwise) — chosen here as on the main screen. */
+@Composable
+private fun MainVoiceRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+    val voices = remember { com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(context) }
+    var current by remember {
+        mutableStateOf(com.brahmadeo.supertonic.tts.utils.RolePrefs.forEngine(context, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"))
+    }
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        RoleVoicePicker(stringResource(AppR.string.main_voice_label), current, voices) { v ->
+            current = v
+            // a grey (unticked) Shtorm recording chosen as the main voice is in use now
+            if (com.brahmadeo.supertonic.tts.utils.ShtormVoices.isOff(context, v)) com.brahmadeo.supertonic.tts.utils.ShtormVoices.setOn(context, v, true)
+            prefs.edit().putString("selected_voice", v).commit()
+        }
+    }
+}
+
+/** The version, and where the program lives. */
+@Composable
+private fun AboutRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val version = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName } catch (e: Exception) { "?" }
+    ListItem(
+        headlineContent = { Text("TeraTTS $version") },
+        supportingContent = { Text(stringResource(AppR.string.settings_about_text), style = MaterialTheme.typography.bodySmall) }
+    )
 }
 
 /**

@@ -442,4 +442,21 @@
     <string name="library_title">Библиотека</string>
     <string name="library_empty">Здесь будут открытые книги</string>
     <string name="library_open_first">Открыть книгу</string>
+    <string name="settings_voice">Голос и модель</string>
+    <string name="settings_voice_desc">Основной голос, модель (TeraTTS / Shtorm), живость, яркость, свои голоса</string>
+    <string name="settings_reading">Чтение вслух</string>
+    <string name="settings_reading_desc">Паузы, знаки препинания, английские слова, музыка, разбивка текста</string>
+    <string name="settings_stress">Ударения и словарь</string>
+    <string name="settings_stress_desc">Словарь ударений, свои правила произношения</string>
+    <string name="settings_roles">Чтение по ролям</string>
+    <string name="settings_roles_desc">Голоса рассказчика и персонажей, громкость и темп голосов</string>
+    <string name="settings_perf">Производительность</string>
+    <string name="settings_perf_desc">Ядра процессора, тест скорости, синтезатор наготове</string>
+    <string name="settings_about">О программе</string>
+    <string name="settings_about_desc">Версия, отправить журнал разработчику</string>
+    <string name="settings_about_text">Офлайн-синтезатор русской речи: TeraTTS и Pocket TTS (Shtorm). Исходники и релизы — github.com/9208499-ship-it/teratts-android, обсуждение — 4PDA.</string>
+    <string name="main_voice_label">Основной голос</string>
+    <string name="player_voice_settings">Настройки озвучки</string>
+    <string name="library_paste_text">Вставить текст</string>
+    <string name="book_open_failed">Книгу открыть не удалось</string>
 </resources>

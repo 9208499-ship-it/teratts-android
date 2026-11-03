@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Pause
@@ -202,7 +203,10 @@ fun PlaybackScreen(
     // the share of the whole book read at a share (0..1) of this chapter, null — not known
     bookShare: ((Float) -> Float?)? = null,
     // stop reading aloud but stay with the text (the reader goes on by eye)
-    onStopReading: () -> Unit = onStopClick
+    onStopReading: () -> Unit = onStopClick,
+    // all the settings / straight to "Голос и модель"
+    onSettings: () -> Unit = {},
+    onVoiceSettings: () -> Unit = onSettings
 ) {
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
@@ -328,7 +332,8 @@ fun PlaybackScreen(
                     actions = {
                         PlayerMoreMenu(
                             showList = showList, onToggleList = { showList = !showList },
-                            onExport = if (!isExporting) onExportClick else null
+                            onExport = if (!isExporting) onExportClick else null,
+                            onVoiceSettings = onVoiceSettings, onSettings = onSettings
                         )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -508,7 +513,8 @@ fun PlaybackScreen(
                                     PlayerMoreMenu(
                                         showList = showList, onToggleList = { showList = !showList },
                                         onToc = onToc, onSearch = onSearch, onCharacters = onCharactersClick,
-                                        onExport = null, horizontal = true
+                                        onExport = null, horizontal = true,
+                                        onVoiceSettings = onVoiceSettings, onSettings = onSettings
                                     )
                                 } else {
                                     // the reader: read aloud, contents, search, characters, sleep timer
@@ -530,6 +536,9 @@ fun PlaybackScreen(
                                         Icon(Icons.Default.People, contentDescription = stringResource(AppR.string.characters_title))
                                     }
                                     SleepButton(sleepLeft, onSleepTimer)
+                                    IconButton(onClick = onSettings) {
+                                        Icon(Icons.Default.Settings, contentDescription = stringResource(AppR.string.lexicon_title))
+                                    }
                                 }
                             }
                         }
@@ -635,7 +644,9 @@ private fun PlayerMoreMenu(
     onSearch: (() -> Unit)? = null,
     onCharacters: (() -> Unit)? = null,
     onExport: (() -> Unit)?,
-    horizontal: Boolean = false
+    horizontal: Boolean = false,
+    onVoiceSettings: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -651,6 +662,8 @@ private fun PlayerMoreMenu(
                 text = { Text(stringResource(if (showList) AppR.string.player_view_phrase else AppR.string.player_view_page)) },
                 onClick = { open = false; onToggleList() }
             )
+            onVoiceSettings?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.player_voice_settings)) }, onClick = { open = false; f() }) }
+            onSettings?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.lexicon_title)) }, onClick = { open = false; f() }) }
         }
     }
 }

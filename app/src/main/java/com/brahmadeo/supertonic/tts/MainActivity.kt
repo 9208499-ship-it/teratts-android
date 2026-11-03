@@ -133,10 +133,17 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         Log.d("MainActivity", "ebookOutlineLauncher result: ${result.resultCode}")
+        if (result.resultCode != RESULT_OK) {
+            // "Back" in the library that is the home screen: leave the app; «Вставить текст»: stay here
+            if (result.data?.getBooleanExtra(EbookLibraryActivity.EXTRA_EXIT, false) == true) finish()
+            else libraryIsHome = false
+        }
         if (result.resultCode == RESULT_OK) {
             val text = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT))
             Log.d("MainActivity", "Received text length: ${text?.length ?: 0}")
             if (!text.isNullOrEmpty()) {
+                // the book opens over the library again: "Back" from it returns to the books
+                if (libraryIsHome) openLibraryHome()
                 // Reset state before loading new ebook text
                 viewModel.inputText.value = ""
                 val stopIntent = Intent(this, PlaybackService::class.java).apply { action = "STOP_PLAYBACK" }
@@ -208,13 +215,16 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
 
-        // Launching the app opens the player with the last book at its place (paused);
-        // the settings screen is one "Back" away.
-        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && AssetManager.isReady(this) &&
-            !getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "").isNullOrEmpty()) {
-            startActivity(Intent(this, PlaybackActivity::class.java)
-                .putExtra("is_resume", true)
-                .putExtra("no_autoplay", true))
+        // As in Moon+ Reader: launching the app opens the last book at its place (paused), with the
+        // library under it — "Back" from the book leads to the books, not to this text screen
+        // (it is «Вставить текст» in the library now)
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && AssetManager.isReady(this)) {
+            openLibraryHome()
+            if (!getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "").isNullOrEmpty()) {
+                startActivity(Intent(this, PlaybackActivity::class.java)
+                    .putExtra("is_resume", true)
+                    .putExtra("no_autoplay", true))
+            }
         }
 
         setContent {
@@ -388,8 +398,7 @@ class MainActivity : ComponentActivity() {
                                 if (EbookManager.getRecentBooks(this).isEmpty()) {
                                     ebookLauncher.launch(arrayOf("*/*"))
                                 } else {
-                                    val intent = Intent(this, EbookLibraryActivity::class.java)
-                                    ebookOutlineLauncher.launch(intent)
+                                    openLibraryHome()
                                 }
                             } catch (e: Exception) {
                                 Log.e("MainActivity", "Failed to open ebook library", e)
@@ -429,6 +438,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // the main voice may have been chosen in Settings → «Голос и модель»
+        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("selected_voice", null)
+            ?.takeIf { it.isNotEmpty() }?.let { viewModel.selectedVoiceFile.value = it }
         checkResumeState()
         startKeepAlive()
         // a voice imported in the settings shows up in the list at once
@@ -751,6 +763,28 @@ class MainActivity : ComponentActivity() {
         })
     }
 
+    /** The library as the home screen (for its result: the book chosen there opens over it). */
+    private var libraryIsHome = false
+
+    private fun openLibraryHome() {
+        libraryIsHome = true
+        ebookOutlineLauncher.launch(Intent(this, EbookLibraryActivity::class.java).putExtra(EbookLibraryActivity.EXTRA_HOME, true))
+    }
+
+    /** A book file sent to the app (a file manager, a browser): imported and opened like one from the library. */
+    private fun openBookFile(uri: Uri): Boolean {
+        val localPath = try { EbookManager.importBook(this, uri) } catch (e: Exception) { null }
+        if (localPath == null) {
+            Toast.makeText(this, getString(R.string.book_open_failed), Toast.LENGTH_LONG).show()
+            return true
+        }
+        if (!libraryIsHome && AssetManager.isReady(this)) openLibraryHome()
+        ebookOutlineLauncher.launch(Intent(this, EbookOutlineActivity::class.java).apply {
+            putExtra(EbookOutlineActivity.EXTRA_URI, localPath)
+        })
+        return true
+    }
+
     private fun launchPlaybackActivity(text: String, stylePath: String) {
         val intent = Intent(this, PlaybackActivity::class.java).apply {
             putExtra(PlaybackActivity.EXTRA_TEXT, com.brahmadeo.supertonic.tts.utils.TextHandoff.wrap(this@MainActivity, text))
@@ -764,6 +798,16 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+        // a book file opened with / sent to TeraTTS
+        val bookUri: Uri? = when {
+            intent.action == Intent.ACTION_VIEW && intent.data?.scheme in listOf<String?>("content", "file") -> intent.data
+            intent.action == Intent.ACTION_SEND && intent.type != "text/plain" ->
+                @Suppress("DEPRECATION") (intent.getParcelableExtra<android.os.Parcelable>(Intent.EXTRA_STREAM) as? Uri)
+            intent.action == Intent.ACTION_SEND && intent.type == "text/plain" && intent.getStringExtra(Intent.EXTRA_TEXT) == null ->
+                @Suppress("DEPRECATION") (intent.getParcelableExtra<android.os.Parcelable>(Intent.EXTRA_STREAM) as? Uri)
+            else -> null
+        }
+        if (bookUri != null) { openBookFile(bookUri); return }
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
             if (!sharedText.isNullOrEmpty()) {

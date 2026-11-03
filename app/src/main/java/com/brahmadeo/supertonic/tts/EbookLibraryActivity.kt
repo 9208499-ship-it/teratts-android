@@ -61,6 +61,20 @@ import com.brahmadeo.supertonic.tts.utils.RecentBook
 
 class EbookLibraryActivity : ComponentActivity() {
 
+    companion object {
+        /** Opened as the app's home screen (MainActivity): "Back" leaves the app. */
+        const val EXTRA_HOME = "library_home"
+        /** In the result: the user left the home library — the app closes. */
+        const val EXTRA_EXIT = "library_exit"
+    }
+
+    private val isHome get() = intent.getBooleanExtra(EXTRA_HOME, false)
+
+    private fun leave() {
+        if (isHome) setResult(RESULT_CANCELED, Intent().putExtra(EXTRA_EXIT, true))
+        finish()
+    }
+
     private val ebookOutlineLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -89,8 +103,10 @@ class EbookLibraryActivity : ComponentActivity() {
         com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         setContent {
             SupertonicTheme {
+                // the home screen: system "Back" leaves the app (as from Moon+ Reader's bookshelf)
+                androidx.activity.compose.BackHandler(enabled = isHome) { leave() }
                 LibraryScreen(
-                    onBack = { finish() },
+                    onBack = { leave() },
                     onOpenNew = { ebookPickerLauncher.launch(arrayOf("*/*")) },
                     onBookClick = { openBook(it.path) },
                     onTocClick = { openBook(it.path, toContents = true) }
@@ -162,8 +178,17 @@ class EbookLibraryActivity : ComponentActivity() {
                 TopAppBar(
                     title = { Text(getString(R.string.library_title)) },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        if (!isHome) IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        // your own text (the old main screen) and the settings
+                        IconButton(onClick = { setResult(RESULT_CANCELED); finish() }) {
+                            Icon(androidx.compose.material.icons.Icons.Default.EditNote, contentDescription = getString(R.string.library_paste_text))
+                        }
+                        IconButton(onClick = { startActivity(Intent(this@EbookLibraryActivity, LexiconActivity::class.java)) }) {
+                            Icon(androidx.compose.material.icons.Icons.Default.Settings, contentDescription = getString(R.string.lexicon_title))
                         }
                     }
                 )

@@ -248,6 +248,7 @@ class LexiconActivity : ComponentActivity() {
                 }
 
                 LexiconScreen(
+                    initialPage = intent.getStringExtra("page"),
                     rules = rulesState.value,
                     accentDictBanner = accentDictBannerState.value,
                     canDownloadAccentDict = canDownload,

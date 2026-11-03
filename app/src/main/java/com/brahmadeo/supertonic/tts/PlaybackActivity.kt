@@ -353,6 +353,10 @@ class PlaybackActivity : ComponentActivity() {
                     bookShare = lens?.let { l -> { s: Float -> com.brahmadeo.supertonic.tts.utils.BookProgress.share(l, chapterIdx, s) } },
                     // ■ stops the voice; the text stays open for reading by eye
                     onStopReading = { try { playbackService?.stop() } catch (_: Exception) { } },
+                    onSettings = { startActivity(android.content.Intent(this@PlaybackActivity, LexiconActivity::class.java)) },
+                    onVoiceSettings = {
+                        startActivity(android.content.Intent(this@PlaybackActivity, LexiconActivity::class.java).putExtra("page", "voice"))
+                    },
                     sentences = sentencesState.value,
                     text = textState.value,
                     title = textState.value.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: "",
@@ -498,6 +502,14 @@ class PlaybackActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val prefs0 = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        // the main voice changed in Settings → «Голос и модель»: read on in it
+        val chosen = prefs0.getString("selected_voice", null)
+        if (!chosen.isNullOrEmpty() && currentVoicePath.isNotEmpty() && !currentVoicePath.contains(";") &&
+            chosen.substringBeforeLast('.') != File(currentVoicePath).name.substringBeforeLast('.')) {
+            currentVoicePath = File(File(currentVoicePath).parentFile, chosen).absolutePath
+            prefs0.edit().putString("last_voice_path", currentVoicePath).apply()
+            try { if (isPlayingState.value && currentIndexState.intValue >= 0) playFromIndex(currentIndexState.intValue) } catch (_: Exception) { }
+        }
         // the service moved on (the next chapter) while this screen was in the background
         val newer = prefs0.getLong("last_text_time", 0L) > textLoadedAt
         // only when the service really moved on (a newer text): a book just opened from the

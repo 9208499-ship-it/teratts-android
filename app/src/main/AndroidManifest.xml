@@ -50,6 +50,35 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!-- book files: "Open with" / "Share" from a file manager or a browser -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/x-fb2" />
+                <data android:mimeType="application/fb2" />
+                <data android:mimeType="application/x-zip-compressed-fb2" />
+                <data android:mimeType="application/x-fb3" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/x-fb2" />
+                <data android:mimeType="application/fb2" />
+                <data android:mimeType="application/x-zip-compressed-fb2" />
+                <data android:mimeType="application/x-fb3" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
             <!-- Install TTS data intent -->
             <intent-filter>
                 <action android:name="android.speech.tts.engine.INSTALL_TTS_DATA" />

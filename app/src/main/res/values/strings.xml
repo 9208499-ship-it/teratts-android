@@ -442,4 +442,21 @@
     <string name="library_title">Library</string>
     <string name="library_empty">Books you open will be here</string>
     <string name="library_open_first">Open a book</string>
+    <string name="settings_voice">Voice and model</string>
+    <string name="settings_voice_desc">Main voice, model (TeraTTS / Shtorm), liveliness, brightness, your own voices</string>
+    <string name="settings_reading">Reading aloud</string>
+    <string name="settings_reading_desc">Pauses, punctuation, English words, music, text splitting</string>
+    <string name="settings_stress">Stress and dictionary</string>
+    <string name="settings_stress_desc">Stress dictionary, your own pronunciation rules</string>
+    <string name="settings_roles">Reading by roles</string>
+    <string name="settings_roles_desc">Narrator's and characters' voices, loudness and pace of voices</string>
+    <string name="settings_perf">Performance</string>
+    <string name="settings_perf_desc">CPU cores, speed test, keeping the synthesizer ready</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_desc">Version, send the log to the developer</string>
+    <string name="settings_about_text">Offline Russian speech synthesizer: TeraTTS and Pocket TTS (Shtorm). Source and releases — github.com/9208499-ship-it/teratts-android, discussion — 4PDA.</string>
+    <string name="main_voice_label">Main voice</string>
+    <string name="player_voice_settings">Voice settings</string>
+    <string name="library_paste_text">Paste text</string>
+    <string name="book_open_failed">Could not open the book</string>
 </resources>
