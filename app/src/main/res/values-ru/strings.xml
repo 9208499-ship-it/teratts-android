@@ -383,7 +383,7 @@
     <string name="music_files">Свои файлы: %1$s шт.</string>
     <string name="music_folder_empty">в папке нет музыки</string>
     <string name="music_files_none">среди выбранных файлов нет музыки</string>
-    <string name="music_list_hint">Можно выбрать один файл, несколько или целую папку: песни играют по очереди, по кругу. Плейлист (.m3u) — выберите папку с его песнями</string>
+    <string name="music_list_hint">Можно выбрать один файл, несколько или целую папку: музыка играет по порядку, по кругу. Плейлист (.m3u) — выберите папку с его музыкой</string>
     <string name="export_with_music">Подмешать фоновую музыку</string>
     <string name="export_music_title">Фоновая музыка</string>
     <string name="export_music_question">Подмешать фоновую музыку в файл?</string>

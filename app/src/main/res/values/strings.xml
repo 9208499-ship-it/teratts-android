@@ -383,7 +383,7 @@
     <string name="music_files">Own files: %1$s</string>
     <string name="music_folder_empty">no music in the folder</string>
     <string name="music_files_none">no music among the chosen files</string>
-    <string name="music_list_hint">One file, several or a whole folder: the songs play one after another, round and round. A playlist (.m3u): choose the folder with its songs</string>
+    <string name="music_list_hint">One file, several or a whole folder: the music plays in order, round and round. A playlist (.m3u): choose the folder with its music</string>
     <string name="export_with_music">Mix in background music</string>
     <string name="export_music_title">Background music</string>
     <string name="export_music_question">Mix the background music into the file?</string>
