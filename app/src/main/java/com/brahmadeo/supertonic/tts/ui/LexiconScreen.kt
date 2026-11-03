@@ -967,12 +967,27 @@ private fun MusicSection() {
     var tracks by remember { mutableStateOf(music.tracks(context)) }
     var chosen by remember { mutableStateOf(music.track(context)?.id) }
     var volume by remember { mutableStateOf(music.volume(context).toFloat()) }
+    // one file (copied into the app, as before) or several (they play one after another)
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
+        val msg = try {
+            val name = music.importFiles(context, uris)
+            tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
+            context.getString(AppR.string.music_own_done, name)
+        } catch (e: Exception) {
+            context.getString(AppR.string.music_own_failed, e.message ?: "?")
+        }
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+    }
+    // a whole folder: its songs one after another (a playlist: the folder its songs lie in)
+    val folderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val msg = try {
-            val name = music.importOwn(context, uri)
+            val name = music.importFolder(context, uri)
             tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
             context.getString(AppR.string.music_own_done, name)
         } catch (e: Exception) {
@@ -1001,7 +1016,12 @@ private fun MusicSection() {
                             style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text(stringResource(AppR.string.music_pick)) }
+                Row {
+                    TextButton(onClick = { launcher.launch(arrayOf("audio/*")) }) { Text(stringResource(AppR.string.music_pick)) }
+                    TextButton(onClick = { folderLauncher.launch(null) }) { Text(stringResource(AppR.string.music_pick_folder)) }
+                }
+                Text(stringResource(AppR.string.music_list_hint), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(stringResource(AppR.string.music_volume, volume.toInt()), style = MaterialTheme.typography.bodyMedium)
                 Slider(
                     value = volume,

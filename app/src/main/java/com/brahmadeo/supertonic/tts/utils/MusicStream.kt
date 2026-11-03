@@ -12,8 +12,11 @@ import java.nio.ByteOrder
  * The background music for a saved file: the track decoded piece by piece (never whole —
  * an hour of music would not fit in memory), made mono at the speech's rate, looped, and
  * mixed under the speech at the volume set for the player. It fades in over the first seconds.
+ * The user's list (a folder, several files): its songs one after another, round and round.
  */
-class MusicStream private constructor(private val ex: MediaExtractor, private val codec: MediaCodec,
+class MusicStream private constructor(private val sources: List<(MediaExtractor) -> Unit>,
+                                      private var ex: MediaExtractor, private var codec: MediaCodec,
+                                      private var srcIdx: Int,
                                       targetRate: Int, private val gain: Float) : Closeable {
     private val resampler = Resampler(targetRate) { decodeMore() }
     private val fadeFrames = targetRate * 3L
@@ -60,6 +63,7 @@ class MusicStream private constructor(private val ex: MediaExtractor, private va
             when {
                 outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> readFormat(codec.outputFormat)
                 outIdx >= 0 -> {
+                    val rate = srcRate
                     val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                     val samples = if (info.size > 0) {
                         val b = codec.getOutputBuffer(outIdx)!!
@@ -68,17 +72,38 @@ class MusicStream private constructor(private val ex: MediaExtractor, private va
                     } else null
                     codec.releaseOutputBuffer(outIdx, false)
                     if (eos) {
-                        // the end of the track: round again from the start
-                        if (++emptyLoops > 3 && samples == null) return null
-                        ex.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                        codec.flush()
-                        inputDone = false
+                        if (++emptyLoops > 3 * sources.size && samples == null) return null
+                        if (sources.size > 1) {
+                            // the end of a song of the list: the next one
+                            if (!nextSource()) return if (samples != null && samples.isNotEmpty()) samples to rate else null
+                        } else {
+                            // the end of the track: round again from the start
+                            ex.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                            codec.flush()
+                            inputDone = false
+                        }
                     }
-                    if (samples != null && samples.isNotEmpty()) { emptyLoops = 0; return samples to srcRate }
+                    if (samples != null && samples.isNotEmpty()) { emptyLoops = 0; return samples to rate }
                 }
             }
         }
         return null
+    }
+
+    /** Opens the next song of the list that can be read; false if none can. */
+    private fun nextSource(): Boolean {
+        for (k in 1..sources.size) {
+            val i = (srcIdx + k) % sources.size
+            val o = openSource(sources[i]) ?: continue
+            try { codec.stop() } catch (_: Exception) { }
+            try { codec.release() } catch (_: Exception) { }
+            try { ex.release() } catch (_: Exception) { }
+            ex = o.first; codec = o.second; srcIdx = i
+            inputDone = false
+            readFormat(o.third)
+            return true
+        }
+        return false
     }
 
     private fun readFormat(f: MediaFormat) {
@@ -114,16 +139,26 @@ class MusicStream private constructor(private val ex: MediaExtractor, private va
             val t = BackgroundMusic.track(c) ?: return null
             val gain = BackgroundMusic.volume(c) / 100f
             if (gain <= 0f) return null
+            val sources = BackgroundMusic.sources(c, t)
+            for ((i, s) in sources.withIndex()) {
+                val o = openSource(s) ?: continue
+                return MusicStream(sources, o.first, o.second, i, targetRate, gain).also { it.readFormat(o.third) }
+            }
+            return null
+        }
+
+        /** A song opened for decoding: its extractor, decoder and format; null if it cannot be read. */
+        private fun openSource(set: (MediaExtractor) -> Unit): Triple<MediaExtractor, MediaCodec, MediaFormat>? {
             val ex = MediaExtractor()
             return try {
-                BackgroundMusic.setSource(c, t, ex)
+                set(ex)
                 val track = (0 until ex.trackCount).first { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
                 ex.selectTrack(track)
                 val format = ex.getTrackFormat(track)
                 val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
                 codec.configure(format, null, null, 0)
                 codec.start()
-                MusicStream(ex, codec, targetRate, gain).also { it.readFormat(format) }
+                Triple(ex, codec, format)
             } catch (e: Exception) {
                 android.util.Log.w("BackgroundMusic", "music not mixed: ${e.message}")
                 try { ex.release() } catch (_: Exception) { }

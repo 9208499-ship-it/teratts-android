@@ -153,7 +153,9 @@ class MainActivity : ComponentActivity() {
                 Toast.makeText(this, "Chapter loaded", Toast.LENGTH_SHORT).show()
                 // "Continue where I stopped" in the outline: start reading at once (it resumes at the place)
                 val autoPlay = result.data?.getBooleanExtra("auto_play", false) == true
-                if (result.data?.getBooleanExtra("open_player", false) == true) openPlayerAtPlace(viewModel.inputText.value, autoPlay)
+                // the library is the home screen: a chapter chosen in the contents opens in the reader
+                // (the text screen under the library is not seen — the chapter used to wait there)
+                if (result.data?.getBooleanExtra("open_player", false) == true || libraryIsHome) openPlayerAtPlace(viewModel.inputText.value, autoPlay)
                 else if (autoPlay) generateAndPlay(viewModel.inputText.value)
             } else {
                 Log.e("MainActivity", "Received empty or null text from ebook activity")
