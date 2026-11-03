@@ -180,6 +180,7 @@ fun LexiconScreen(
             item { MainVoiceRow() }
             item { EngineSection() }
             item { ImportVoiceRow() }
+            item { OwnVoicesRow() }
             item { NoiseScaleRow() }
           }
           "reading" -> {
@@ -1033,6 +1034,74 @@ private fun MusicSection() {
     }
 }
 
+/** Bumped when an own voice is added or removed: the list of them is read again. */
+private val ownVoicesTick = mutableIntStateOf(0)
+
+/**
+ * The user's own voices (my_…): a recording for Pocket TTS (tap — listen, take another piece,
+ * gender, delete) or a TeraTTS voice; ✕ deletes it for good. The main voice is not deleted.
+ */
+@Composable
+private fun OwnVoicesRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val tick = ownVoicesTick.intValue
+    val dir = java.io.File(context.filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/voice_styles")
+    val own = remember(tick) {
+        (dir.listFiles { f -> f.isFile && f.name.startsWith("my_") && (f.name.endsWith(".wav") || f.name.endsWith(".json")) }
+            ?.map { it.name } ?: emptyList()).sorted()
+    }
+    if (own.isEmpty()) return
+    var checking by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<String?>(null) }
+    checking?.let { name -> VoiceCheckDialog(name) { checking = null; ownVoicesTick.intValue++ } }
+    deleting?.let { name ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            text = { Text(stringResource(AppR.string.own_voice_delete_confirm, name.removePrefix("my_").substringBeforeLast('.'))) },
+            confirmButton = {
+                TextButton(onClick = {
+                    com.brahmadeo.supertonic.tts.utils.VoiceImport.delete(context, name)
+                    deleting = null; ownVoicesTick.intValue++
+                }) { Text(stringResource(AppR.string.voice_check_delete)) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(AppR.string.cancel_action)) } }
+        )
+    }
+    val main = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+        .getString("selected_voice", "")?.substringBeforeLast('.') ?: ""
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 4.dp)) {
+            Text(stringResource(AppR.string.own_voices_title), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(AppR.string.own_voices_hint), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            for (name in own) {
+                val recording = name.endsWith(".wav")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                        .clickable(enabled = recording) { checking = name }
+                        .padding(vertical = 2.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(name.removePrefix("my_").substringBeforeLast('.'), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(if (recording) AppR.string.own_voice_tag_pocket else AppR.string.own_voice_tag_tera),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = {
+                        if (name.substringBeforeLast('.') == main) android.widget.Toast.makeText(context,
+                            context.getString(AppR.string.own_voice_in_use), android.widget.Toast.LENGTH_LONG).show()
+                        else deleting = name
+                    }) { Icon(Icons.Default.Delete, contentDescription = stringResource(AppR.string.voice_check_delete)) }
+                }
+            }
+        }
+    }
+}
+
 /** Your own voice: a recording (for Shtorm), a Supertonic .json or the two TeraTTS .npy files. */
 @Composable
 private fun ImportVoiceRow() {
@@ -1044,6 +1113,7 @@ private fun ImportVoiceRow() {
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
         val msg = try {
             val name = com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
+            ownVoicesTick.intValue++
             // a recording: listen to it at once, another piece of it can be taken
             if (name.endsWith(".wav")) { checking = name; null }
             else context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))

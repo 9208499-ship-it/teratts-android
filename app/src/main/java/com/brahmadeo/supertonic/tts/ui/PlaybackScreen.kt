@@ -220,6 +220,9 @@ fun PlaybackScreen(
 ) {
     // ⚙ while reading: the sheet of the reading's settings
     var sheetOpen by remember { mutableStateOf(false) }
+    // the page under the text: plain, paper, parchment, dark (chosen in the reading's sheet)
+    val pageCtx = androidx.compose.ui.platform.LocalContext.current
+    var pageStyle by remember { mutableStateOf(PageStyles.get(pageCtx)) }
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
@@ -367,10 +370,13 @@ fun PlaybackScreen(
             showList = showList,
             onToggleList = { showList = !showList },
             onSettings = onSettings,
-            onVoiceSettings = onVoiceSettings
+            onVoiceSettings = onVoiceSettings,
+            pageStyle = pageStyle,
+            onPageStyle = { s -> pageStyle = s; PageStyles.set(pageCtx, s) }
         )
     }
 
+    PageTheme(pageStyle) {
     Scaffold(
         topBar = {
             if (chrome && !speaking) {
@@ -410,7 +416,7 @@ fun PlaybackScreen(
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // ---- the text ----
-                Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp)) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().pageTexture(pageStyle).padding(horizontal = 20.dp)) {
                     if (showList && book != null) {
                         // a phrase may run over several short paragraphs (dialogue lines)
                         val curParas = if (n == 0) IntRange.EMPTY else
@@ -605,8 +611,9 @@ fun PlaybackScreen(
                                         Icon(Icons.Default.People, contentDescription = stringResource(AppR.string.characters_title))
                                     }
                                     SleepButton(sleepLeft, onSleepTimer)
-                                    IconButton(onClick = onSettings) {
-                                        Icon(Icons.Default.Settings, contentDescription = stringResource(AppR.string.lexicon_title))
+                                    // the reading's sheet here too (the page, the voice…; all the settings from it)
+                                    IconButton(onClick = { sheetOpen = true }) {
+                                        Icon(Icons.Default.Settings, contentDescription = stringResource(AppR.string.sheet_title))
                                     }
                                 }
                             }
@@ -683,6 +690,7 @@ fun PlaybackScreen(
             }
         }
     }
+    } // PageTheme
 }
 
 /** Shows phrase [i] at the top of the screen without reading it (the progress line while reading by eye). */

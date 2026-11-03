@@ -77,7 +77,9 @@ internal fun ReadingSheet(
     showList: Boolean,
     onToggleList: () -> Unit,
     onSettings: () -> Unit,
-    onVoiceSettings: () -> Unit
+    onVoiceSettings: () -> Unit,
+    pageStyle: String = PageStyles.PLAIN,
+    onPageStyle: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
@@ -112,6 +114,16 @@ internal fun ReadingSheet(
                 }
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // ---- the page under the text ----
+            Text(stringResource(AppR.string.page_style_title), style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                for ((st, name) in listOf(PageStyles.PLAIN to AppR.string.page_style_plain, PageStyles.PAPER to AppR.string.page_style_paper,
+                        PageStyles.PARCHMENT to AppR.string.page_style_parchment, PageStyles.DARK to AppR.string.page_style_dark)) {
+                    FilterChip(selected = pageStyle == st, onClick = { onPageStyle(st) }, label = { Text(stringResource(name)) })
+                }
+            }
+            Spacer(modifier = Modifier.padding(top = 6.dp))
 
             // ---- the pace ----
             Text(

@@ -501,4 +501,17 @@
     <string name="quote_added">The phrase is kept in the quotes</string>
     <string name="quote_already">This phrase is already in the quotes</string>
     <string name="quote_other_chapter">A quote from another chapter: %1$s</string>
+    <string name="page_style_title">Page</string>
+    <string name="page_style_plain">Plain</string>
+    <string name="page_style_paper">Paper</string>
+    <string name="page_style_parchment">Parchment</string>
+    <string name="page_style_dark">Dark</string>
+    <string name="library_view_shelf">Shelf</string>
+    <string name="library_view_list">List</string>
+    <string name="own_voices_title">Your own voices</string>
+    <string name="own_voices_hint">A recording for Pocket TTS: tap to listen, take another piece, set the gender. The bin deletes the voice for good</string>
+    <string name="own_voice_tag_pocket">recording, for Pocket TTS</string>
+    <string name="own_voice_tag_tera">voice for TeraTTS</string>
+    <string name="own_voice_delete_confirm">Delete the voice «%1$s» for good? Characters with it get another voice of the same gender.</string>
+    <string name="own_voice_in_use">This is the main voice: choose another main voice first</string>
 </resources>

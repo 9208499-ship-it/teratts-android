@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -142,6 +144,8 @@ class EbookLibraryActivity : ComponentActivity() {
         val ctx = this@EbookLibraryActivity
         val untitled = getString(R.string.library_untitled)
         fun titleOf(book: RecentBook) = EbookManager.displayTitle(ctx, book) ?: untitled
+        // a list or a shelf of covers (the button above switches, the choice is kept)
+        var view by remember { mutableStateOf(com.brahmadeo.supertonic.tts.ui.LibraryView.get(ctx)) }
 
         renaming?.let { book ->
             var name by remember(book.path) { mutableStateOf(EbookManager.displayTitle(ctx, book) ?: "") }
@@ -185,6 +189,16 @@ class EbookLibraryActivity : ComponentActivity() {
                         }
                     },
                     actions = {
+                        // a shelf of covers / a list
+                        IconButton(onClick = {
+                            view = if (view == com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF) com.brahmadeo.supertonic.tts.ui.LibraryView.LIST
+                                else com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF
+                            com.brahmadeo.supertonic.tts.ui.LibraryView.set(ctx, view)
+                        }) {
+                            if (view == com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF)
+                                Icon(Icons.Default.ViewAgenda, contentDescription = getString(R.string.library_view_list))
+                            else Icon(Icons.Default.GridView, contentDescription = getString(R.string.library_view_shelf))
+                        }
                         // your own text (the old main screen) and the settings
                         IconButton(onClick = { setResult(RESULT_CANCELED); finish() }) {
                             Icon(androidx.compose.material.icons.Icons.Default.EditNote, contentDescription = getString(R.string.library_paste_text))
@@ -210,6 +224,18 @@ class EbookLibraryActivity : ComponentActivity() {
                         }
                     }
                 }
+            } else if (view == com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF) {
+                com.brahmadeo.supertonic.tts.ui.BookShelf(
+                    books = recentBooks,
+                    titleOf = { titleOf(it) },
+                    modifier = Modifier.fillMaxSize().padding(paddingValues),
+                    onOpen = onBookClick,
+                    onToc = onTocClick,
+                    onRename = { renaming = it },
+                    onDelete = { deleting = it },
+                    labels = com.brahmadeo.supertonic.tts.ui.ShelfLabels(getString(R.string.player_toc),
+                        getString(R.string.library_rename), getString(R.string.delete))
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),

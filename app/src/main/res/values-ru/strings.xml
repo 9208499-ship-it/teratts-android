@@ -501,4 +501,17 @@
     <string name="quote_added">Фраза сохранена в цитаты</string>
     <string name="quote_already">Эта фраза уже в цитатах</string>
     <string name="quote_other_chapter">Цитата из другой главы: %1$s</string>
+    <string name="page_style_title">Фон страницы</string>
+    <string name="page_style_plain">Обычный</string>
+    <string name="page_style_paper">Бумага</string>
+    <string name="page_style_parchment">Пергамент</string>
+    <string name="page_style_dark">Тёмный</string>
+    <string name="library_view_shelf">Полка</string>
+    <string name="library_view_list">Список</string>
+    <string name="own_voices_title">Свои голоса</string>
+    <string name="own_voices_hint">Запись для Pocket TTS: нажмите — послушать, взять другой кусок, указать пол. Корзина — удалить голос совсем</string>
+    <string name="own_voice_tag_pocket">запись, для Pocket TTS</string>
+    <string name="own_voice_tag_tera">голос для TeraTTS</string>
+    <string name="own_voice_delete_confirm">Удалить голос «%1$s» совсем? Персонажи с этим голосом получат другой голос того же пола.</string>
+    <string name="own_voice_in_use">Это основной голос — сначала выберите другой основной голос</string>
 </resources>
