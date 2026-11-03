@@ -449,7 +449,7 @@
     <string name="settings_stress">Stress and dictionary</string>
     <string name="settings_stress_desc">Stress dictionary, your own pronunciation rules</string>
     <string name="settings_roles">Reading by roles</string>
-    <string name="settings_roles_desc">Narrator's and characters' voices, loudness and pace of voices</string>
+    <string name="settings_roles_desc">Narrator and character voices, loudness and pace</string>
     <string name="settings_perf">Performance</string>
     <string name="settings_perf_desc">CPU cores, speed test, keeping the synthesizer ready</string>
     <string name="settings_about">About</string>
