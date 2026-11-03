@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Pause
@@ -206,8 +208,18 @@ fun PlaybackScreen(
     onStopReading: () -> Unit = onStopClick,
     // all the settings / straight to "Голос и модель"
     onSettings: () -> Unit = {},
-    onVoiceSettings: () -> Unit = onSettings
+    onVoiceSettings: () -> Unit = onSettings,
+    // the reading's sheet (⚙ on the panel): the voice now (its file), choosing a voice / the model / the roles
+    voiceNow: String = "",
+    onVoicePick: (String) -> Unit = {},
+    onEngine: (String) -> Unit = {},
+    onRoles: (Boolean) -> Unit = {},
+    // ★: phrase i to the book's quotes; the list of the quotes
+    onQuote: ((Int) -> Unit)? = null,
+    onQuotes: (() -> Unit)? = null
 ) {
+    // ⚙ while reading: the sheet of the reading's settings
+    var sheetOpen by remember { mutableStateOf(false) }
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
@@ -268,6 +280,25 @@ fun PlaybackScreen(
         val local = layouts[p]?.getOffsetForPosition(Offset(0f, listState.firstVisibleItemScrollOffset.toFloat())) ?: 0
         return book.chunkAt(book.paragraphs[p].first + local).coerceIn(0, (n - 1).coerceAtLeast(0))
     }
+    // ⏪ ⏩ a paragraph back / on: the start of this paragraph (or of the one before, if already
+    // there), the start of the next one; plain text without paragraphs — five phrases
+    fun paraStep(d: Int): Int {
+        if (n == 0) return 0
+        val pc = book?.paraOfChunk ?: return (index + 5 * d).coerceIn(0, n - 1)
+        val p = pc.getOrElse(index) { 0 }
+        if (d > 0) {
+            for (i in index + 1 until n) if (pc.getOrElse(i) { p } > p) return i
+            return n - 1
+        }
+        var first = index
+        while (first > 0 && pc.getOrElse(first - 1) { -1 } == p) first--
+        if (first < index) return first
+        if (first == 0) return 0
+        val pp = pc.getOrElse(first - 1) { 0 }
+        var s = first - 1
+        while (s > 0 && pc.getOrElse(s - 1) { -1 } == pp) s--
+        return s
+    }
 
     // time left: remaining characters at the current pace
     var sliderSpeed by remember(speed) { mutableStateOf(speed) }
@@ -306,9 +337,37 @@ fun PlaybackScreen(
     longFor?.let { i ->
         AlertDialog(
             onDismissRequest = { longFor = null },
-            text = { Text(sentences.getOrNull(i)?.take(200) ?: "", style = MaterialTheme.typography.bodyMedium) },
+            text = {
+                Column {
+                    Text(sentences.getOrNull(i)?.take(200) ?: "", style = MaterialTheme.typography.bodyMedium)
+                    if (onQuote != null) TextButton(onClick = { longFor = null; onQuote(i) }) { Text(stringResource(AppR.string.player_quote)) }
+                }
+            },
             confirmButton = { TextButton(onClick = { longFor = null; playFrom(i) }) { Text(stringResource(AppR.string.player_read_here)) } },
             dismissButton = { TextButton(onClick = { longFor = null; onSentenceLongClick(i) }) { Text(stringResource(AppR.string.player_who_says)) } }
+        )
+    }
+
+    if (sheetOpen) {
+        ReadingSheet(
+            onDismiss = { sheetOpen = false },
+            speed = sliderSpeed,
+            onSpeedChange = { v -> sliderSpeed = v; onSpeedChange(v) },
+            sleepLeft = sleepLeft,
+            onSleepTimer = onSleepTimer,
+            voiceNow = voiceNow,
+            onVoicePick = onVoicePick,
+            onEngine = onEngine,
+            onRoles = onRoles,
+            onQuote = onQuote?.let { q -> { q(index) } },
+            onQuotes = onQuotes,
+            onToc = onToc,
+            onSearch = onSearch,
+            onCharacters = onCharactersClick,
+            showList = showList,
+            onToggleList = { showList = !showList },
+            onSettings = onSettings,
+            onVoiceSettings = onVoiceSettings
         )
     }
 
@@ -333,7 +392,7 @@ fun PlaybackScreen(
                         PlayerMoreMenu(
                             showList = showList, onToggleList = { showList = !showList },
                             onExport = if (!isExporting) onExportClick else null,
-                            onVoiceSettings = onVoiceSettings, onSettings = onSettings
+                            onVoiceSettings = onVoiceSettings, onSettings = onSettings, onQuotes = onQuotes
                         )
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -474,10 +533,18 @@ fun PlaybackScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (speaking) {
-                                    // the voice: stop (stay with the text), phrase back, play/pause, phrase on, speed, sleep, more
-                                    IconButton(onClick = onStopReading) {
-                                        Icon(Icons.Default.Stop, contentDescription = stringResource(AppR.string.player_stop_reading))
+                                    // the voice (after eReader Prestigio): ⚙ the reading's sheet, ⏪ paragraph back,
+                                    // ⏮ phrase back, play/pause, ⏭ phrase on, ⏩ paragraph on, ■ stop (stay with the text)
+                                    IconButton(onClick = { sheetOpen = true }, modifier = Modifier.size(44.dp)) {
+                                        Icon(Icons.Default.Settings, contentDescription = stringResource(AppR.string.sheet_title))
                                     }
+                                    SkipButton(
+                                        icon = Icons.Default.FastRewind,
+                                        description = stringResource(AppR.string.player_prev_para),
+                                        enabled = index > 0,
+                                        onClick = { playFrom(paraStep(-1)) },
+                                        onLongClick = { playFrom(paraStep(-1)) }
+                                    )
                                     SkipButton(
                                         icon = Icons.Default.SkipPrevious,
                                         description = stringResource(AppR.string.player_prev),
@@ -508,14 +575,16 @@ fun PlaybackScreen(
                                         onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
                                         onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
                                     )
-                                    SpeedButton(sliderSpeed, onChange = { sliderSpeed = it }, onDone = { onSpeedChange(sliderSpeed) })
-                                    SleepButton(sleepLeft, onSleepTimer)
-                                    PlayerMoreMenu(
-                                        showList = showList, onToggleList = { showList = !showList },
-                                        onToc = onToc, onSearch = onSearch, onCharacters = onCharactersClick,
-                                        onExport = null, horizontal = true,
-                                        onVoiceSettings = onVoiceSettings, onSettings = onSettings
+                                    SkipButton(
+                                        icon = Icons.Default.FastForward,
+                                        description = stringResource(AppR.string.player_next_para),
+                                        enabled = index < n - 1,
+                                        onClick = { playFrom(paraStep(1)) },
+                                        onLongClick = { playFrom(paraStep(1)) }
                                     )
+                                    IconButton(onClick = onStopReading, modifier = Modifier.size(44.dp)) {
+                                        Icon(Icons.Default.Stop, contentDescription = stringResource(AppR.string.player_stop_reading))
+                                    }
                                 } else {
                                     // the reader: read aloud, contents, search, characters, sleep timer
                                     IconButton(onClick = startReading) {
@@ -541,6 +610,8 @@ fun PlaybackScreen(
                                     }
                                 }
                             }
+                            // the sleep timer while it is on: how long is left, +15 min, off
+                            if (speaking && sleepLeft != null) SleepStrip(sleepLeft, onSleepTimer)
                         }
                     }
                 }
@@ -646,7 +717,8 @@ private fun PlayerMoreMenu(
     onExport: (() -> Unit)?,
     horizontal: Boolean = false,
     onVoiceSettings: (() -> Unit)? = null,
-    onSettings: (() -> Unit)? = null
+    onSettings: (() -> Unit)? = null,
+    onQuotes: (() -> Unit)? = null
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -663,7 +735,7 @@ private fun PlayerMoreMenu(
                 onClick = { open = false; onToggleList() }
             )
             onVoiceSettings?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.player_voice_settings)) }, onClick = { open = false; f() }) }
-            onSettings?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.lexicon_title)) }, onClick = { open = false; f() }) }
+            onQuotes?.let { f -> DropdownMenuItem(text = { Text(stringResource(AppR.string.quotes_title)) }, onClick = { open = false; f() }) }
         }
     }
 }
@@ -837,7 +909,7 @@ private fun SkipButton(
 ) {
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(44.dp)
             .clip(CircleShape)
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center
@@ -845,7 +917,7 @@ private fun SkipButton(
         Icon(
             icon,
             contentDescription = description,
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(30.dp),
             tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
         )
     }

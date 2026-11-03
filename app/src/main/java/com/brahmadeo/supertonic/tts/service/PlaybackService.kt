@@ -438,13 +438,26 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val modelPath = com.brahmadeo.supertonic.tts.utils.AssetManager.modelDir(applicationContext).absolutePath
             val libPath = applicationInfo.nativeLibraryDir + "/libonnxruntime.so"
             val previous = engineReady
+            // reading now: it goes on with the new model from the phrase being heard; paused — it is
+            // stopped (the place is kept); a phrase being made with the old model ends before it is let go
+            val again = lastPlay
+            val replayAt = if (isPlaying && isSynthesizing && again != null) currentSentenceIndex.coerceAtLeast(0) else -1
+            val stopping = if (isSynthesizing && replayAt < 0) stopServicePlayback(keepCard = true) else null
+            val old = synthesisJob
             engineReady = serviceScope.launch(Dispatchers.IO) {
                 previous?.join()
+                stopping?.join()
+                if (old != null && old.isActive) {
+                    SupertonicTTS.setCancelled(true)
+                    old.cancelAndJoin()
+                    SupertonicTTS.setCancelled(false)
+                }
                 SupertonicTTS.release()
                 com.brahmadeo.supertonic.tts.utils.AssetManager.ensureHomosolver(applicationContext)
                 SupertonicTTS.appContext = applicationContext
                 SupertonicTTS.initialize(modelPath, libPath)
             }
+            if (replayAt >= 0 && again != null) synthesizeAndPlay(again.text, again.lang, again.style, liveSpeed, again.steps, replayAt)
         }
         return START_NOT_STICKY
     }

@@ -357,6 +357,13 @@ class PlaybackActivity : ComponentActivity() {
                     onVoiceSettings = {
                         startActivity(android.content.Intent(this@PlaybackActivity, LexiconActivity::class.java).putExtra("page", "voice"))
                     },
+                    // the reading's sheet: the voice, the model, the roles — reading goes on in them
+                    voiceNow = File(currentVoicePath.substringBefore(';')).name,
+                    onVoicePick = { v -> useVoice(v) },
+                    onEngine = { e -> useEngine(e) },
+                    onRoles = { on -> com.brahmadeo.supertonic.tts.utils.RolePrefs.setEnabled(this@PlaybackActivity, on); restartReading() },
+                    onQuote = { i -> addQuote(i) },
+                    onQuotes = { quotesOpenState.value = true },
                     sentences = sentencesState.value,
                     text = textState.value,
                     title = textState.value.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: "",
@@ -418,6 +425,26 @@ class PlaybackActivity : ComponentActivity() {
                         }
                     }
                 )
+                if (quotesOpenState.value) {
+                    val qBook = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackActivity, textState.value)
+                    val qList = remember(quotesTick.intValue, qBook) { com.brahmadeo.supertonic.tts.utils.Quotes.of(this@PlaybackActivity, qBook) }
+                    com.brahmadeo.supertonic.tts.ui.QuotesDialog(
+                        quotes = qList,
+                        onGo = { q ->
+                            val i = sentencesState.value.indexOfFirst { it.trim() == q.text }
+                            if (i >= 0) { quotesOpenState.value = false; playFromIndex(i) }
+                            else Toast.makeText(this@PlaybackActivity, getString(R.string.quote_other_chapter, q.chapter), Toast.LENGTH_SHORT).show()
+                        },
+                        onShare = { q ->
+                            try {
+                                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                                    .putExtra(Intent.EXTRA_TEXT, "«" + q.text + "»" + (if (q.chapter.isNotEmpty()) "\n— " + q.chapter else "")), null))
+                            } catch (_: Exception) { }
+                        },
+                        onDelete = { q -> com.brahmadeo.supertonic.tts.utils.Quotes.remove(this@PlaybackActivity, q); quotesTick.intValue++ },
+                        onDismiss = { quotesOpenState.value = false }
+                    )
+                }
                 if (exportAskState.value) {
                     androidx.compose.material3.AlertDialog(
                         onDismissRequest = { exportAskState.value = false },
@@ -594,6 +621,46 @@ class PlaybackActivity : ComponentActivity() {
         } catch (e: RemoteException) {
             e.printStackTrace()
         }
+    }
+
+    // ---- the reading's sheet (⚙ on the panel) and the quotes ----
+    private val quotesOpenState = mutableStateOf(false)
+    private val quotesTick = mutableIntStateOf(0)
+
+    /** The reading goes on (from the phrase heard) with what was just changed; paused — the next "play" starts afresh. */
+    private fun restartReading() {
+        try {
+            val i = currentIndexState.intValue
+            if (isPlayingState.value && i >= 0) playFromIndex(i)
+            else if (isServiceActiveState.value) playbackService?.stop()
+        } catch (_: Exception) { }
+    }
+
+    /** A voice chosen in the sheet: it becomes the main one, the reading goes on in it. */
+    private fun useVoice(file: String) {
+        if (com.brahmadeo.supertonic.tts.utils.ShtormVoices.isOff(this, file)) com.brahmadeo.supertonic.tts.utils.ShtormVoices.setOn(this, file, true)
+        val dir = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/voice_styles")
+        currentVoicePath = File(dir, file).absolutePath
+        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit()
+            .putString("selected_voice", file).putString("last_voice_path", currentVoicePath).apply()
+        restartReading()
+    }
+
+    /** The model chosen in the sheet: the service restarts the engine and, if reading, goes on with it. */
+    private fun useEngine(e: String) {
+        val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
+        if (assets.engine(this) == e) return
+        assets.setEngine(this, e)
+        try { startService(Intent(this, PlaybackService::class.java).setAction("RESET_ENGINE")) } catch (_: Exception) { }
+    }
+
+    /** ★: phrase [i] (the one being heard) to the book's quotes. */
+    private fun addQuote(i: Int) {
+        val s = sentencesState.value.getOrNull(i) ?: return
+        val book = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this, currentText)
+        val chapter = currentText.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: ""
+        val added = com.brahmadeo.supertonic.tts.utils.Quotes.add(this, book, chapter, s)
+        Toast.makeText(this, getString(if (added) R.string.quote_added else R.string.quote_already), Toast.LENGTH_SHORT).show()
     }
 
     private fun playFromIndex(index: Int) {
