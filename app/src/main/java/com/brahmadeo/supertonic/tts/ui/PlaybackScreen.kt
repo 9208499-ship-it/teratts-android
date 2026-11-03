@@ -42,6 +42,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -223,6 +237,13 @@ fun PlaybackScreen(
     // the page under the text: plain, paper, parchment, dark (chosen in the reading's sheet)
     val pageCtx = androidx.compose.ui.platform.LocalContext.current
     var pageStyle by remember { mutableStateOf(PageStyles.get(pageCtx)) }
+    // the book as pages to turn (or the ribbon), how a page turns, whether it rustles
+    var pageMode by remember { mutableStateOf(PageMode.paged(pageCtx)) }
+    var pageAnim by remember { mutableStateOf(PageMode.anim(pageCtx)) }
+    var pageSound by remember { mutableStateOf(PageMode.sound(pageCtx)) }
+    // the pages' own "phrase at the top" and "show phrase i" (the paged view registers them)
+    var pagedTop by remember { mutableStateOf<(() -> Int)?>(null) }
+    var pagedJump by remember { mutableStateOf<((Int) -> Unit)?>(null) }
     // the book text, scrollable by finger, is the main view (karaoke is the second one)
     var showList by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
@@ -250,7 +271,7 @@ fun PlaybackScreen(
     } else null
     val heardKey = heard?.first ?: -1
     LaunchedEffect(currentIndex, heardKey, showList, followVoice, book) {
-        if (!showList || !followVoice || currentIndex !in sentences.indices) return@LaunchedEffect
+        if (!showList || !followVoice || currentIndex !in sentences.indices || (pageMode && book != null)) return@LaunchedEffect
         if (book == null) { listState.animateScrollToItem(currentIndex); return@LaunchedEffect }
         val target = heard ?: return@LaunchedEffect
         val p1 = book.paraAt(target.first)
@@ -278,6 +299,8 @@ fun PlaybackScreen(
     val playFrom: (Int) -> Unit = { i -> followVoice = true; onItemClick(i) }
     // the phrase at the top of the screen (after scrolling by hand)
     fun topVisibleChunk(): Int {
+        // pages: the first phrase of the page shown
+        pagedTop?.let { if (pageMode && showList && book != null) return it() }
         if (book == null) return listState.firstVisibleItemIndex.coerceIn(0, (n - 1).coerceAtLeast(0))
         val p = listState.firstVisibleItemIndex.coerceIn(0, book.paragraphs.size - 1)
         val local = layouts[p]?.getOffsetForPosition(Offset(0f, listState.firstVisibleItemScrollOffset.toFloat())) ?: 0
@@ -372,7 +395,10 @@ fun PlaybackScreen(
             onSettings = onSettings,
             onVoiceSettings = onVoiceSettings,
             pageStyle = pageStyle,
-            onPageStyle = { s -> pageStyle = s; PageStyles.set(pageCtx, s) }
+            onPageStyle = { s -> pageStyle = s; PageStyles.set(pageCtx, s) },
+            paged = pageMode, onPaged = { v -> pageMode = v; PageMode.setPaged(pageCtx, v) },
+            pageAnim = pageAnim, onPageAnim = { a -> pageAnim = a; PageMode.setAnim(pageCtx, a) },
+            pageSound = pageSound, onPageSound = { v -> pageSound = v; PageMode.setSound(pageCtx, v) }
         )
     }
 
@@ -409,15 +435,34 @@ fun PlaybackScreen(
             }
         }
     ) { paddingValues ->
+        val paged = pageMode && showList && book != null
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                // pages: under the bars (the top bar lies over the page, as in readers)
+                .padding(if (paged) PaddingValues(bottom = paddingValues.calculateBottomPadding()) else paddingValues)
         ) {
+            if (paged && book != null) {
+                PagedBookView(
+                    book = book, sentences = sentences, index = index,
+                    fraction = currentFraction,
+                    heardAt = heard?.first ?: book.ranges.getOrNull(index)?.first ?: -1,
+                    speaking = speaking, followVoice = followVoice, onFollow = { followVoice = it },
+                    anim = pageAnim, pageStyle = pageStyle,
+                    reserve = if (speaking && sleepLeft != null) 160.dp else 116.dp,
+                    footer = if (!speaking && !chrome) placeLabel else null,
+                    onTap = { i -> tapText(i) }, onLongPress = { i -> longFor = i }, onWord = onWordDoubleTap,
+                    onNextChapter = onNextChapter,
+                    register = { t, j -> pagedTop = t; pagedJump = j },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             Column(modifier = Modifier.fillMaxSize()) {
                 // ---- the text ----
-                Box(modifier = Modifier.weight(1f).fillMaxWidth().pageTexture(pageStyle).padding(horizontal = 20.dp)) {
-                    if (showList && book != null) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().pageTexture(if (paged) PageStyles.PLAIN else pageStyle).padding(horizontal = 20.dp)) {
+                    if (paged) {
+                        // the pages are drawn under this column (PagedBookView)
+                    } else if (showList && book != null) {
                         // a phrase may run over several short paragraphs (dialogue lines)
                         val curParas = if (n == 0) IntRange.EMPTY else
                             book.ranges[index]?.let { book.paraAt(it.first)..book.paraAt(it.last) }
@@ -471,7 +516,7 @@ fun PlaybackScreen(
                             onLongClick = { longFor = index }, fraction = currentFraction)
                     }
                     // the bars hidden: only the place, small, in the corner (as Moon+ does)
-                    if (!speaking && !chrome) {
+                    if (!speaking && !chrome && !paged) {
                         Text(
                             placeLabel,
                             style = MaterialTheme.typography.labelSmall,
@@ -512,7 +557,9 @@ fun PlaybackScreen(
                                                 // reading: go on from there; not: just show that place
                                                 if (speaking) playFrom(i) else {
                                                     followVoice = false
-                                                    onItemClickSilently(i, book, layouts, listState, scope)
+                                                    val jump = pagedJump
+                                                    if (pageMode && showList && jump != null) jump(i)
+                                                    else onItemClickSilently(i, book, layouts, listState, scope)
                                                 }
                                             }
                                         }
@@ -691,6 +738,232 @@ fun PlaybackScreen(
         }
     }
     } // PageTheme
+}
+
+/** One piece of a paragraph on a page: its lines [first..last], where they start in its layout, how tall. */
+private class PageFrag(val p: Int, val first: Int, val last: Int, val top: Int, val height: Int)
+
+/** A page: its pieces and where it starts in the chapter's text. */
+private class BookPageOut(val frags: List<PageFrag>, val start: Int)
+
+/** The chapter cut into pages of [heightPx] (the same type the page is drawn with). */
+private fun paginate(
+    book: BookPage, measure: (Int) -> TextLayoutResult, heightPx: Int, gapPx: Int
+): List<BookPageOut> {
+    val pages = ArrayList<BookPageOut>()
+    var cur = ArrayList<PageFrag>()
+    var start = 0
+    var y = 0
+    fun close() { if (cur.isNotEmpty()) { pages.add(BookPageOut(cur, start)); cur = ArrayList(); y = 0 } }
+    for (p in book.paragraphs.indices) {
+        val lay = measure(p)
+        val lines = lay.lineCount
+        if (cur.isNotEmpty()) y += gapPx
+        var a = 0
+        while (a < lines) {
+            var b = a
+            while (b < lines && (lay.getLineBottom(b) - lay.getLineTop(a)).toInt() <= heightPx - y) b++
+            if (b == a) {
+                if (cur.isEmpty()) b = a + 1 else { close(); continue }
+            }
+            if (cur.isEmpty()) start = book.paragraphs[p].first + lay.getLineStart(a)
+            val top = lay.getLineTop(a).toInt()
+            val h = (lay.getLineBottom(b - 1) - lay.getLineTop(a)).toInt()
+            cur.add(PageFrag(p, a, b - 1, top, h))
+            y += h
+            a = b
+            if (a < lines) close()
+        }
+    }
+    close()
+    return pages
+}
+
+/**
+ * The chapter as pages to turn with a finger (as in paper-book readers): the same paragraphs, stress,
+ * taps and highlight as the ribbon, cut to the screen. While the voice reads, the page turns after it;
+ * a turn by hand (a swipe, or a tap at the left / right edge) leaves the voice where it is. The page
+ * slides away or is turned over like a leaf; a turn by hand rustles (if so chosen). At the end of the
+ * chapter one more swipe opens the next one.
+ */
+@Composable
+private fun PagedBookView(
+    book: BookPage,
+    sentences: List<String>,
+    index: Int,
+    fraction: Float,
+    heardAt: Int,
+    speaking: Boolean,
+    followVoice: Boolean,
+    onFollow: (Boolean) -> Unit,
+    anim: String,
+    pageStyle: String,
+    reserve: androidx.compose.ui.unit.Dp,
+    footer: String?,
+    onTap: (Int) -> Unit,
+    onLongPress: (Int) -> Unit,
+    onWord: (String, String?, String?) -> Unit,
+    onNextChapter: (() -> Unit)?,
+    register: (top: (() -> Int)?, jump: ((Int) -> Unit)?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val dens = LocalDensity.current
+    val measurer = rememberTextMeasurer(cacheSize = 0)
+    val style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Serif, fontSize = 19.sp, lineHeight = 1.45.em)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val bg = MaterialTheme.colorScheme.background
+    Column(modifier = modifier.background(bg).pageTexture(pageStyle).windowInsetsPadding(WindowInsets.statusBars)) {
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val padX = with(dens) { 20.dp.roundToPx() }
+            val padTop = with(dens) { 12.dp.roundToPx() }
+            val padBottom = with(dens) { 6.dp.roundToPx() }
+            val gap = with(dens) { 10.dp.roundToPx() }
+            val wPx = constraints.maxWidth - 2 * padX
+            val hPx = constraints.maxHeight - padTop - padBottom
+            val pages: List<BookPageOut> = if (wPx <= 0 || hPx <= 0) emptyList() else remember(book, wPx, hPx, style, dens) {
+                paginate(book, { p ->
+                    val r = book.paragraphs[p]
+                    measurer.measure(
+                        buildAnnotatedString {
+                            withStyle(ParagraphStyle(textIndent = TextIndent(firstLine = 1.5.em))) { append(book.text.substring(r.first, r.last + 1)) }
+                        },
+                        style = style,
+                        constraints = Constraints(maxWidth = wPx)
+                    )
+                }, hPx, gap)
+            }
+            val starts = remember(pages) { IntArray(pages.size) { pages[it].start } }
+            fun pageOf(abs: Int): Int {
+                var lo = 0; var hi = starts.size - 1; var ans = 0
+                while (lo <= hi) { val m = (lo + hi) ushr 1; if (starts[m] <= abs) { ans = m; lo = m + 1 } else hi = m - 1 }
+                return ans
+            }
+            val extra = if (onNextChapter != null) 1 else 0
+            if (pages.isNotEmpty()) key(pages) {
+                val pager = rememberPagerState(initialPage = pageOf(heardAt.coerceAtLeast(0))) { pages.size + extra }
+                val scope = rememberCoroutineScope()
+                // a swipe by hand: the pages no longer follow the voice (the button brings them back)
+                val dragged by pager.interactionSource.collectIsDraggedAsState()
+                LaunchedEffect(dragged) { if (dragged) onFollow(false) }
+                // the voice moved on to another page: turn it (silently)
+                LaunchedEffect(heardAt, followVoice, speaking) {
+                    if (!followVoice || heardAt < 0) return@LaunchedEffect
+                    val t = pageOf(heardAt)
+                    if (t != pager.currentPage && !pager.isScrollInProgress) pager.animateScrollToPage(t)
+                }
+                // a page turned by hand rustles; the page after the last one opens the next chapter
+                var lastSettled by remember { mutableStateOf(pager.settledPage) }
+                LaunchedEffect(pager.settledPage) {
+                    val s = pager.settledPage
+                    if (s != lastSettled && !speaking) PageSound.play(ctx)
+                    lastSettled = s
+                    if (s >= pages.size) onNextChapter?.invoke()
+                }
+                DisposableEffect(pages) {
+                    register(
+                        { book.chunkAt(starts[pager.currentPage.coerceIn(0, pages.size - 1)]) },
+                        { i -> book.ranges.getOrNull(i)?.let { r -> scope.launch { pager.scrollToPage(pageOf(r.first)) } } }
+                    )
+                    onDispose { register(null, null) }
+                }
+                val curParas = book.ranges.getOrNull(index)?.let { book.paraAt(it.first)..book.paraAt(it.last) } ?: IntRange.EMPTY
+                HorizontalPager(state = pager, beyondViewportPageCount = 1, modifier = Modifier.fillMaxSize()) { page ->
+                    val o = (pager.currentPage - page) + pager.currentPageOffsetFraction
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(if (anim == PageMode.FLIP && o > 0f) 1f else 0f)
+                            .graphicsLayer {
+                                if (anim == PageMode.FLIP) {
+                                    if (o > 0f) {
+                                        // the leaf being turned: it stays, swinging round its left edge
+                                        translationX = o * size.width
+                                        transformOrigin = TransformOrigin(0f, 0.5f)
+                                        rotationY = -90f * o.coerceIn(0f, 1f)
+                                        cameraDistance = 14f * density
+                                    } else if (o < 0f) {
+                                        // the page under it: stays where it is
+                                        translationX = o * size.width
+                                    }
+                                }
+                            }
+                            .background(bg)
+                            .pageTexture(pageStyle)
+                            // a tap at the left / right edge turns the page (a swipe still goes to the pages)
+                            .pointerInput(pager) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    val w = size.width
+                                    val zone = if (down.position.x < w * 0.16f) -1 else if (down.position.x > w * 0.84f) 1 else 0
+                                    if (zone != 0) {
+                                        val up = waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                                        if (up != null && (up.position - down.position).getDistance() < viewConfiguration.touchSlop &&
+                                            up.uptimeMillis - down.uptimeMillis < 400) {
+                                            up.consume()
+                                            val to = pager.currentPage + zone
+                                            if (to in 0 until pager.pageCount) {
+                                                onFollow(false)
+                                                scope.launch { pager.animateScrollToPage(to) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                    ) {
+                        if (page >= pages.size) {
+                            Text(
+                                stringResource(AppR.string.page_next_chapter),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        } else {
+                            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(top = 12.dp)) {
+                                val frags = pages[page].frags
+                                for ((k, f) in frags.withIndex()) {
+                                    if (k > 0) Spacer(modifier = Modifier.height(10.dp))
+                                    Box(modifier = Modifier.fillMaxWidth().height(with(dens) { f.height.toDp() }).clipToBounds()) {
+                                        Box(modifier = Modifier.layout { m, c ->
+                                            val pl = m.measure(c.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                                            layout(pl.width, c.maxHeight) { pl.place(0, -f.top) }
+                                        }) {
+                                            BookParagraph(
+                                                book = book, p = f.p, sentences = sentences,
+                                                current = if (f.p in curParas) index else -1,
+                                                fraction = if (f.p in curParas) fraction else -1f,
+                                                onLayout = { },
+                                                onTap = onTap, onLongPress = onLongPress, onWord = onWord
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            // the page's shade while the leaf above it is being turned
+                            if (anim == PageMode.FLIP && o < 0f) {
+                                Box(modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.22f * (-o).coerceIn(0f, 1f))))
+                            }
+                        }
+                    }
+                }
+                if (!followVoice && speaking) {
+                    ExtendedFloatingActionButton(
+                        onClick = { onFollow(true) },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                    ) { Text(stringResource(AppR.string.player_to_current)) }
+                }
+                // under the text: the page of the chapter and the place in the book (the panel covers it)
+                if (footer != null) {
+                    Text(
+                        "${(pager.currentPage + 1).coerceAtMost(pages.size)} / ${pages.size}  ·  $footer",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.BottomCenter).offset(y = reserve - 18.dp)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(reserve))
+    }
 }
 
 /** Shows phrase [i] at the top of the screen without reading it (the progress line while reading by eye). */

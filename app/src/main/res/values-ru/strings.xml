@@ -514,4 +514,11 @@
     <string name="own_voice_tag_tera">голос для TeraTTS</string>
     <string name="own_voice_delete_confirm">Удалить голос «%1$s» совсем? Персонажи с этим голосом получат другой голос того же пола.</string>
     <string name="own_voice_in_use">Это основной голос — сначала выберите другой основной голос</string>
+    <string name="text_view_title">Текст</string>
+    <string name="text_view_ribbon">Лентой</string>
+    <string name="text_view_pages">Страницами</string>
+    <string name="page_anim_flip">Перелистывание</string>
+    <string name="page_anim_slide">Сдвиг</string>
+    <string name="page_sound">Шелест при листании</string>
+    <string name="page_next_chapter">Следующая глава ›</string>
 </resources>

@@ -514,4 +514,11 @@
     <string name="own_voice_tag_tera">voice for TeraTTS</string>
     <string name="own_voice_delete_confirm">Delete the voice «%1$s» for good? Characters with it get another voice of the same gender.</string>
     <string name="own_voice_in_use">This is the main voice: choose another main voice first</string>
+    <string name="text_view_title">Text</string>
+    <string name="text_view_ribbon">Ribbon</string>
+    <string name="text_view_pages">Pages</string>
+    <string name="page_anim_flip">Turn over</string>
+    <string name="page_anim_slide">Slide</string>
+    <string name="page_sound">Rustle when turning</string>
+    <string name="page_next_chapter">Next chapter ›</string>
 </resources>

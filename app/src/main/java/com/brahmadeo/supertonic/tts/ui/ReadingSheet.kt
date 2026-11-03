@@ -79,7 +79,13 @@ internal fun ReadingSheet(
     onSettings: () -> Unit,
     onVoiceSettings: () -> Unit,
     pageStyle: String = PageStyles.PLAIN,
-    onPageStyle: (String) -> Unit = {}
+    onPageStyle: (String) -> Unit = {},
+    paged: Boolean = false,
+    onPaged: (Boolean) -> Unit = {},
+    pageAnim: String = PageMode.FLIP,
+    onPageAnim: (String) -> Unit = {},
+    pageSound: Boolean = true,
+    onPageSound: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
@@ -121,6 +127,25 @@ internal fun ReadingSheet(
                 for ((st, name) in listOf(PageStyles.PLAIN to AppR.string.page_style_plain, PageStyles.PAPER to AppR.string.page_style_paper,
                         PageStyles.PARCHMENT to AppR.string.page_style_parchment, PageStyles.DARK to AppR.string.page_style_dark)) {
                     FilterChip(selected = pageStyle == st, onClick = { onPageStyle(st) }, label = { Text(stringResource(name)) })
+                }
+            }
+            // ---- the text: a ribbon to scroll or pages to turn (how they turn, with a rustle or not) ----
+            Spacer(modifier = Modifier.padding(top = 6.dp))
+            Text(stringResource(AppR.string.text_view_title), style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                FilterChip(selected = !paged, onClick = { onPaged(false) }, label = { Text(stringResource(AppR.string.text_view_ribbon)) })
+                FilterChip(selected = paged, onClick = { onPaged(true) }, label = { Text(stringResource(AppR.string.text_view_pages)) })
+                if (paged) {
+                    FilterChip(selected = pageAnim == PageMode.FLIP, onClick = { onPageAnim(PageMode.FLIP) },
+                        label = { Text(stringResource(AppR.string.page_anim_flip)) })
+                    FilterChip(selected = pageAnim == PageMode.SLIDE, onClick = { onPageAnim(PageMode.SLIDE) },
+                        label = { Text(stringResource(AppR.string.page_anim_slide)) })
+                }
+            }
+            if (paged) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(AppR.string.page_sound), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Switch(checked = pageSound, onCheckedChange = { onPageSound(it) })
                 }
             }
             Spacer(modifier = Modifier.padding(top = 6.dp))
