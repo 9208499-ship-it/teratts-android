@@ -22,6 +22,29 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setNoiseS
     crate::tera::set_noise_scale(scale);
 }
 
+/// A book's audio made beforehand (BookPrep) is made at 1×: the reading's pace is applied when it is
+/// played — the same pitch-keeping stretch the engine uses. PCM 16-bit mono in, PCM out.
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_timeStretchPcm<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    pcm: jni::objects::JByteArray<'local>,
+    rate: jfloat,
+    sample_rate: jni::sys::jint,
+) -> jni::sys::jbyteArray {
+    let bytes = env.convert_byte_array(&pcm).unwrap_or_default();
+    let x: Vec<f32> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect();
+    let y = crate::stretch::time_stretch(&x, rate, sample_rate.max(1) as u32);
+    let mut out = Vec::with_capacity(y.len() * 2);
+    for v in y {
+        out.extend_from_slice(&((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    match env.byte_array_from_slice(&out) {
+        Ok(a) => a.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
 /// Shtorm's brightness: dB added above 3 kHz (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketBrightness(

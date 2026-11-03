@@ -225,6 +225,7 @@ fun LexiconScreen(
             }
           }
           "roles" -> { item { RolesSection() } }
+          "prep" -> { item { PrepSection() } }
           "perf" -> {
             item { KeepReadyRow() }
             item { FastCoresRow() }
@@ -402,6 +403,8 @@ private fun settingsPages() = listOf(
         androidx.compose.material.icons.Icons.Default.Spellcheck),
     SettingsPage("roles", stringResource(AppR.string.settings_roles), stringResource(AppR.string.settings_roles_desc),
         androidx.compose.material.icons.Icons.Default.People),
+    SettingsPage("prep", stringResource(AppR.string.settings_prep), stringResource(AppR.string.settings_prep_desc),
+        androidx.compose.material.icons.Icons.Default.BatteryChargingFull),
     SettingsPage("perf", stringResource(AppR.string.settings_perf), stringResource(AppR.string.settings_perf_desc),
         androidx.compose.material.icons.Icons.Default.Speed),
     SettingsPage("about", stringResource(AppR.string.settings_about), stringResource(AppR.string.settings_about_desc),
@@ -423,6 +426,63 @@ private fun MainVoiceRow() {
             // a grey (unticked) Shtorm recording chosen as the main voice is in use now
             if (com.brahmadeo.supertonic.tts.utils.ShtormVoices.isOff(context, v)) com.brahmadeo.supertonic.tts.utils.ShtormVoices.setOn(context, v, true)
             prefs.edit().putString("selected_voice", v).commit()
+        }
+    }
+}
+
+/**
+ * Audio of the open book made beforehand (BookPrep): on / off, when (only on charge, or also with at
+ * least half the battery), how much of the book is ready, and freeing the space.
+ */
+@Composable
+private fun PrepSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+    var on by remember { mutableStateOf(prep.enabled(context)) }
+    var mode by remember { mutableStateOf(prep.mode(context)) }
+    var tick by remember { mutableIntStateOf(0) }
+    val book = remember { com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(context) }
+    val status = remember(tick, on, mode) {
+        val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+        val voice = prefs.getString("last_voice_path", "") ?: ""
+        if (book != null) prep.status(context, book, voice) else 0 to 0L
+    }
+    Column {
+        PunctuationToggleRow(
+            title = stringResource(AppR.string.prep_title),
+            description = stringResource(AppR.string.prep_desc),
+            checked = on,
+            onToggle = { on = it; prep.setEnabled(context, it) }
+        )
+        if (on) {
+            Column(modifier = Modifier.padding(horizontal = 28.dp)) {
+                for ((m, label) in listOf(prep.MODE_CHARGING to stringResource(AppR.string.prep_mode_charging),
+                        prep.MODE_HALF to stringResource(AppR.string.prep_mode_half))) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { mode = m; prep.setMode(context, m) }
+                    ) {
+                        RadioButton(selected = mode == m, onClick = null)
+                        Text(label, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Text(
+                    if (book == null) stringResource(AppR.string.prep_no_book)
+                    else stringResource(AppR.string.prep_status, status.first, (status.second / (1024 * 1024)).toInt()),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+                Row {
+                    TextButton(onClick = {
+                        if (!prep.conditionsOk(context)) android.widget.Toast.makeText(context,
+                            context.getString(AppR.string.prep_wait), android.widget.Toast.LENGTH_LONG).show()
+                        prep.kick(context); tick++
+                    }) { Text(stringResource(AppR.string.prep_now)) }
+                    TextButton(onClick = { prep.deleteAll(context); tick++ }, enabled = status.second > 0) {
+                        Text(stringResource(AppR.string.prep_delete))
+                    }
+                }
+            }
         }
     }
 }

@@ -203,6 +203,9 @@ class MainActivity : ComponentActivity() {
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)
         QueueManager.initialize(this)
 
+        // the job that makes the open book's audio beforehand (if it is on)
+        com.brahmadeo.supertonic.tts.utils.BookPrep.schedule(this)
+
         // Wipe v1/v2 leftovers from prior versions of the app so we don't waste storage.
         AssetManager.cleanupOldVersions(this)
 

@@ -459,4 +459,17 @@
     <string name="player_voice_settings">Voice settings</string>
     <string name="library_paste_text">Paste text</string>
     <string name="book_open_failed">Could not open the book</string>
+    <string name="settings_prep">Audio beforehand</string>
+    <string name="settings_prep_desc">Voice the open book beforehand while charging — then it plays like an ordinary player</string>
+    <string name="prep_title">Prepare the open book\'s audio beforehand</string>
+    <string name="prep_desc">Chapters from the current one on are voiced in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses. Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
+    <string name="prep_mode_charging">Only while charging</string>
+    <string name="prep_mode_half">While charging or with at least half the battery</string>
+    <string name="prep_status">Chapters of the open book ready: %1$d · all prepared audio takes %2$d MB</string>
+    <string name="prep_no_book">Open a book — it will be prepared</string>
+    <string name="prep_now">Start now</string>
+    <string name="prep_delete">Delete prepared audio</string>
+    <string name="prep_wait">It starts when the phone is charging (or has half its battery, if chosen)</string>
+    <string name="notif_preparing">Preparing the book\'s audio…</string>
+    <string name="notif_preparing_n">Preparing the book\'s audio: chapter %1$d of %2$d</string>
 </resources>

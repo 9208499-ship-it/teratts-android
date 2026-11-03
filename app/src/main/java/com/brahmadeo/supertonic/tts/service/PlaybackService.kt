@@ -427,6 +427,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             skipPhrase(1)
         } else if (intent?.action == "TERA_PREV") {
             skipPhrase(-1)
+        } else if (intent?.action == com.brahmadeo.supertonic.tts.utils.BookPrep.ACTION_PREPARE) {
+            startPrepare()
         } else if (intent?.action == ACTION_PREVIEW) {
             previewVoice(intent.getStringExtra("text") ?: "", intent.getStringExtra("voice") ?: "",
                 intent.getFloatExtra("speed", 1f))
@@ -720,116 +722,15 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
                 val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
 
-                // Reading by roles: who says what, worked out once for the whole text
-                val rolesOn = com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this@PlaybackService)
-                // character settings are kept per book (the book of this text, "" if none)
-                val charScope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text)
-                // the whole book's characters (built once in the background) and the user's corrections
-                // The first chapter used to be read before the book's roster was ready: its characters,
-                // genders and voices came from that chapter alone, and changed from the next one on.
-                // Now the roster is waited for (once per book, a few seconds; at most half a minute).
-                val roster = if (rolesOn && charScope.isNotEmpty())
-                    com.brahmadeo.supertonic.tts.utils.BookRoster.await(this@PlaybackService, charScope, 30_000L) else null
-                val rolePrior = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(
-                    roster?.genders ?: emptyMap(),
-                    if (rolesOn) com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(this@PlaybackService, charScope) else emptyMap(),
-                    roster?.aliases ?: emptyMap())
-                val roleResult = if (rolesOn) {
-                    try {
-                        com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text, rolePrior),
-                            (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope))
-                    } catch (e: Throwable) {
-                        Log.e(TAG, "Role analysis failed, reading without roles", e); null
-                    }
-                } else null
-                val roleSpans = roleResult?.spans ?: emptyList()
-                // where each spoken chunk lies in the text (robust to the splitter's spacing and gluing)
-                val roleRanges = if (roleResult != null) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
-                val maleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
-                    com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)) ?: stylePath
-                val femaleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
-                    com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService)) ?: stylePath
-                // narrator: its own voice if chosen, otherwise the main voice
-                val narratorStyle = if (rolesOn) {
-                    com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService)
-                        .takeIf { it.isNotEmpty() }
-                        ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: stylePath
-                } else stylePath
-                // a line whose speaker is unknown is still a line: never the narrator's voice
-                // The narrator's voice (by default the main voice — often the same as the male
-                // lines' one, ru_m5) belongs to the narrator and the hero. Other characters
-                // used to get it too: a man without his own voice ("Ньютон", the 7th by lines in
-                // «Неучтённый») spoke exactly like the hero. Now they get another voice of their gender.
-                val narratorFile = java.io.File(narratorStyle).name
-                fun notNarrator(style: String, female: Boolean): String =
-                    if (!rolesOn || java.io.File(style).name != narratorFile) style
-                    else com.brahmadeo.supertonic.tts.utils.CharacterVoices.alternative(this@PlaybackService, narratorFile, female)
-                        ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: style
-                val maleStyle = notNarrator(maleStyle0, false)
-                val femaleStyle = notNarrator(femaleStyle0, true)
-                val unknownStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService)
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
-                    ?.let { notNarrator(it, com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(java.io.File(it).name)) } ?: maleStyle
-
-                // Every character: their own voice (remembered across chapters) and speed
-                val charVoice = HashMap<String, String>()
-                val charSpeed = HashMap<String, Float>()
-                if (roleResult != null) {
-                    val perCharacter = com.brahmadeo.supertonic.tts.utils.RolePrefs.charactersEnabled(this@PlaybackService)
-                    val available = com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(this@PlaybackService)
-                    // own voices only for the main characters of the book; the rest — by gender
-                    val ranking = roster?.ranking ?: roleResult.characters.map { it.name }
-                    val mainSet = ranking.filter { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO }
-                        .take(com.brahmadeo.supertonic.tts.utils.RolePrefs.mainCount(this@PlaybackService)).toSet() + com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM
-                    for (c in roleResult.characters) {
-                        charSpeed[c.name] = com.brahmadeo.supertonic.tts.utils.CharacterVoices.speedOverride(this@PlaybackService, c.name, charScope) ?: c.speed
-                        if (!perCharacter) continue
-                        if (c.name == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO) {
-                            // the hero speaks in the narrator's voice unless a voice was set for him
-                            com.brahmadeo.supertonic.tts.utils.CharacterVoices.explicit(this@PlaybackService, c.name, charScope)
-                                ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
-                                ?.let { charVoice[c.name] = it }
-                            continue
-                        }
-                        // a voice once given stays to the end of the book, even if the character is not
-                        // among the main ones by the whole book's count (it used to fall back to the
-                        // common male/female voice from the next chapter on)
-                        if (c.name !in mainSet && !com.brahmadeo.supertonic.tts.utils.CharacterVoices.isManual(this@PlaybackService, c.name, charScope) &&
-                            com.brahmadeo.supertonic.tts.utils.CharacterVoices.explicit(this@PlaybackService, c.name, charScope) == null) continue
-                        // the gender of the whole book, not of this chapter
-                        val bookRole = roster?.genders?.get(c.name) ?: c.role
-                        val default = if (bookRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE)
-                            com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService) else com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)
-                        com.brahmadeo.supertonic.tts.utils.CharacterVoices.voiceFor(this@PlaybackService, c.name, bookRole, available, default, narratorFile, charScope,
-                            reserved = setOf(java.io.File(maleStyle).name, java.io.File(femaleStyle).name, java.io.File(unknownStyle).name))
-                            ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
-                            ?.let { charVoice[c.name] = it }
-                    }
-                }
-
-                // a line nobody could be matched to: the voice chosen for unknown lines, or else the common
-                // voice of the main character's sex (most lines) — in "Alice" a woman's, not a man's
-                val speechStyle = if (com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService).isNotEmpty()) unknownStyle else {
-                    val main = roleResult?.let { r ->
-                        (com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this@PlaybackService, charScope)?.ranking ?: r.characters.map { it.name })
-                            .firstOrNull { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO && it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM }
-                    }
-                    // the common voice of that character's sex — not the character's own voice: the
-                    // main character must not seem to say every line nobody was found for
-                    val mainRole = main?.let { m -> roster?.genders?.get(m) ?: roleResult?.characters?.firstOrNull { it.name == m }?.role }
-                    if (mainRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE) femaleStyle else unknownStyle
-                }
-                // The hero speaks in the narrator's voice — unless the line is plainly the other sex's: a
-                // book told by several people ("Неучтённый‑3": a chapter told by a grandmother) read
-                // her lines in the man's narrator voice
-                val narratorMale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(narratorFile)
-                val narratorFemale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(narratorFile)
-                fun heroStyle(role: com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role): String = when {
-                    role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE && narratorMale -> femaleStyle
-                    role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE && narratorFemale -> maleStyle
-                    else -> narratorStyle
-                }
+                // who says each phrase, in which voice, at which pace and loudness (shared with BookPrep)
+                val plan = voicePlan(text, sentences, stylePath,
+                    com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text))
+                // a chapter made beforehand (BookPrep): played from its file — no neural network, no stalls
+                val prepBook = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService)
+                    ?.takeIf { bookScope.isNotEmpty() }
+                val prepared = prepBook?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, it, text, totalSentences, stylePath) }
+                val prepReader = prepared?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.Reader(it) }
+                if (prepared != null) Log.i(TAG, "Prepared audio: the chapter plays from its file")
 
                 // Channel sizing:
                 //  pre-roll OFF: 50 chunks ~ 5 s look-ahead — enough to hide
@@ -997,12 +898,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
                         // A sentence may hold a line and the author words ("— Привет, — сказала она"):
                         // with roles on it is voiced piece by piece, each with its own voice.
-                        val pieces = if (roleResult != null) {
-                            com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.piecesIn(text, roleRanges.getOrNull(index), roleSpans, sentences[index])
-                        } else {
-                            listOf(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece(sentences[index],
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.NARRATOR, null, com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Manner.NORMAL))
-                        }
+                        val pieces = plan.pieces(index)
                         var result: ByteArray? = null
                         val sentenceStarted = System.nanoTime()
                         // sentences of this phrase: where each starts, counted in letters (pieces are
@@ -1012,24 +908,26 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         val startLetters = sentStarts.map { p -> chunkText.substring(0, p).count { it.isLetterOrDigit() } }
                         var lettersDone = 0
                         var sentenceBytes = 0L
-                        for (pc in pieces) {
-                            if (SupertonicTTS.isCancelled() || !isActive) break
-                            // first-person books: the hero ("уточнил я") speaks in the narrator's voice
-                            val pieceStyle = if (pc.speaker == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO) (charVoice[pc.speaker] ?: heroStyle(pc.role))
-                            else pc.speaker?.let { charVoice[it] } ?: when (pc.role) {
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE -> maleStyle
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE -> femaleStyle
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> speechStyle
-                                else -> narratorStyle
+                        // made beforehand: the phrase's sentences from the file, at the reading's pace
+                        val ready = prepReader?.phrase(index)
+                        if (ready != null) {
+                            for ((charAt, pcm0) in ready) {
+                                if (SupertonicTTS.isCancelled() || !isActive) break
+                                if (sentStarts.size > 1) {
+                                    val m = ByteArray(0)
+                                    subMarkers[m] = longArrayOf(index.toLong(), charAt.toLong())
+                                    try { channel.send(m) } catch (_: Exception) { break }
+                                }
+                                val pcm = if (Math.abs(liveSpeed - 1f) > 0.01f) SupertonicTTS.stretch(pcm0, liveSpeed) else pcm0
+                                if (pcm.isEmpty()) continue
+                                try { channel.send(pcm) } catch (_: Exception) { break }
+                                result = pcm; sentenceBytes += pcm.size
                             }
-                            // character's own pace × how this line is said (выпалил / протянул)
-                            // × the voice's own tempo: a slow voice (made from a recording) is sped up to the others
-                            val pieceSpeed = (liveSpeed * (pc.speaker?.let { charSpeed[it] } ?: 1f) *
-                                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner) *
-                                com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this@PlaybackService, pieceStyle, narratorStyle)).coerceIn(0.5f, 2.5f)
-                            // every voice as loud as the main one (voices differ by a lot), then how the line is said
-                            val pieceGain = VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner) *
-                                com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, pieceStyle, narratorStyle)
+                        } else for (pc in pieces) {
+                            if (SupertonicTTS.isCancelled() || !isActive) break
+                            val pieceStyle = plan.style(pc)
+                            val pieceSpeed = plan.speed(pc, pieceStyle, liveSpeed)
+                            val pieceGain = plan.gain(pc, pieceStyle)
                             // sentence by sentence, each with its marker: the highlight follows the
                             // voice exactly, as readers do with system TTS (the engine cuts at
                             // sentence ends anyway, so this costs nothing)
@@ -1105,6 +1003,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     if (preRollSignal != null && !preRollSignal.isCompleted) {
                         preRollSignal.complete(Unit)
                     }
+                    prepReader?.close()
                     channel.close()
                     currentAudioChannel = null
                 }
@@ -1148,6 +1047,284 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
             }
         }
+    }
+
+
+    /** Who says each phrase and in which voice, at which pace and loudness: for reading and for BookPrep. */
+    private class VoicePlan(
+        val pieces: (Int) -> List<com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece>,
+        val style: (com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece) -> String,
+        val speed: (com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece, String, Float) -> Float,
+        val gain: (com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece, String) -> Float
+    )
+
+    /** [charScope]: the book whose character settings apply ("" — none). */
+    private suspend fun voicePlan(text: String, sentences: List<String>, stylePath: String, charScope: String): VoicePlan {
+        // Reading by roles: who says what, worked out once for the whole text
+        val rolesOn = com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this@PlaybackService)
+        // the whole book's characters (built once in the background) and the user's corrections
+        // The first chapter used to be read before the book's roster was ready: its characters,
+        // genders and voices came from that chapter alone, and changed from the next one on.
+        // Now the roster is waited for (once per book, a few seconds; at most half a minute).
+        val roster = if (rolesOn && charScope.isNotEmpty())
+            com.brahmadeo.supertonic.tts.utils.BookRoster.await(this@PlaybackService, charScope, 30_000L) else null
+        val rolePrior = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(
+            roster?.genders ?: emptyMap(),
+            if (rolesOn) com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(this@PlaybackService, charScope) else emptyMap(),
+            roster?.aliases ?: emptyMap())
+        val roleResult = if (rolesOn) {
+            try {
+                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text, rolePrior),
+                    (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope))
+            } catch (e: Throwable) {
+                Log.e(TAG, "Role analysis failed, reading without roles", e); null
+            }
+        } else null
+        val roleSpans = roleResult?.spans ?: emptyList()
+        // where each spoken chunk lies in the text (robust to the splitter's spacing and gluing)
+        val roleRanges = if (roleResult != null) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
+        val maleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
+            com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)) ?: stylePath
+        val femaleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
+            com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService)) ?: stylePath
+        // narrator: its own voice if chosen, otherwise the main voice
+        val narratorStyle = if (rolesOn) {
+            com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService)
+                .takeIf { it.isNotEmpty() }
+                ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: stylePath
+        } else stylePath
+        // a line whose speaker is unknown is still a line: never the narrator's voice
+        // The narrator's voice (by default the main voice — often the same as the male
+        // lines' one, ru_m5) belongs to the narrator and the hero. Other characters
+        // used to get it too: a man without his own voice ("Ньютон", the 7th by lines in
+        // «Неучтённый») spoke exactly like the hero. Now they get another voice of their gender.
+        val narratorFile = java.io.File(narratorStyle).name
+        fun notNarrator(style: String, female: Boolean): String =
+            if (!rolesOn || java.io.File(style).name != narratorFile) style
+            else com.brahmadeo.supertonic.tts.utils.CharacterVoices.alternative(this@PlaybackService, narratorFile, female)
+                ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: style
+        val maleStyle = notNarrator(maleStyle0, false)
+        val femaleStyle = notNarrator(femaleStyle0, true)
+        val unknownStyle = com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService)
+            .takeIf { it.isNotEmpty() }
+            ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
+            ?.let { notNarrator(it, com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(java.io.File(it).name)) } ?: maleStyle
+
+        // Every character: their own voice (remembered across chapters) and speed
+        val charVoice = HashMap<String, String>()
+        val charSpeed = HashMap<String, Float>()
+        if (roleResult != null) {
+            val perCharacter = com.brahmadeo.supertonic.tts.utils.RolePrefs.charactersEnabled(this@PlaybackService)
+            val available = com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(this@PlaybackService)
+            // own voices only for the main characters of the book; the rest — by gender
+            val ranking = roster?.ranking ?: roleResult.characters.map { it.name }
+            val mainSet = ranking.filter { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO }
+                .take(com.brahmadeo.supertonic.tts.utils.RolePrefs.mainCount(this@PlaybackService)).toSet() + com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM
+            for (c in roleResult.characters) {
+                charSpeed[c.name] = com.brahmadeo.supertonic.tts.utils.CharacterVoices.speedOverride(this@PlaybackService, c.name, charScope) ?: c.speed
+                if (!perCharacter) continue
+                if (c.name == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO) {
+                    // the hero speaks in the narrator's voice unless a voice was set for him
+                    com.brahmadeo.supertonic.tts.utils.CharacterVoices.explicit(this@PlaybackService, c.name, charScope)
+                        ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
+                        ?.let { charVoice[c.name] = it }
+                    continue
+                }
+                // a voice once given stays to the end of the book, even if the character is not
+                // among the main ones by the whole book's count (it used to fall back to the
+                // common male/female voice from the next chapter on)
+                if (c.name !in mainSet && !com.brahmadeo.supertonic.tts.utils.CharacterVoices.isManual(this@PlaybackService, c.name, charScope) &&
+                    com.brahmadeo.supertonic.tts.utils.CharacterVoices.explicit(this@PlaybackService, c.name, charScope) == null) continue
+                // the gender of the whole book, not of this chapter
+                val bookRole = roster?.genders?.get(c.name) ?: c.role
+                val default = if (bookRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE)
+                    com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService) else com.brahmadeo.supertonic.tts.utils.RolePrefs.maleVoice(this@PlaybackService)
+                com.brahmadeo.supertonic.tts.utils.CharacterVoices.voiceFor(this@PlaybackService, c.name, bookRole, available, default, narratorFile, charScope,
+                    reserved = setOf(java.io.File(maleStyle).name, java.io.File(femaleStyle).name, java.io.File(unknownStyle).name))
+                    ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }
+                    ?.let { charVoice[c.name] = it }
+            }
+        }
+
+        // a line nobody could be matched to: the voice chosen for unknown lines, or else the common
+        // voice of the main character's sex (most lines) — in "Alice" a woman's, not a man's
+        val speechStyle = if (com.brahmadeo.supertonic.tts.utils.RolePrefs.unknownVoice(this@PlaybackService).isNotEmpty()) unknownStyle else {
+            val main = roleResult?.let { r ->
+                (com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this@PlaybackService, charScope)?.ranking ?: r.characters.map { it.name })
+                    .firstOrNull { it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO && it != com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.SYSTEM }
+            }
+            // the common voice of that character's sex — not the character's own voice: the
+            // main character must not seem to say every line nobody was found for
+            val mainRole = main?.let { m -> roster?.genders?.get(m) ?: roleResult?.characters?.firstOrNull { it.name == m }?.role }
+            if (mainRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE) femaleStyle else unknownStyle
+        }
+        // The hero speaks in the narrator's voice — unless the line is plainly the other sex's: a
+        // book told by several people ("Неучтённый‑3": a chapter told by a grandmother) read
+        // her lines in the man's narrator voice
+        val narratorMale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(narratorFile)
+        val narratorFemale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(narratorFile)
+        fun heroStyle(role: com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role): String = when {
+            role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE && narratorMale -> femaleStyle
+            role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE && narratorFemale -> maleStyle
+            else -> narratorStyle
+        }
+        return VoicePlan(
+            pieces = { index ->
+                if (roleResult != null) {
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.piecesIn(text, roleRanges.getOrNull(index), roleSpans, sentences[index])
+                } else {
+                    listOf(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Piece(sentences[index], com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.NARRATOR, null, com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Manner.NORMAL))
+                }
+            },
+            style = { pc ->
+                // first-person books: the hero ("уточнил я") speaks in the narrator's voice
+                if (pc.speaker == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO) (charVoice[pc.speaker] ?: heroStyle(pc.role))
+                else pc.speaker?.let { charVoice[it] } ?: when (pc.role) {
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE -> maleStyle
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE -> femaleStyle
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> speechStyle
+                    else -> narratorStyle
+                }
+            },
+            // character's own pace × how this line is said (выпалил / протянул)
+            // × the voice's own tempo: a slow voice (made from a recording) is sped up to the others
+            speed = { pc, pieceStyle, live ->
+                (live * (pc.speaker?.let { charSpeed[it] } ?: 1f) *
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerSpeed(pc.manner) *
+                    com.brahmadeo.supertonic.tts.utils.VoiceTempo.factor(this@PlaybackService, pieceStyle, narratorStyle)).coerceIn(0.5f, 2.5f)
+            },
+            // every voice as loud as the main one (voices differ by a lot), then how the line is said
+            gain = { pc, pieceStyle ->
+                VOLUME_BOOST_FACTOR * com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.mannerGain(pc.manner) *
+                    com.brahmadeo.supertonic.tts.utils.VoiceLoudness.factor(this@PlaybackService, pieceStyle, narratorStyle)
+            }
+        )
+    }
+
+    // ---- audio of the open book made beforehand (BookPrep) ----
+    @Volatile private var preparing = false
+
+    /** Started by BookPrep (the system's job or the settings): voices the open book's next chapters. */
+    private fun startPrepare() {
+        if (isServiceActive() || preparing) return
+        // started with startForegroundService: in the foreground within 5 seconds, whatever follows
+        try { startForegroundService(getString(R.string.notif_preparing), false) } catch (e: Exception) {
+            Log.w(TAG, "prepare fg: ${e.message}"); return
+        }
+        if (!com.brahmadeo.supertonic.tts.utils.BookPrep.conditionsOk(this)) { stopForeground(STOP_FOREGROUND_REMOVE); return }
+        preparing = true
+        SupertonicTTS.setCancelled(false)
+        // a reader app wants the engine (system TTS): preparing gives way at once and goes on later
+        SupertonicTTS.onEngineWanted = {
+            val job = synthesisJob
+            if (preparing && job != null && android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+                SupertonicTTS.setCancelled(true)
+                job.cancel()
+                kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(5_000L) { job.join() } }
+                SupertonicTTS.setCancelled(false)
+            }
+        }
+        synthesisJob = serviceScope.launch(Dispatchers.IO) {
+            try {
+                engineReady?.join()
+                prepareBook()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.i(TAG, "Prepare: stopped (reading started or the phone is not charging)")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Prepare failed", e)
+            } finally {
+                preparing = false
+                SupertonicTTS.onEngineWanted = null
+                try { if (wakeLock?.isHeld == true && !isServiceActive()) wakeLock?.release() } catch (_: Exception) { }
+                withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
+                    if (!isServiceActive()) stopForeground(STOP_FOREGROUND_REMOVE)
+                }
+            }
+        }
+    }
+
+    private suspend fun prepareBook() {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        val book = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) ?: return
+        val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+        val lang = prefs.getString("last_lang", "ru") ?: "ru"
+        val steps = prefs.getInt("last_steps", 5)
+        // the voice the book is read in (as the player has it)
+        val voiceDir = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/voice_styles")
+        val stylePath = prefs.getString("last_voice_path", "")?.takeIf { it.isNotEmpty() && !it.contains(';') }
+            ?: File(voiceDir, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json").absolutePath
+        val current = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this)
+        val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this).filter { it.index >= current }
+        val scope = File(book).name
+        for ((k, c) in chapters.withIndex()) {
+            if (!currentCoroutineContext().isActive || !prep.conditionsOk(this)) return
+            // the same text the player gets (MainActivity.prepareTextForTts)
+            val t = c.text.trim()
+            val text = if (lang.lowercase().startsWith("ko") || t.endsWith(" .")) t else "$t ."
+            val effectiveLang = autoDetectRussian(text, lang)
+            val sentences = textNormalizer.splitIntoSentences(text, effectiveLang)
+            if (sentences.isEmpty() || prep.find(this, book, text, sentences.size, stylePath) != null) continue
+            withContext(Dispatchers.Main) {
+                try { updateNotification(getString(R.string.notif_preparing_n, k + 1, chapters.size)) } catch (_: Exception) { }
+            }
+            wakeLock?.acquire(60 * 60 * 1000L)
+            prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps)
+        }
+        Log.i(TAG, "Prepare: the book is ready from the current chapter on")
+    }
+
+    /** One chapter into its file, phrase by phrase, with the index BookPrep plays it by. */
+    private suspend fun prepareChapter(book: String, scope: String, text: String, sentences: List<String>,
+                                       lang: String, stylePath: String, steps: Int) {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        val isAdvancedEnabled = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getBoolean("is_advanced_normalization", false)
+        val plan = voicePlan(text, sentences, stylePath, scope)
+        val rate = SupertonicTTS.getAudioSampleRate()
+        val dir = prep.bookDir(this, book).apply { mkdirs() }
+        val key = prep.textKey(text)
+        val (writer, made) = com.brahmadeo.supertonic.tts.utils.AudioFileWriter.open(File(dir, "$key.m4a"), rate)
+        val starts = ArrayList<Long>()
+        val subsAll = ArrayList<List<Pair<Int, Long>>>()
+        var samples = 0L
+        var ok = false
+        try {
+            for ((index, chunkText) in sentences.withIndex()) {
+                if (!currentCoroutineContext().isActive || SupertonicTTS.isCancelled() || !prep.conditionsOk(this)) return
+                starts.add(samples)
+                // the same sentence boundaries the player marks (SpokenProgress), counted in letters
+                val sentStarts = com.brahmadeo.supertonic.tts.utils.SpokenProgress.sentenceStarts(chunkText)
+                val startLetters = sentStarts.map { p -> chunkText.substring(0, p).count { it.isLetterOrDigit() } }
+                var lettersDone = 0
+                val subsHere = ArrayList<Pair<Int, Long>>()
+                for (pc in plan.pieces(index)) {
+                    val pieceStyle = plan.style(pc)
+                    // made at 1×: the reading's pace is applied when it is played
+                    val pieceSpeed = plan.speed(pc, pieceStyle, 1f)
+                    val pieceGain = plan.gain(pc, pieceStyle)
+                    for (sub in com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)) {
+                        if (sentStarts.size > 1) {
+                            val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
+                            subsHere.add(sentStarts[k] to samples)
+                        } else if (subsHere.isEmpty()) subsHere.add(0 to samples)
+                        lettersDone += sub.count { it.isLetterOrDigit() }
+                        val normalized = textNormalizer.normalize(sub, lang, isAdvancedEnabled)
+                        val r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                        if (r != null && r.isNotEmpty()) { writer.write(r); samples += r.size / 2 }
+                        else if (SupertonicTTS.isCancelled()) return
+                    }
+                }
+                if (subsHere.isEmpty()) subsHere.add(0 to starts.last())
+                subsAll.add(subsHere)
+            }
+            starts.add(samples)
+            ok = currentCoroutineContext().isActive && !SupertonicTTS.isCancelled() && starts.size == sentences.size + 1
+        } finally {
+            if (!ok) { writer.abort(); made.delete() }
+        }
+        if (writer.finish()) {
+            prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath)
+            Log.i(TAG, "Prepare: chapter ready (${samples / rate} s): ${made.name}")
+        } else made.delete()
     }
 
     /**

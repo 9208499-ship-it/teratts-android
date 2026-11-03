@@ -28,6 +28,11 @@ object SupertonicTTS {
     private external fun setNoiseScale(scale: Float)
     private external fun setPocketTemperature(value: Float)
     private external fun setPocketBrightness(value: Float)
+    private external fun timeStretchPcm(pcm: ByteArray, rate: Float, sampleRate: Int): ByteArray?
+
+    /** PCM 16-bit mono [rate] times faster (pitch kept): audio made beforehand, played at the reading's pace. */
+    fun stretch(pcm: ByteArray, rate: Float): ByteArray =
+        try { timeStretchPcm(pcm, rate, cachedSampleRate) ?: pcm } catch (e: Throwable) { pcm }
     private external fun setVoiceRhythm(table: String)
     private external fun setCommaQuotes(on: Boolean)
     @Volatile private var rhythmAvailable = true

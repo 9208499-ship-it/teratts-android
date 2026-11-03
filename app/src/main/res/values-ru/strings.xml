@@ -459,4 +459,17 @@
     <string name="player_voice_settings">Настройки озвучки</string>
     <string name="library_paste_text">Вставить текст</string>
     <string name="book_open_failed">Книгу открыть не удалось</string>
+    <string name="settings_prep">Аудио заранее</string>
+    <string name="settings_prep_desc">Озвучивать открытую книгу заранее, на зарядке — потом она играет как обычный плеер</string>
+    <string name="prep_title">Готовить аудио открытой книги заранее</string>
+    <string name="prep_desc">Главы от текущей и дальше озвучиваются в фоне тем же голосом и с теми же ролями, что при чтении. Готовая глава играет из файла: батарея почти не тратится, пауз не бывает. Сменили голос, модель, роли или словарь — глава читается вживую и готовится заново.</string>
+    <string name="prep_mode_charging">Только на зарядке</string>
+    <string name="prep_mode_half">На зарядке или если заряд не меньше половины</string>
+    <string name="prep_status">Готово глав открытой книги: %1$d · всё подготовленное занимает %2$d МБ</string>
+    <string name="prep_no_book">Откройте книгу — готовиться будет она</string>
+    <string name="prep_now">Начать сейчас</string>
+    <string name="prep_delete">Удалить подготовленное</string>
+    <string name="prep_wait">Начнётся, когда телефон будет на зарядке (или с зарядом от половины, если выбрано)</string>
+    <string name="notif_preparing">Готовлю аудио книги…</string>
+    <string name="notif_preparing_n">Готовлю аудио книги: глава %1$d из %2$d</string>
 </resources>
