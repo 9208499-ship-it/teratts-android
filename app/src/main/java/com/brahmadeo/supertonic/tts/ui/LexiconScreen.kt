@@ -9,6 +9,13 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Spellcheck
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
@@ -162,9 +169,7 @@ fun LexiconScreen(
                     )
                 }
             }
-            return@Scaffold
-        }
-        LazyColumn(
+        } else LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
