@@ -848,6 +848,7 @@ private fun EngineSection() {
     var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
     var brightness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormBrightness) }
     var quality by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormSteps) }
+    var denoise by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormDenoise) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
     var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
@@ -991,6 +992,40 @@ private fun EngineSection() {
                     FilterChip(
                         selected = quality == n,
                         onClick = { quality = n; com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormSteps(context, n) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            // cleaning by a speech-enhancement network (10 MB, downloaded when first chosen)
+            val pp = com.brahmadeo.supertonic.tts.utils.PunctuationPrefs
+            Text(stringResource(AppR.string.shtorm_denoise_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(AppR.string.shtorm_denoise_desc),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(top = 4.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                for ((m, label) in listOf(pp.DENOISE_OFF to stringResource(AppR.string.shtorm_denoise_off),
+                        pp.DENOISE_PREP to stringResource(AppR.string.shtorm_denoise_prep),
+                        pp.DENOISE_ALWAYS to stringResource(AppR.string.shtorm_denoise_always))) {
+                    FilterChip(
+                        selected = denoise == m,
+                        enabled = progress == null,
+                        onClick = {
+                            if (m == pp.DENOISE_OFF || assets.denoiserReady(context)) {
+                                denoise = m; pp.setShtormDenoise(context, m)
+                            } else {
+                                error = null; progress = 0f
+                                scope.launch {
+                                    try {
+                                        assets.downloadDenoiser(context) { v -> scope.launch { progress = v } }
+                                        denoise = m; pp.setShtormDenoise(context, m)
+                                    } catch (ex: Exception) {
+                                        error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                                    }
+                                    progress = null
+                                }
+                            }
+                        },
                         label = { Text(label) }
                     )
                 }

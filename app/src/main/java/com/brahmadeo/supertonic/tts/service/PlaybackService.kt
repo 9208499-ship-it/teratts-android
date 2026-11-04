@@ -1378,6 +1378,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         prepWaiter?.cancel()
         prep.now.value = getString(R.string.prep_starting)
         preparing = true
+        prep.making = true
         SupertonicTTS.setCancelled(false)
         // a reader app wants the engine (system TTS): preparing gives way at once and goes on later
         SupertonicTTS.onEngineWanted = {
@@ -1399,6 +1400,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 Log.e(TAG, "Prepare failed", e)
             } finally {
                 preparing = false
+                com.brahmadeo.supertonic.tts.utils.BookPrep.making = false
                 com.brahmadeo.supertonic.tts.utils.BookPrep.now.value = null
                 SupertonicTTS.onEngineWanted = null
                 try { if (wakeLock?.isHeld == true && !isServiceActive()) wakeLock?.release() } catch (_: Exception) { }

@@ -55,6 +55,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocket
     crate::pocket::set_brightness(value);
 }
 
+/// Pocket TTS: its finished speech cleaned by the speech-enhancement network (settings).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketDenoise(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jni::sys::jboolean,
+) {
+    crate::denoise::set_enabled(on != 0);
+}
+
 /// Pocket TTS's quality: the flow head's steps for each frame (settings).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketSteps(
@@ -140,6 +150,7 @@ mod tera;
 mod homo;
 mod stretch;
 mod pocket;
+mod denoise;
 mod thermal;
 
 use helper::{load_text_to_speech, load_voice_style, load_and_mix_voice_styles, TextToSpeech, Style};

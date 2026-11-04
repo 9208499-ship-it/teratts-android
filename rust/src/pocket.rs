@@ -303,6 +303,12 @@ pub struct Pocket {
     pub eos_threshold: f32,
     /// Flow steps per frame (1: as before; see [set_decode_steps]).
     pub decode_steps: usize,
+    /// The model's folder (the denoiser's file lies there too) and the threads it was given.
+    dir: String,
+    /// The speech-enhancement network for the finished speech (denoise.rs): loaded when first
+    /// wanted; [denoiser_failed]: it would not load — not tried again.
+    denoiser: Option<crate::denoise::Denoiser>,
+    denoiser_failed: bool,
 }
 
 /// The frames a phrase may take when read normally: its letters at 11 a second (book prose is
@@ -339,7 +345,32 @@ impl Pocket {
         let decoder_states = States::of(&decoder)?;
         let bpe = Bpe::load(&Path::new(dir).join("tokenizer.model"))?;
         Ok(Pocket { encoder, text, main, flow, decoder, main_states, decoder_states, bpe,
-            voices: HashMap::new(), temperature: 0.3, eos_threshold: -4.0, decode_steps: 1 })
+            voices: HashMap::new(), temperature: 0.3, eos_threshold: -4.0, decode_steps: 1,
+            dir: dir.to_string(), denoiser: None, denoiser_failed: false })
+    }
+
+    /// Finished speech (24 kHz) cleaned by the speech-enhancement network, at its 48 kHz — if it is
+    /// switched on and its file has been downloaded; otherwise None (the speech is used as it is).
+    /// One thread: on more the small network only waits for them (measured: 1 is the fastest).
+    pub fn clean(&mut self, x: &[f32]) -> Option<Vec<f32>> {
+        if !crate::denoise::enabled() || self.denoiser_failed || x.is_empty() { return None; }
+        if self.denoiser.is_none() {
+            let path = Path::new(&self.dir).join(crate::denoise::MODEL_FILE);
+            if !path.exists() { return None; }
+            match crate::denoise::Denoiser::load(&path, 1) {
+                Ok(d) => self.denoiser = Some(d),
+                Err(e) => { log::warn!("denoiser: {e:#}"); self.denoiser_failed = true; return None; }
+            }
+        }
+        let t = std::time::Instant::now();
+        let up = resample(x, POCKET_RATE, crate::denoise::RATE);
+        match self.denoiser.as_mut()?.run(&up, crate::denoise::ATTENUATION_LIMIT_DB) {
+            Ok(y) => {
+                log::info!("denoised {:.2} s in {} ms", x.len() as f32 / POCKET_RATE as f32, t.elapsed().as_millis());
+                Some(y)
+            }
+            Err(e) => { log::warn!("denoiser: {e:#}"); None }
+        }
     }
 
     /// The voice's conditioning from its recording (first 30 s; cached until the file changes).
@@ -697,6 +728,7 @@ mod engine_path {
         assert_eq!(tts.kind, crate::helper::ModelKind::Pocket);
         tts.voice_path = format!("{d}/alba.wav");
         let style = crate::helper::Style { ttl: ndarray::Array3::zeros((1, 50, 256)), dp: ndarray::Array3::zeros((1, 8, 16)) };
+        if std::env::var("DENOISE").is_ok() { crate::denoise::set_enabled(true); }
         for speed in [1.0f32, 1.4] {
             let t = std::time::Instant::now();
             let (wav, dur) = tts.call("Стр+елки час+ов показ+ывали п+олночь. А стрелк+и заст+ыли на пост+ах, — сказал он, — и ждал+и рассв+ета!",

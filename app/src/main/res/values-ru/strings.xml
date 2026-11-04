@@ -564,4 +564,9 @@
     <string name="shtorm_quality_1">Обычное</string>
     <string name="shtorm_quality_2">Высокое</string>
     <string name="shtorm_quality_4">Наилучшее</string>
+    <string name="shtorm_denoise_title">Очистка звука нейросетью</string>
+    <string name="shtorm_denoise_desc">Небольшая нейросеть (DPDFNet) дочищает готовую речь Pocket TTS. Процессору это почти вдвое больше работы, поэтому можно включить только при подготовке книги заранее и сохранении аудиокниги. «Всегда» — и при чтении: если на вашем телефоне чтение начнёт запинаться, верните «При подготовке». При первом выборе скачивается 10 МБ.</string>
+    <string name="shtorm_denoise_off">Выкл</string>
+    <string name="shtorm_denoise_prep">При подготовке</string>
+    <string name="shtorm_denoise_always">Всегда</string>
 </resources>

@@ -52,6 +52,17 @@ object PunctuationPrefs {
     @Volatile var shtormLiveliness: Float = 0.3f
         private set
 
+    /**
+     * Pocket TTS's speech cleaned by a speech-enhancement network: [DENOISE_OFF], [DENOISE_PREP] (only
+     * where time does not matter: the book made beforehand, an audiobook saved) or [DENOISE_ALWAYS]
+     * (also while reading: twice the work for the processor).
+     */
+    @Volatile var shtormDenoise: Int = 0
+        private set
+    const val DENOISE_OFF = 0
+    const val DENOISE_PREP = 1
+    const val DENOISE_ALWAYS = 2
+
     /** Pocket TTS's quality: flow steps per frame (1 as before; 2 and 4 cleaner and slower). */
     @Volatile var shtormSteps: Int = 1
         private set
@@ -88,6 +99,7 @@ object PunctuationPrefs {
         shtormLiveliness = p.getFloat("shtorm_liveliness", 0.3f)
         shtormBrightness = p.getFloat("shtorm_brightness", 8f)
         shtormSteps = p.getInt("shtorm_steps", 1).coerceIn(1, 8)
+        shtormDenoise = p.getInt("shtorm_denoise", DENOISE_OFF).coerceIn(DENOISE_OFF, DENOISE_ALWAYS)
         paragraphPause = p.getFloat(KEY_PARAGRAPH_PAUSE, 0.9f)
         // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
         // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
@@ -139,6 +151,13 @@ object PunctuationPrefs {
         shtormLiveliness = value.coerceIn(0.1f, 0.7f)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putFloat("shtorm_liveliness", shtormLiveliness)
+            .apply()
+    }
+
+    fun setShtormDenoise(context: Context, mode: Int) {
+        shtormDenoise = mode.coerceIn(DENOISE_OFF, DENOISE_ALWAYS)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putInt("shtorm_denoise", shtormDenoise)
             .apply()
     }
 

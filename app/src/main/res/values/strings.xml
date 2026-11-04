@@ -564,4 +564,9 @@
     <string name="shtorm_quality_1">Usual</string>
     <string name="shtorm_quality_2">High</string>
     <string name="shtorm_quality_4">Best</string>
+    <string name="shtorm_denoise_title">Cleaning by a neural network</string>
+    <string name="shtorm_denoise_desc">A small network (DPDFNet) polishes Pocket TTS\'s finished speech. It nearly doubles the processor\'s work, so it can be on only while a book is prepared beforehand or an audiobook saved. Always: also while reading; if reading starts to stall on your phone, go back to While preparing. 10 MB is downloaded when first chosen.</string>
+    <string name="shtorm_denoise_off">Off</string>
+    <string name="shtorm_denoise_prep">While preparing</string>
+    <string name="shtorm_denoise_always">Always</string>
 </resources>

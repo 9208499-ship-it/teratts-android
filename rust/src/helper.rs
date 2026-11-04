@@ -720,7 +720,11 @@ impl TextToSpeech {
             let mut raw = pocket.say(&text, &voice)?;
             // brightness: Shtorm's codec softens the highs (settings slider, dB above 3 kHz)
             crate::pocket::high_shelf(&mut raw, crate::pocket::brightness(), 3000.0, crate::pocket::POCKET_RATE as f32);
-            let wav = crate::pocket::resample(&raw, crate::pocket::POCKET_RATE, tera::SAMPLE_RATE as u32);
+            // cleaned by the speech-enhancement network, if switched on (settings; denoise.rs)
+            let wav = match pocket.clean(&raw) {
+                Some(c) => crate::pocket::resample(&c, crate::denoise::RATE, tera::SAMPLE_RATE as u32),
+                None => crate::pocket::resample(&raw, crate::pocket::POCKET_RATE, tera::SAMPLE_RATE as u32),
+            };
             let mut wav = tera::trim_edges(&wav, 0.02, 0.10);
             tera::fade_out(&mut wav);
             let wav = crate::stretch::time_stretch(&wav, speed, tera::SAMPLE_RATE as u32);

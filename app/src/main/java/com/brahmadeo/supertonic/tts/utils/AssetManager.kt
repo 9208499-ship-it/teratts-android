@@ -289,6 +289,25 @@ object AssetManager {
         downloadShtorm(context, onProgress)
     }
 
+    // ---- Pocket TTS: cleaning its speech with a speech-enhancement network (rust/src/denoise.rs) ----
+    /** DPDFNet2 48 kHz (Ceva, Apache-2.0), as published by sherpa-onnx; 10 MB, next to Pocket's files. */
+    private val DENOISER = Remote("dpdfnet2_48khz_hr.onnx", 10596848L, "0b399f8a58dc4d70d8cd97541f5c39869406145193b957d00a03b66070944928")
+    private const val DENOISER_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models"
+
+    fun denoiserReady(context: Context) = present(context, DENOISER)
+
+    /** Downloads the cleaning network once (checked); [onProgress] 0..1. */
+    suspend fun downloadDenoiser(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        if (denoiserReady(context)) { onProgress(1f); return@withContext }
+        val target = File(shtormDir(context).apply { mkdirs() }, DENOISER.name)
+        fetchCounting("$DENOISER_URL/${DENOISER.name}", target) { n -> onProgress((n.toFloat() / DENOISER.size).coerceIn(0f, 0.99f)) }
+        if (target.length() != DENOISER.size || sha256(target) != DENOISER.sha) {
+            target.delete()
+            throw java.io.IOException("файл очистки звука повреждён, попробуйте ещё раз")
+        }
+        onProgress(1f)
+    }
+
     fun shtormSizeMb(context: Context): Long =
         (shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
 

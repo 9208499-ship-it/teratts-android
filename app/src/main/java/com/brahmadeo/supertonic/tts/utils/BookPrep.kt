@@ -37,6 +37,9 @@ object BookPrep {
     /** What the preparing does right now, for the settings ("глава 3 из 40 · 37 %"); null — nothing. */
     val now = androidx.compose.runtime.mutableStateOf<String?>(null)
 
+    /** A chapter is being made right now (the engine is working for BookPrep, not for the reading). */
+    @Volatile var making = false
+
     /** Asked for while the book was being read: starts as soon as the reading is paused or stopped. */
     @Volatile var wanted = false
 
@@ -144,7 +147,7 @@ object BookPrep {
             AssetManager.engine(context), AssetManager.shtormPrecision(context), AssetManager.teacherOn(context),
             voice, r.enabled(context), r.charactersEnabled(context), r.maleVoice(context), r.femaleVoice(context),
             r.narratorVoice(context), r.unknownVoice(context), r.mainCount(context),
-            p.noiseScale, p.pauseScale, p.paragraphPause, p.shtormLiveliness, p.shtormBrightness, p.shtormSteps,
+            p.noiseScale, p.pauseScale, p.paragraphPause, p.shtormLiveliness, p.shtormBrightness, p.shtormSteps, p.shtormDenoise != p.DENOISE_OFF,
             p.tightQuestionExclamation, p.tightCommasAndPeriods, AssetManager.commaQuotes,
             LexiconManager.isEnabled(), lex, EnglishTranscriber.let { it.load(context); it.enabled }
         )
