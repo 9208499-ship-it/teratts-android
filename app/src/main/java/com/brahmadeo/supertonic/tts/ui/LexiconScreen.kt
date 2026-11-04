@@ -1,6 +1,7 @@
 package com.brahmadeo.supertonic.tts.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -846,6 +847,7 @@ private fun EngineSection() {
     var precision by remember { mutableStateOf(assets.shtormPrecision(context)) }
     var liveliness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormLiveliness) }
     var brightness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormBrightness) }
+    var quality by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormSteps) }
     var commaQuotes by remember { assets.loadCommaQuotes(context); mutableStateOf(assets.commaQuotes) }
     var teacher by remember { mutableStateOf(assets.teacherOn(context)) }
     var teacherFile by remember { mutableStateOf(assets.teacherDownloaded(context)) }
@@ -978,6 +980,21 @@ private fun EngineSection() {
                 brightness = 8f
                 com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormBrightness(context, 8f)
             }, enabled = brightness != 8f) { Text(stringResource(AppR.string.shtorm_brightness_reset)) }
+            // quality: the flow head's steps for each 80 ms of sound (from the next phrase)
+            Text(stringResource(AppR.string.shtorm_quality_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            Text(stringResource(AppR.string.shtorm_quality_desc),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                for ((n, label) in listOf(1 to stringResource(AppR.string.shtorm_quality_1),
+                        2 to stringResource(AppR.string.shtorm_quality_2), 4 to stringResource(AppR.string.shtorm_quality_4))) {
+                    FilterChip(
+                        selected = quality == n,
+                        onClick = { quality = n; com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.setShtormSteps(context, n) },
+                        label = { Text(label) }
+                    )
+                }
+            }
         }
         progress?.let { p ->
             Text(stringResource(AppR.string.engine_downloading, (p * 100).toInt()), style = MaterialTheme.typography.bodySmall)
@@ -1225,7 +1242,7 @@ private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     remember { if (engineShown.value.isEmpty()) engineShown.value = assets.engine(context); 0 }
     var engine by engineShown
-    var part by remember { mutableStateOf(vi.PART_START) }
+    var part by remember { mutableStateOf(vi.PART_AUTO) }
     var gender by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceGender.get(context, name)) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1256,11 +1273,19 @@ private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
                         }) { Text(stringResource(AppR.string.voice_check_use_shtorm)) }
                     }
                 }
+                // what the cleaning could not mend (overload, a muffled recording, noise, too short)
+                val notes = remember(name, part, busy) { vi.notes(context, name) }
+                for (n in notes) {
+                    Text("• $n", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp))
+                }
                 if (vi.canRecut(name)) {
                     Text(stringResource(AppR.string.voice_check_part), style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((p, title) in listOf(vi.PART_START to stringResource(AppR.string.voice_part_start),
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+                        for ((p, title) in listOf(vi.PART_AUTO to stringResource(AppR.string.voice_part_auto),
+                                vi.PART_START to stringResource(AppR.string.voice_part_start),
                                 vi.PART_MIDDLE to stringResource(AppR.string.voice_part_middle),
                                 vi.PART_END to stringResource(AppR.string.voice_part_end))) {
                             FilterChip(

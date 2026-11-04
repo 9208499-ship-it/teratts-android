@@ -336,7 +336,7 @@
     <string name="send_log_desc">Если чтение вылетает в другой читалке (Moon+ Reader и др.): повторите вылет, потом нажмите здесь и отправьте файл. В нём только сообщения TeraTTS, модель телефона и версия Android.</string>
     <string name="outline_reading_now">Читаете сейчас</string>
     <string name="voice_import_title">Импорт голоса</string>
-    <string name="voice_import_desc">Свой тембр. Для Pocket TTS — запись речи (wav, mp3, m4a, ogg…), хватит 5–10 секунд одного голоса без музыки. Для TeraTTS — файл голоса .json от Supertonic или два файла style_ttl.npy и style_dp.npy, выбранные вместе. Появится в списке голосов своей модели как my_&lt;имя&gt;, его можно дать и персонажу.</string>
+    <string name="voice_import_desc">Свой тембр. Для Pocket TTS — запись речи (wav, mp3, m4a, ogg…), 6–10 секунд одного голоса без музыки, в тихой комнате, обычным диктофоном; читайте ровно, как книгу — манера переносится в чтение. Гул, длинные паузы и громкость программа поправит сама. Для TeraTTS — файл голоса .json от Supertonic или два файла style_ttl.npy и style_dp.npy, выбранные вместе. Появится в списке голосов своей модели как my_&lt;имя&gt;, его можно дать и персонажу.</string>
     <string name="voice_import_done">Голос добавлен: %1$s</string>
     <string name="voice_import_failed">Голос не добавлен: %1$s</string>
     <string name="noise_scale_title">Стабильность ↔ выразительность</string>
@@ -408,7 +408,7 @@
     <string name="shtorm_precision_32">Полная (32 бита) — 302 МБ</string>
     <string name="shtorm_precision_8">Быстрее (8 бит) — 76 МБ, на слух не отличить; для слабых телефонов</string>
     <string name="voice_check_title">Голос %1$s</string>
-    <string name="voice_check_desc">Послушайте, как он читает. Не нравится — возьмите другой кусок записи, голос переделается сразу.</string>
+    <string name="voice_check_desc">Послушайте, как он читает. Программа сама взяла самый чистый кусок записи, убрала гул и длинные паузы, выровняла громкость. Не нравится — возьмите другой кусок, голос переделается сразу.</string>
     <string name="voice_check_need_shtorm">Голос из записи читает модель Pocket TTS — послушать его можно, когда она выбрана.</string>
     <string name="voice_check_use_shtorm">Включить Pocket TTS и послушать</string>
     <string name="voice_check_part">Кусок записи</string>
@@ -554,4 +554,14 @@
     <string name="prep_after_reading">Сейчас идёт чтение — подготовка начнётся, как только поставите его на паузу или остановите</string>
     <string name="prep_progress">Готовлю главу %1$d из %2$d · %3$d%%</string>
     <string name="prep_stop">Остановить</string>
+    <string name="voice_part_auto">Лучший</string>
+    <string name="voice_note_clipped">В записи перегруз (звук хрипит) — голос его повторит. Лучше записать тише или подальше от микрофона.</string>
+    <string name="voice_note_muffled">Запись глухая, как голосовое из мессенджера или звонок — голос будет глуховатым. Лучше записать обычным диктофоном.</string>
+    <string name="voice_note_noisy">Слышен фоновый шум (голос громче него всего на %1$d дБ) — голос перенесёт его в чтение. Лучше записать в тишине.</string>
+    <string name="voice_note_short">Чистой речи меньше 6 секунд — лучше 6–10 секунд законченными фразами.</string>
+    <string name="shtorm_quality_title">Качество звука</string>
+    <string name="shtorm_quality_desc">Сколько шагов нейросеть делает на каждый кусочек звука: больше — чище, но медленнее (2 шага — примерно +10% времени, 4 — +20%). С новой фразы.</string>
+    <string name="shtorm_quality_1">Обычное</string>
+    <string name="shtorm_quality_2">Высокое</string>
+    <string name="shtorm_quality_4">Наилучшее</string>
 </resources>

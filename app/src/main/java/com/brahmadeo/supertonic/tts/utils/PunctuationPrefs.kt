@@ -52,6 +52,10 @@ object PunctuationPrefs {
     @Volatile var shtormLiveliness: Float = 0.3f
         private set
 
+    /** Pocket TTS's quality: flow steps per frame (1 as before; 2 and 4 cleaner and slower). */
+    @Volatile var shtormSteps: Int = 1
+        private set
+
     /** Shtorm's brightness: dB added above 3 kHz (0 … 12, default 8 — its codec softens the highs). */
     @Volatile var shtormBrightness: Float = 8f
         private set
@@ -83,6 +87,7 @@ object PunctuationPrefs {
         noiseScale = p.getFloat("noise_scale", 0.667f)
         shtormLiveliness = p.getFloat("shtorm_liveliness", 0.3f)
         shtormBrightness = p.getFloat("shtorm_brightness", 8f)
+        shtormSteps = p.getInt("shtorm_steps", 1).coerceIn(1, 8)
         paragraphPause = p.getFloat(KEY_PARAGRAPH_PAUSE, 0.9f)
         // TeraTTS: these three tweaks were tuned for Supertonic and hurt here
         // ("..." → ". . .", "Куда??" → "Куда? ?", "слово ," is unusual input), so they stay off.
@@ -134,6 +139,13 @@ object PunctuationPrefs {
         shtormLiveliness = value.coerceIn(0.1f, 0.7f)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putFloat("shtorm_liveliness", shtormLiveliness)
+            .apply()
+    }
+
+    fun setShtormSteps(context: Context, value: Int) {
+        shtormSteps = value.coerceIn(1, 8)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putInt("shtorm_steps", shtormSteps)
             .apply()
     }
 

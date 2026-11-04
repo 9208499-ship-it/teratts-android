@@ -39,6 +39,20 @@ pub fn temperature() -> f32 {
     f32::from_bits(TEMPERATURE_BITS.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// Steps of the flow head for each 80 ms frame ("Качество" in the settings). The head turns noise
+/// into the frame's latent; one step jumps there at once, more walk there in smaller steps (Kyutai:
+/// "more steps for higher quality", their example is 5). The head is small next to the transformer:
+/// a step costs a fraction of a frame.
+static DECODE_STEPS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+pub fn set_decode_steps(n: i32) {
+    DECODE_STEPS.store(n.clamp(1, 8) as u32, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn decode_steps() -> usize {
+    DECODE_STEPS.load(std::sync::atomic::Ordering::Relaxed) as usize
+}
+
 /// Brightness from the settings slider: dB added above ~3 kHz. Shtorm's codec (24 kHz) softens the
 /// highs, and an own voice came out "глуховато"; +8 dB gave it back its clarity (tolyos, by ear).
 static BRIGHTNESS_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x4100_0000); // 8.0
@@ -287,6 +301,8 @@ pub struct Pocket {
     /// Noise of each frame: MyTTS settles on 0.3 (the upstream default 0.7 is livelier, less steady).
     pub temperature: f32,
     pub eos_threshold: f32,
+    /// Flow steps per frame (1: as before; see [set_decode_steps]).
+    pub decode_steps: usize,
 }
 
 /// The frames a phrase may take when read normally: its letters at 11 a second (book prose is
@@ -323,7 +339,7 @@ impl Pocket {
         let decoder_states = States::of(&decoder)?;
         let bpe = Bpe::load(&Path::new(dir).join("tokenizer.model"))?;
         Ok(Pocket { encoder, text, main, flow, decoder, main_states, decoder_states, bpe,
-            voices: HashMap::new(), temperature: 0.3, eos_threshold: -4.0 })
+            voices: HashMap::new(), temperature: 0.3, eos_threshold: -4.0, decode_steps: 1 })
     }
 
     /// The voice's conditioning from its recording (first 30 s; cached until the file changes).
@@ -438,16 +454,22 @@ impl Pocket {
                 extra += 1;
                 if extra > eos_extra { break; }
             }
-            // one flow step from noise (s = 0 → t = 1)
-            let x: Vec<f32> = (0..32).map(|_| if self.temperature > 0.0 { normal.sample(&mut rng) } else { 0.0 }).collect();
-            let flow = self.flow.run(ort::inputs!{
-                "c" => Tensor::from_array(Array::from_shape_vec(1024, cond.clone())?)?,
-                "s" => Tensor::from_array(Array::from_shape_vec((1, 1), vec![0f32])?)?,
-                "t" => Tensor::from_array(Array::from_shape_vec((1, 1), vec![1f32])?)?,
-                "x" => Tensor::from_array(Array::from_shape_vec((1, 32), x.clone())?)?
-            })?;
-            let dir = flow["flow_dir"].try_extract_tensor::<f32>()?.1.to_vec();
-            prev = x.iter().zip(&dir).map(|(a, d)| a + d).collect();
+            // from noise to the frame's latent: the flow head's steps s → t over 0 → 1
+            // (as upstream's decoding and PocketTTS.cpp: x += dir · (t − s))
+            let mut x: Vec<f32> = (0..32).map(|_| if self.temperature > 0.0 { normal.sample(&mut rng) } else { 0.0 }).collect();
+            let steps = self.decode_steps.clamp(1, 8);
+            for j in 0..steps {
+                let (s, t) = (j as f32 / steps as f32, (j + 1) as f32 / steps as f32);
+                let flow = self.flow.run(ort::inputs!{
+                    "c" => Tensor::from_array(Array::from_shape_vec(1024, cond.clone())?)?,
+                    "s" => Tensor::from_array(Array::from_shape_vec((1, 1), vec![s])?)?,
+                    "t" => Tensor::from_array(Array::from_shape_vec((1, 1), vec![t])?)?,
+                    "x" => Tensor::from_array(Array::from_shape_vec((1, 32), x.clone())?)?
+                })?;
+                let dir = flow["flow_dir"].try_extract_tensor::<f32>()?.1.to_vec();
+                for (a, d) in x.iter_mut().zip(&dir) { *a += d * (t - s); }
+            }
+            prev = x;
             latents.extend_from_slice(&prev);
         }
         Ok((latents, eos))
@@ -618,6 +640,47 @@ mod real_model {
             let mut w = hound::WavWriter::create(format!("{}/rust_{}.wav", std::env::temp_dir().display(), text.len()),
                 hound::WavSpec { channels: 1, sample_rate: 44100, bits_per_sample: 16, sample_format: hound::SampleFormat::Int }).unwrap();
             for s in resample(&a, POCKET_RATE, 44100) { w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16).unwrap(); }
+            w.finalize().unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod steps {
+    use super::*;
+
+    #[test]
+    fn decode_steps_are_clamped() {
+        set_decode_steps(0);
+        assert_eq!(decode_steps(), 1);
+        set_decode_steps(20);
+        assert_eq!(decode_steps(), 8);
+        set_decode_steps(1);
+    }
+
+    /// The same phrases with 1, 2 and 4 flow steps: time and audio, to compare by ear.
+    /// SHTORM_DIR=… ORT_DYLIB_PATH=… OUT=… cargo test --release --lib compare_steps -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn compare_steps() {
+        let Ok(d) = std::env::var("SHTORM_DIR") else { return };
+        let out = std::env::var("OUT").unwrap_or_else(|_| std::env::temp_dir().display().to_string());
+        let voice = std::env::var("VOICE").unwrap_or_else(|_| format!("{d}/alba.wav"));
+        let mut p = Pocket::load(&d, 4).unwrap();
+        let texts = [
+            "Стре\u{301}лки часо\u{301}в показывали по\u{301}лночь, а в до\u{301}ме всё ещё горе\u{301}л свет.",
+            "Он долго смотре\u{301}л в окно\u{301}, пото\u{301}м тихо сказа\u{301}л: «Пора\u{301}».",
+        ];
+        for steps in [1usize, 2, 4] {
+            p.decode_steps = steps;
+            let mut all = Vec::new();
+            let t = std::time::Instant::now();
+            for text in texts { all.extend(p.say(text, &voice).unwrap()); all.extend(std::iter::repeat(0f32).take(9600)); }
+            let secs = all.len() as f32 / POCKET_RATE as f32;
+            eprintln!("steps {steps}: {secs:.2} s audio in {:.2} s", t.elapsed().as_secs_f32());
+            let mut w = hound::WavWriter::create(format!("{out}/steps_{steps}.wav"),
+                hound::WavSpec { channels: 1, sample_rate: POCKET_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int }).unwrap();
+            for s in all { w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16).unwrap(); }
             w.finalize().unwrap();
         }
     }

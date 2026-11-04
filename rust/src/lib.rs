@@ -55,6 +55,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocket
     crate::pocket::set_brightness(value);
 }
 
+/// Pocket TTS's quality: the flow head's steps for each frame (settings).
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketSteps(
+    _env: JNIEnv,
+    _class: JClass,
+    value: jni::sys::jint,
+) {
+    crate::pocket::set_decode_steps(value);
+}
+
 /// Shtorm's liveliness: the noise of each frame (settings slider).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketTemperature(

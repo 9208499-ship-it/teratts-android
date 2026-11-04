@@ -14,8 +14,9 @@ import java.io.File
  *  - or the two TeraTTS files of a voice, style_ttl.npy and style_dp.npy, chosen together.
  * The sizes are checked (style_ttl 1×50×256, style_dp 1×8×16): a file that does not fit
  * would only make the engine fail later. Saved as "my_<name>.json" next to the other voices.
- *  - or a recording (wav / m4a / mp3 / ogg …) — a voice for Shtorm: it speaks in the voice of
- *    a few seconds of clean speech. 4–9 s of it, cut at a pause, saved as "my_<name>.wav".
+ *  - or a recording (wav / m4a / mp3 / ogg …) — a voice for Pocket TTS: it speaks in the voice of
+ *    a few seconds of clean speech. Cleaned (VoicePrep: rumble, long pauses, level) and its
+ *    cleanest 6–10 s taken, saved as "my_<name>.wav"; what cannot be mended is told ([notes]).
  */
 object VoiceImport {
     private val TTL = intArrayOf(1, 50, 256)
@@ -48,8 +49,8 @@ object VoiceImport {
     private val AUDIO = listOf(".wav", ".m4a", ".mp3", ".ogg", ".opus", ".flac", ".aac", ".3gp", ".amr", ".webm", ".mp4")
     private const val RATE = 24000
 
-    /** A recording → mono 24 kHz (Android's own decoders: anything the phone can play). */
-    private fun decode(context: Context, uri: Uri): FloatArray {
+    /** A recording → mono 24 kHz (Android's own decoders: anything the phone can play), and its own rate. */
+    private fun decode(context: Context, uri: Uri): Pair<FloatArray, Int> {
         val ex = android.media.MediaExtractor()
         context.contentResolver.openFileDescriptor(uri, "r")?.use { ex.setDataSource(it.fileDescriptor) }
             ?: throw Failure("файл не читается")
@@ -112,7 +113,7 @@ object VoiceImport {
             val mono = FloatArray(samples.size / ch) { i -> var a = 0f; for (c in 0 until ch) a += samples[i * ch + c]; a / ch }
             // a proper resampler: the straight-line one used before dulled the highs and let what
             // lies above 12 kHz fold back as hiss — and Shtorm copies the sample's sound as it is
-            return resample(mono, rate, RATE)
+            return resample(mono, rate, RATE) to rate
         } finally {
             ex.release()
         }
@@ -143,46 +144,27 @@ object VoiceImport {
         }
     }
 
-    /** Which piece of a long recording becomes the voice: from its start, its middle or its end. */
-    const val PART_START = 0
-    const val PART_MIDDLE = 1
-    const val PART_END = 2
+    /** Which piece of the recording becomes the voice: the cleanest one, or from its start, middle or end. */
+    const val PART_AUTO = VoicePrep.PART_AUTO
+    const val PART_START = VoicePrep.PART_START
+    const val PART_MIDDLE = VoicePrep.PART_MIDDLE
+    const val PART_END = VoicePrep.PART_END
 
-    /**
-     * 4–9 s of the recording, cut at its quietest 50 ms (a phrase's end). [part]: from the first
-     * sound, or from a pause near the middle or near the end of the speech.
-     */
-    private fun sample(x: FloatArray, part: Int = PART_START): FloatArray {
-        val win = RATE / 20
-        val rms = FloatArray(x.size / win) { i -> var a = 0f; for (k in i * win until (i + 1) * win) a += x[k] * x[k]; kotlin.math.sqrt(a / win) }
-        val peak = rms.maxOrNull() ?: 0f
-        if (peak < 1e-3f) throw Failure("в записи тишина")
-        val loud = peak * 0.05f
-        val first = (rms.indexOfFirst { it > loud }.coerceAtLeast(0) - 2).coerceAtLeast(0)
-        val last = rms.indexOfLast { it > loud }.coerceAtLeast(first)
-        // the start: the first sound, or the pause nearest to the wanted place (within 2.5 s; the
-        // quietest moment there if there is none), then on to the sound after it (a phrase's beginning)
-        val want = when (part) {
-            PART_MIDDLE -> (first + last) / 2 - 90
-            PART_END -> last - 180
-            else -> first
-        }.coerceIn(first, maxOf(first, last - 80))
-        val near = maxOf(first, want - 50)..minOf(rms.size - 1, want + 50)
-        var s = if (want == first) first
-            else near.filter { rms[it] < loud }.minByOrNull { kotlin.math.abs(it - want) } ?: near.minByOrNull { rms[it] } ?: want
-        if (s != first) {
-            val sound = (s until minOf(rms.size, s + 20)).firstOrNull { rms[it] > loud }
-            if (sound != null) s = maxOf(first, sound - 2)
-        }
-        val start = s * win
-        val from = s + 80
-        val to = minOf(rms.size, s + 180)
-        val end = if (to > from) (from until to).minByOrNull { rms[it] }!! * win else x.size
-        val clip = x.copyOfRange(start, end.coerceAtMost(x.size))
-        if (clip.size < RATE * 3) throw Failure("нужно хотя бы 3 секунды чистой речи")
-        // a normal level: peaks at −3 dB
-        val m = clip.maxOf { kotlin.math.abs(it) }
-        return if (m > 0f) FloatArray(clip.size) { clip[it] * (0.7f / m) } else clip
+    private fun sample(x: FloatArray, part: Int = PART_AUTO): FloatArray =
+        try { VoicePrep.pick(x, part) } catch (e: VoicePrep.Failure) { throw Failure(e.message ?: "?") }
+
+    /** Each recording imported in this run: what was found in it, and how long its voice piece is. */
+    private val found = HashMap<String, Pair<VoicePrep.Report, Float>>()
+
+    /** What cannot be mended in the voice [name]'s recording (empty: all is well, or not known). */
+    fun notes(context: Context, name: String): List<String> {
+        val (r, secs) = synchronized(found) { found[name] } ?: return emptyList()
+        val n = ArrayList<String>()
+        if (r.clipped) n.add(context.getString(com.brahmadeo.supertonic.tts.R.string.voice_note_clipped))
+        if (r.muffled) n.add(context.getString(com.brahmadeo.supertonic.tts.R.string.voice_note_muffled))
+        if (r.noisy) n.add(context.getString(com.brahmadeo.supertonic.tts.R.string.voice_note_noisy, r.snrDb.toInt().coerceAtLeast(0)))
+        if (secs < 5.5f) n.add(context.getString(com.brahmadeo.supertonic.tts.R.string.voice_note_short))
+        return n
     }
 
     private fun writeWav(f: File, x: FloatArray) {
@@ -219,7 +201,9 @@ object VoiceImport {
     /** The voice [name] made again from another [part] of the recording just imported. */
     fun recut(context: Context, name: String, part: Int) {
         val (x, f) = last?.takeIf { it.second.name == name } ?: throw Failure("запись уже закрыта, импортируйте её заново")
-        writeWav(f, sample(x, part))
+        val clip = sample(x, part)
+        writeWav(f, clip)
+        synchronized(found) { found[name]?.let { found[name] = it.first to VoicePrep.seconds(clip) } }
         VoiceLoudness.forget(context, f.name); VoiceTempo.forget(context, f.name)
     }
 
@@ -240,11 +224,15 @@ object VoiceImport {
         // a recording: a voice for Shtorm
         val audio = named.firstOrNull { (n, _) -> AUDIO.any { n.endsWith(it, true) } }
         if (audio != null) {
-            val x = try { decode(context, audio.second) } catch (e: Failure) { throw e }
+            val (raw, rate) = try { decode(context, audio.second) } catch (e: Failure) { throw e }
                 catch (e: Exception) { throw Failure("запись не читается: ${e.message}") }
+            // what cannot be mended is told; the rumble, long pauses and the level are mended
+            val report = VoicePrep.check(raw, rate)
+            val x = VoicePrep.clean(raw)
             val clip = sample(x)
             val f = target(context, audio.first, ".wav")
             writeWav(f, clip)
+            synchronized(found) { found[f.name] = report to VoicePrep.seconds(clip) }
             // a voice of the same name may have been deleted: what was measured for it does not apply
             VoiceLoudness.forget(context, f.name); VoiceTempo.forget(context, f.name); VoiceGender.set(context, f.name, "")
             last = x to f

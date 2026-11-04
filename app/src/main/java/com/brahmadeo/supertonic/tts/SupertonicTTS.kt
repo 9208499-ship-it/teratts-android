@@ -28,6 +28,7 @@ object SupertonicTTS {
     private external fun setNoiseScale(scale: Float)
     private external fun setPocketTemperature(value: Float)
     private external fun setPocketBrightness(value: Float)
+    private external fun setPocketSteps(value: Int)
     private external fun timeStretchPcm(pcm: ByteArray, rate: Float, sampleRate: Int): ByteArray?
 
     /** PCM 16-bit mono [rate] times faster (pitch kept): audio made beforehand, played at the reading's pace. */
@@ -234,6 +235,7 @@ object SupertonicTTS {
                 }
                 catch (e: UnsatisfiedLinkError) { rhythmAvailable = false }
             }
+            try { setPocketSteps(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.shtormSteps) } catch (e: UnsatisfiedLinkError) { }
             setParagraphPause(com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.paragraphPause)
             // the voice in the form the running model needs (Shtorm: a recording, TeraTTS: a voice file)
             val voice = com.brahmadeo.supertonic.tts.utils.AssetManager.voiceForEngine(stylePath)

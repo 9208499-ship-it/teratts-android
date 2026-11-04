@@ -336,7 +336,7 @@
     <string name="send_log_desc">If reading crashes in another app (Moon+ Reader and others): reproduce the crash, then tap here and send the file. It holds only TeraTTS messages, the phone model and the Android version.</string>
     <string name="outline_reading_now">Reading now</string>
     <string name="voice_import_title">Import a voice</string>
-    <string name="voice_import_desc">Your own timbre. For Pocket TTS: a recording of speech (wav, mp3, m4a, ogg…), 5–10 s of one voice without music is enough. For TeraTTS: a voice .json made for Supertonic or the two files style_ttl.npy and style_dp.npy, chosen together. It appears in that model\'s voice list as my_&lt;name&gt; and can be given to a character.</string>
+    <string name="voice_import_desc">Your own timbre. For Pocket TTS: a recording of speech (wav, mp3, m4a, ogg…), 6–10 s of one voice without music, in a quiet room, with an ordinary voice recorder; read evenly, as a book — the manner carries over. Hum, long pauses and loudness are mended by the app. For TeraTTS: a voice .json made for Supertonic or the two files style_ttl.npy and style_dp.npy, chosen together. It appears in that model\'s voice list as my_&lt;name&gt; and can be given to a character.</string>
     <string name="voice_import_done">Voice added: %1$s</string>
     <string name="voice_import_failed">Voice not added: %1$s</string>
     <string name="noise_scale_title">Stability ↔ expressiveness</string>
@@ -408,7 +408,7 @@
     <string name="shtorm_precision_32">Full (32-bit) — 302 MB</string>
     <string name="shtorm_precision_8">Faster (8-bit) — 76 MB, sounds the same; for slow phones</string>
     <string name="voice_check_title">Voice %1$s</string>
-    <string name="voice_check_desc">Listen to how it reads. If you don\'t like it, take another piece of the recording: the voice is remade at once.</string>
+    <string name="voice_check_desc">Listen to how it reads. The app took the cleanest piece of the recording, removed hum and long pauses and levelled it. If you don\'t like it, take another piece: the voice is remade at once.</string>
     <string name="voice_check_need_shtorm">A voice from a recording is read by the Pocket TTS model: you can listen to it when Pocket TTS is chosen.</string>
     <string name="voice_check_use_shtorm">Switch to Pocket TTS and listen</string>
     <string name="voice_check_part">Piece of the recording</string>
@@ -554,4 +554,14 @@
     <string name="prep_after_reading">The book is being read: preparing starts as soon as you pause or stop it</string>
     <string name="prep_progress">Preparing chapter %1$d of %2$d · %3$d%%</string>
     <string name="prep_stop">Stop</string>
+    <string name="voice_part_auto">Best</string>
+    <string name="voice_note_clipped">The recording is overloaded (the sound rasps): the voice will repeat it. Record more quietly or farther from the microphone.</string>
+    <string name="voice_note_muffled">The recording is muffled, like a messenger voice note or a call: the voice will sound dull. Use an ordinary voice recorder.</string>
+    <string name="voice_note_noisy">Background noise is heard (the voice is only %1$d dB louder): the voice will carry it into the reading. Record in silence.</string>
+    <string name="voice_note_short">Less than 6 seconds of clean speech: 6–10 seconds of whole phrases is better.</string>
+    <string name="shtorm_quality_title">Sound quality</string>
+    <string name="shtorm_quality_desc">How many steps the network takes for each bit of sound: more is cleaner but slower (2 steps about +10% time, 4 about +20%). From the next phrase.</string>
+    <string name="shtorm_quality_1">Usual</string>
+    <string name="shtorm_quality_2">High</string>
+    <string name="shtorm_quality_4">Best</string>
 </resources>
