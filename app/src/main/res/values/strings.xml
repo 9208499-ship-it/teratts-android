@@ -550,4 +550,8 @@
     <string name="update_check_failed">Could not check: GitHub is unreachable</string>
     <string name="update_auto_title">Check at start</string>
     <string name="update_auto_desc">Once a day; offers the new version when one is out</string>
+    <string name="prep_starting">Starting…</string>
+    <string name="prep_after_reading">The book is being read: preparing starts as soon as you pause or stop it</string>
+    <string name="prep_progress">Preparing chapter %1$d of %2$d · %3$d%%</string>
+    <string name="prep_stop">Stop</string>
 </resources>

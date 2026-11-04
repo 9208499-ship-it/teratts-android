@@ -450,10 +450,16 @@ private fun PrepSection() {
     var mode by remember { mutableStateOf(prep.mode(context)) }
     var tick by remember { mutableIntStateOf(0) }
     val book = remember { com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(context) }
-    val status = remember(tick, on, mode) {
-        val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
-        val voice = prefs.getString("last_voice_path", "") ?: ""
-        if (book != null) prep.status(context, book, voice) else 0 to 0L
+    // how much is ready: counted in the background, again every few seconds while it is being made
+    var status by remember { mutableStateOf(0 to 0L) }
+    val working = prep.now.value
+    LaunchedEffect(tick, on, mode) {
+        while (true) {
+            status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try { if (book != null) prep.status(context, book, prep.voicePath(context)) else 0 to 0L } catch (e: Exception) { 0 to 0L }
+            }
+            kotlinx.coroutines.delay(3000)
+        }
     }
     Column {
         PunctuationToggleRow(
@@ -480,13 +486,20 @@ private fun PrepSection() {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp)
                 )
+                // what is being done right now (or what it waits for)
+                if (working != null) {
+                    Text(working, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp))
+                }
                 Row {
-                    TextButton(onClick = {
+                    if (working != null) TextButton(onClick = { prep.stop(context) }) { Text(stringResource(AppR.string.prep_stop)) }
+                    else TextButton(onClick = {
                         if (!prep.conditionsOk(context)) android.widget.Toast.makeText(context,
                             context.getString(AppR.string.prep_wait), android.widget.Toast.LENGTH_LONG).show()
-                        prep.kick(context); tick++
+                        else prep.kick(context, byHand = true)
+                        tick++
                     }) { Text(stringResource(AppR.string.prep_now)) }
-                    TextButton(onClick = { prep.deleteAll(context); tick++ }, enabled = status.second > 0) {
+                    TextButton(onClick = { prep.deleteAll(context); tick++ }, enabled = status.second > 0 && working == null) {
                         Text(stringResource(AppR.string.prep_delete))
                     }
                 }

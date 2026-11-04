@@ -550,4 +550,8 @@
     <string name="update_check_failed">Не удалось проверить: нет связи с GitHub</string>
     <string name="update_auto_title">Проверять при запуске</string>
     <string name="update_auto_desc">Раз в день; если вышла новая версия — предложит обновиться</string>
+    <string name="prep_starting">Запускаю подготовку…</string>
+    <string name="prep_after_reading">Сейчас идёт чтение — подготовка начнётся, как только поставите его на паузу или остановите</string>
+    <string name="prep_progress">Готовлю главу %1$d из %2$d · %3$d%%</string>
+    <string name="prep_stop">Остановить</string>
 </resources>

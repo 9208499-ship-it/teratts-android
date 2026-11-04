@@ -430,7 +430,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         } else if (intent?.action == "TERA_PREV") {
             skipPhrase(-1)
         } else if (intent?.action == com.brahmadeo.supertonic.tts.utils.BookPrep.ACTION_PREPARE) {
-            startPrepare()
+            startPrepare(intent.getBooleanExtra("by_hand", false))
+        } else if (intent?.action == com.brahmadeo.supertonic.tts.utils.BookPrep.ACTION_STOP) {
+            if (intent.getBooleanExtra("hold", false)) com.brahmadeo.supertonic.tts.utils.BookPrep.holdOff(this)
+            stopPrepare()
         } else if (intent?.action == ACTION_PREVIEW) {
             previewVoice(intent.getStringExtra("text") ?: "", intent.getStringExtra("voice") ?: "",
                 intent.getFloatExtra("speed", 1f))
@@ -1332,14 +1335,48 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     // ---- audio of the open book made beforehand (BookPrep) ----
     @Volatile private var preparing = false
 
-    /** Started by BookPrep (the system's job or the settings): voices the open book's next chapters. */
-    private fun startPrepare() {
-        if (isServiceActive() || preparing) return
+    private var prepWaiter: Job? = null
+
+    /**
+     * Started by BookPrep (the system's job, or [byHand] from the settings): voices the open book's
+     * next chapters. The engine is one: asked by hand while the book is being read, preparing waits
+     * and starts as soon as the reading is paused or stopped; a paused reading lets the engine go at
+     * once ("play" goes on from the phrase being heard). The system's job just tries again later.
+     * Every step is shown in the settings (BookPrep.now) and in the notification.
+     */
+    private fun startPrepare(byHand: Boolean) {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        if (preparing) return
+        val busy = isPlaying || isSynthesizing || starting
+        if (busy && !byHand) { Log.i(TAG, "Prepare: the book is being read — later"); return }
         // started with startForegroundService: in the foreground within 5 seconds, whatever follows
-        try { startForegroundService(getString(R.string.notif_preparing), false) } catch (e: Exception) {
-            Log.w(TAG, "prepare fg: ${e.message}"); return
+        // (a reading service is in the foreground already: its card stays as it is)
+        if (!busy) {
+            try { ServiceCompat.startForeground(this, NOTIFICATION_ID, prepNotification(getString(R.string.prep_starting), -1),
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0)
+            } catch (e: Exception) {
+                Log.w(TAG, "prepare fg: ${e.message}"); prep.now.value = null; return
+            }
         }
-        if (!com.brahmadeo.supertonic.tts.utils.BookPrep.conditionsOk(this)) { stopForeground(STOP_FOREGROUND_REMOVE); return }
+        if (!prep.conditionsOk(this)) {
+            prep.wanted = false; prep.now.value = null
+            if (!busy) stopForeground(STOP_FOREGROUND_REMOVE)
+            return
+        }
+        if (isPlaying || starting) { prepareAfterReading(); return }
+        if (isSynthesizing) {
+            // paused, the engine held by the phrase it was making: let it go, then prepare
+            Log.i(TAG, "Prepare: the paused reading lets the engine go")
+            prep.wanted = false
+            serviceScope.launch {
+                stopServicePlayback(keepCard = true).join()
+                if (!isServiceActive()) startPrepare(true) else prep.now.value = null
+            }
+            return
+        }
+        prep.wanted = false
+        prepWaiter?.cancel()
+        prep.now.value = getString(R.string.prep_starting)
         preparing = true
         SupertonicTTS.setCancelled(false)
         // a reader app wants the engine (system TTS): preparing gives way at once and goes on later
@@ -1362,6 +1399,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 Log.e(TAG, "Prepare failed", e)
             } finally {
                 preparing = false
+                com.brahmadeo.supertonic.tts.utils.BookPrep.now.value = null
                 SupertonicTTS.onEngineWanted = null
                 try { if (wakeLock?.isHeld == true && !isServiceActive()) wakeLock?.release() } catch (_: Exception) { }
                 withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
@@ -1371,16 +1409,81 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
+    /** Asked for while the book is being read: waits until it is paused or stopped, then prepares. */
+    private fun prepareAfterReading() {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        prep.wanted = true
+        prep.now.value = getString(R.string.prep_after_reading)
+        Log.i(TAG, "Prepare: waits for the reading to stop")
+        if (prepWaiter?.isActive == true) return
+        prepWaiter = serviceScope.launch {
+            var quiet = 0
+            while (prep.wanted) {
+                delay(2000)
+                // two looks in a row: not the moment a phrase or a chapter is being started
+                if (isPlaying || starting || preparing) { quiet = 0; continue }
+                if (++quiet < 2) continue
+                startPrepare(true)
+                if (!prep.wanted || preparing) break
+            }
+        }
+    }
+
+    private fun stopPrepare() {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        prep.wanted = false
+        prepWaiter?.cancel()
+        if (!preparing) { prep.now.value = null; return }
+        val job = synthesisJob
+        Log.i(TAG, "Prepare: stopped by hand")
+        serviceScope.launch {
+            SupertonicTTS.setCancelled(true)
+            job?.cancelAndJoin()
+            if (!isServiceActive() && !preparing) SupertonicTTS.setCancelled(false)
+        }
+    }
+
+    /** The notification while the book is being prepared: what is done, with a "stop" button. */
+    private fun prepNotification(text: String, percent: Int): android.app.Notification {
+        val open = PendingIntent.getActivity(this, 3,
+            Intent(this, com.brahmadeo.supertonic.tts.PlaybackActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("is_resume", true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val stop = PendingIntent.getService(this, 16,
+            Intent(this, PlaybackService::class.java).setAction(com.brahmadeo.supertonic.tts.utils.BookPrep.ACTION_STOP).putExtra("hold", true),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.notif_preparing))
+            .setContentText(text)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(open)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setOngoing(true)
+            .setProgress(100, percent.coerceIn(0, 100), percent < 0)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.cancel), stop)
+            .build()
+    }
+
+    /** What is being prepared: in the settings and in the notification. */
+    private fun showPrepProgress(text: String, percent: Int) {
+        com.brahmadeo.supertonic.tts.utils.BookPrep.now.value = text
+        try {
+            (attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, prepNotification(text, percent))
+        } catch (_: Exception) { }
+    }
+
     private suspend fun prepareBook() {
         val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
-        val book = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) ?: return
+        val book = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this) ?: run {
+            Log.i(TAG, "Prepare: no book open"); return
+        }
         val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
         val lang = prefs.getString("last_lang", "ru") ?: "ru"
         val steps = prefs.getInt("last_steps", 5)
-        // the voice the book is read in (as the player has it)
-        val voiceDir = File(filesDir, "${com.brahmadeo.supertonic.tts.utils.AssetManager.MODEL_VERSION}/voice_styles")
-        val stylePath = prefs.getString("last_voice_path", "")?.takeIf { it.isNotEmpty() && !it.contains(';') }
-            ?: File(voiceDir, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json").absolutePath
+        // the voice the book is read in (as the player has it): the reading finds the chapter by it
+        val stylePath = prep.voicePath(this)
         val current = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this)
         val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this).filter { it.index >= current }
         val scope = File(book).name
@@ -1392,18 +1495,20 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val effectiveLang = autoDetectRussian(text, lang)
             val sentences = textNormalizer.splitIntoSentences(text, effectiveLang)
             if (sentences.isEmpty() || prep.find(this, book, text, sentences.size, stylePath) != null) continue
-            withContext(Dispatchers.Main) {
-                try { updateNotification(getString(R.string.notif_preparing_n, k + 1, chapters.size)) } catch (_: Exception) { }
-            }
+            showPrepProgress(getString(R.string.prep_progress, k + 1, chapters.size, 0), 0)
             wakeLock?.acquire(60 * 60 * 1000L)
-            prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps)
+            Log.i(TAG, "Prepare: chapter ${k + 1} of ${chapters.size} (${sentences.size} phrases)")
+            prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps) { done ->
+                val pc = done * 100 / sentences.size
+                showPrepProgress(getString(R.string.prep_progress, k + 1, chapters.size, pc), pc)
+            }
         }
         Log.i(TAG, "Prepare: the book is ready from the current chapter on")
     }
 
     /** One chapter into its file, phrase by phrase, with the index BookPrep plays it by. */
     private suspend fun prepareChapter(book: String, scope: String, text: String, sentences: List<String>,
-                                       lang: String, stylePath: String, steps: Int) {
+                                       lang: String, stylePath: String, steps: Int, progress: (Int) -> Unit) {
         val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
         val isAdvancedEnabled = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getBoolean("is_advanced_normalization", false)
         val plan = voicePlan(text, sentences, stylePath, scope)
@@ -1443,6 +1548,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
                 if (subsHere.isEmpty()) subsHere.add(0 to starts.last())
                 subsAll.add(subsHere)
+                progress(index + 1)
             }
             starts.add(samples)
             ok = currentCoroutineContext().isActive && !SupertonicTTS.isCancelled() && starts.size == sentences.size + 1

@@ -29,7 +29,31 @@ object BookPrep {
     const val MODE_CHARGING = "charging"
     const val MODE_HALF = "charging_or_half"
     const val ACTION_PREPARE = "PREPARE_BOOK"
+    const val ACTION_STOP = "STOP_PREPARE"
     private const val TAG = "TeraPrep"
+    private const val KEY_HOLD = "hold_until"
+    private const val HOLD_MS = 3 * 60 * 60_000L
+
+    /** What the preparing does right now, for the settings ("глава 3 из 40 · 37 %"); null — nothing. */
+    val now = androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    /** Asked for while the book was being read: starts as soon as the reading is paused or stopped. */
+    @Volatile var wanted = false
+
+    /** The voice the book is read in (as the player has it): the chapters are made in it. */
+    fun voicePath(context: Context): String {
+        val prefs = context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)
+        val voiceDir = File(context.filesDir, "${AssetManager.MODEL_VERSION}/voice_styles")
+        return prefs.getString("last_voice_path", "")?.takeIf { it.isNotEmpty() }
+            ?: File(voiceDir, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json").absolutePath
+    }
+
+    /** Stopped from the notification: the system's job does not start it again for a few hours. */
+    fun holdOff(context: Context) {
+        wanted = false
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_HOLD, System.currentTimeMillis() + HOLD_MS).apply()
+    }
 
     fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, false)
     fun mode(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MODE, MODE_CHARGING) ?: MODE_CHARGING
@@ -37,13 +61,22 @@ object BookPrep {
     fun setEnabled(context: Context, on: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()
         schedule(context)
-        if (on) kick(context)
+        if (on) kick(context, byHand = true) else stop(context)
+    }
+
+    /** Stops what is being made now (and a start waiting for the reading to stop). */
+    fun stop(context: Context) {
+        wanted = false
+        if (now.value == null) return
+        try {
+            context.startService(Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java).setAction(ACTION_STOP))
+        } catch (e: Exception) { Log.w(TAG, "stop: ${e.message}"); now.value = null }
     }
 
     fun setMode(context: Context, mode: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODE, mode).apply()
         schedule(context)
-        kick(context)
+        kick(context, byHand = true)
     }
 
     /** May the phone make audio now: charging, or (if chosen) at least half the battery and no power saving. */
@@ -72,15 +105,24 @@ object BookPrep {
         try { js.schedule(b.build()) } catch (e: Exception) { Log.w(TAG, "schedule: ${e.message}") }
     }
 
-    /** Starts making audio now, if allowed (the service decides what there is to do). */
-    fun kick(context: Context) {
+    /**
+     * Starts making audio now, if allowed (the service decides what there is to do). [byHand]: from
+     * the settings — then also after a stop from the notification, and the settings show it at once.
+     */
+    fun kick(context: Context, byHand: Boolean = false) {
         if (!conditionsOk(context)) return
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (byHand) p.edit().remove(KEY_HOLD).apply()
+        else if (System.currentTimeMillis() < p.getLong(KEY_HOLD, 0L)) return
+        if (byHand && now.value == null) now.value = context.getString(com.brahmadeo.supertonic.tts.R.string.prep_starting)
         try {
             val i = Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java).setAction(ACTION_PREPARE)
+                .putExtra("by_hand", byHand)
             androidx.core.content.ContextCompat.startForegroundService(context, i)
         } catch (e: Exception) {
             // Android 12+: not from the background unless the app may ignore battery optimisation
             Log.w(TAG, "start: ${e.message}")
+            if (byHand) now.value = null
         }
     }
 
