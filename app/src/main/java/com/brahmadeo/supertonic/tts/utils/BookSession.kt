@@ -223,10 +223,46 @@ object BookSession {
     }
 
     /** Text of the next chapter with real text (the session moves on to it), or null at the end. */
+    /** The next chapter found ahead of time (the book, the chapter it follows, its index and text). */
+    private class Peeked(val path: String, val after: Int, val index: Int, val text: String)
+    @Volatile private var peeked: Peeked? = null
+
+    /**
+     * The chapter after the current one, without moving the session: found while the end of the
+     * current one is still playing, so its beginning can be voiced in time. [nextChapter] takes it
+     * from here (the book is not opened twice).
+     */
+    suspend fun peekNextChapter(context: Context): String? {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val path = p.getString(KEY_PATH, null) ?: return null
+        val index = p.getInt(KEY_INDEX, -1)
+        peeked?.let { if (it.path == path && it.after == index) return it.text }
+        val file = File(path)
+        if (!file.exists()) return null
+        val parser = EbookParser(context)
+        val publication = parser.openPublication(file).getOrNull() ?: return null
+        val order = publication.readingOrder
+        for (i in index + 1 until order.size) {
+            val text = parser.extractText(publication, order[i]).getOrNull()?.trim()
+            if (text == null || text.length < MIN_CHAPTER_CHARS) continue
+            peeked = Peeked(path, index, i, text)
+            return text
+        }
+        return null
+    }
+
     suspend fun nextChapter(context: Context): String? {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val path = p.getString(KEY_PATH, null) ?: return null
         val index = p.getInt(KEY_INDEX, -1)
+        // found ahead of time while the end of the chapter played
+        peeked?.takeIf { it.path == path && it.after == index }?.let { k ->
+            peeked = null
+            p.edit().putInt(KEY_INDEX, k.index).putString(KEY_PREFIX, prefixOf(k.text)).apply()
+            rememberChapter(context, prefixOf(k.text), k.index)
+            log(context, "next: chapter ${k.index} (found ahead)")
+            return k.text
+        }
         val file = File(path)
         if (!file.exists()) { log(context, "next: book file is gone: $path"); return null }
         val parser = EbookParser(context)

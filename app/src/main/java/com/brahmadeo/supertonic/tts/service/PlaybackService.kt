@@ -745,8 +745,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val prefs = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
                 val isAdvancedEnabled = prefs.getBoolean("is_advanced_normalization", false)
 
+                // the beginning of this chapter made ahead, while the end of the last one played: used;
+                // made for another text (the reader jumped elsewhere): dropped
+                val early = ahead?.takeIf { it.text == text && it.style == stylePath }
+                if (early == null) { ahead?.stop = true; ahead = null; aheadEpoch++ }
                 // who says each phrase, in which voice, at which pace and loudness (shared with BookPrep)
-                val plan = voicePlan(text, sentences, stylePath,
+                val plan = early?.plan ?: voicePlan(text, sentences, stylePath,
                     com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text))
                 // a chapter made beforehand (BookPrep): played from its file — no neural network, no stalls
                 val prepBook = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService)
@@ -972,7 +976,15 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 // Streaming: each finished chunk inside generateAudio is
                                 // pushed via streamingListener.onAudioChunk into the
                                 // channel, where the consumer above picks it up.
-                                val r = SupertonicTTS.generateAudio(
+                                // made ahead (the next chapter's first phrases): no waiting for the engine
+                                val made = early?.let { e ->
+                                    val d = e.pcm.remove(aheadKey(normalizedText, effectiveLang, pieceStyle, pieceSpeed, pieceGain, steps))
+                                    if (d == null) { e.stop = true; null } else d.await()
+                                }
+                                val r = if (made != null && made.isNotEmpty()) {
+                                    try { channel.send(made) } catch (_: Exception) { break }
+                                    made
+                                } else SupertonicTTS.generateAudio(
                                     normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
                                     pieceGain, streamingListener
                                 )
@@ -1034,6 +1046,17 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     currentAudioChannel = null
                 }
 
+                // the whole chapter is made and the end of it is still playing: the next chapter's
+                // beginning is made now, so it follows without a pause (Pocket TTS needs a few seconds
+                // for a phrase — at a chapter start nothing was made ahead, and the reading stood still)
+                if (isActive && isSynthesizing && !SupertonicTTS.isCancelled() && prepReader == null) {
+                    val spd = liveSpeed
+                    val epoch = aheadEpoch
+                    serviceScope.launch(Dispatchers.IO) {
+                        try { makeNextChapterBeginning(text, lang, stylePath, steps, spd, isAdvancedEnabled, epoch) }
+                        catch (e: Exception) { Log.w(TAG, "next chapter ahead: ${e.message}") }
+                    }
+                }
                 // Consumer drains anything left in the buffer; then AudioTrack itself drains.
                 playerJob.join()
                 if (sawAnyAudio) drainAudioTrack()
@@ -1092,6 +1115,68 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
+
+    // ---- the next chapter's beginning, made while the end of the current one plays ----
+    /** For [text] in voice [style]: its plan and the first phrases (by what is said and how), as they come. */
+    private class Ahead(val text: String, val style: String) {
+        @Volatile var plan: VoicePlan? = null
+        val pcm = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<ByteArray?>>()
+        @Volatile var stop = false
+    }
+    @Volatile private var ahead: Ahead? = null
+    /** Changes whenever a reading starts that does not use what was made ahead: that work stops. */
+    @Volatile private var aheadEpoch = 0
+
+    private fun aheadKey(t: String, lang: String, style: String, speed: Float, gain: Float, steps: Int) =
+        "$t|$lang|$style|$speed|$gain|$steps"
+
+    /**
+     * The next chapter of the book being read: its text found, its voices worked out and its first
+     * ~20 seconds voiced, in the order the reading will need them — the reading then picks them up
+     * at once. Stops as soon as the reading goes elsewhere (or catches up with it).
+     */
+    private suspend fun makeNextChapterBeginning(cur: String, lang: String, stylePath: String, steps: Int,
+                                                 speed: Float, isAdvancedEnabled: Boolean, epoch: Int) {
+        val bs = com.brahmadeo.supertonic.tts.utils.BookSession
+        val timer = com.brahmadeo.supertonic.tts.utils.SleepTimer
+        if (timer.atChapterEnd(this) || timer.expired(this) || !bs.matches(this, cur)) return
+        val path = bs.currentPath(this) ?: return
+        val next = bs.peekNextChapter(this) ?: return
+        // the same text the next chapter will be read as (continueWithNextChapter)
+        val text = if (lang.lowercase().startsWith("ko") || next.endsWith(" .")) next else "$next ."
+        val effLang = autoDetectRussian(text, lang)
+        val sentences = textNormalizer.splitIntoSentences(text, effLang)
+        if (sentences.isEmpty()) return
+        // made beforehand into a file: it plays from there, nothing to make
+        if (com.brahmadeo.supertonic.tts.utils.BookPrep.find(this, path, text, sentences.size, stylePath) != null) return
+        if (aheadEpoch != epoch) return
+        val a = Ahead(text, stylePath)
+        ahead = a
+        a.plan = voicePlan(text, sentences, stylePath, File(path).name)
+        val plan = a.plan ?: return
+        var seconds = 0f
+        var first = true
+        for (index in 0 until minOf(sentences.size, 8)) {
+            for (pc in plan.pieces(index)) {
+                val style = plan.style(pc)
+                val sp = plan.speed(pc, style, speed)
+                val gain = plan.gain(pc, style)
+                var subs = com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)
+                if (first) { subs = quickStartSplit(subs); first = false }
+                for (sub in subs) {
+                    if (a.stop || ahead !== a || aheadEpoch != epoch || SupertonicTTS.isCancelled()) return
+                    val norm = textNormalizer.normalize(sub, effLang, isAdvancedEnabled)
+                    val d = kotlinx.coroutines.CompletableDeferred<ByteArray?>()
+                    a.pcm[aheadKey(norm, effLang, style, sp, gain, steps)] = d
+                    var r: ByteArray? = null
+                    try { r = SupertonicTTS.generateAudio(norm, effLang, style, sp, 0.0f, steps, gain, null) }
+                    finally { d.complete(r) }
+                    r?.let { seconds += it.size / 2f / SupertonicTTS.getAudioSampleRate().coerceAtLeast(1) }
+                    if (seconds >= 20f) return
+                }
+            }
+        }
+    }
 
     /** Who says each phrase and in which voice, at which pace and loudness: for reading and for BookPrep. */
     private class VoicePlan(
