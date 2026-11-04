@@ -569,4 +569,17 @@
     <string name="shtorm_denoise_off">Off</string>
     <string name="shtorm_denoise_prep">While preparing</string>
     <string name="shtorm_denoise_always">Always</string>
+    <string name="prep_why_off">preparing is off</string>
+    <string name="prep_why_unplugged">the phone is not on the charger</string>
+    <string name="prep_why_low">the battery is below half</string>
+    <string name="prep_why_saver">power saving is on</string>
+    <string name="prep_note_stopped">Stopped: %1$s.</string>
+    <string name="prep_note_done">Done: the book is voiced from the current chapter to the end.</string>
+    <string name="prep_note_reading">Stopped: the reading started. It goes on after it, if the phone is on the charger.</string>
+    <string name="prep_note_hand">Stopped by hand.</string>
+    <string name="prep_note_failed">Error: %1$s</string>
+    <string name="prep_paused_engine">Paused: another app needs the voice now; going on when it is done</string>
+    <string name="prep_background_need">For preparing to start on its own on the charger while the app is closed, Android must let it work in the background.</string>
+    <string name="prep_background_allow">Allow background work</string>
+    <string name="prep_cant_now">It will not start now: %1$s</string>
 </resources>

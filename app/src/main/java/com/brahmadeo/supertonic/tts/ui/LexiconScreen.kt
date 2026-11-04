@@ -454,11 +454,16 @@ private fun PrepSection() {
     // how much is ready: counted in the background, again every few seconds while it is being made
     var status by remember { mutableStateOf(0 to 0L) }
     val working = prep.now.value
+    // how the last preparing ended, and whether Android lets it start on its own (Android 12+)
+    var note by remember { mutableStateOf(prep.note(context)) }
+    var bgAllowed by remember { mutableStateOf(prep.mayRunInBackground(context)) }
     LaunchedEffect(tick, on, mode) {
         while (true) {
             status = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try { if (book != null) prep.status(context, book, prep.voicePath(context)) else 0 to 0L } catch (e: Exception) { 0 to 0L }
             }
+            note = prep.note(context)
+            bgAllowed = prep.mayRunInBackground(context)
             kotlinx.coroutines.delay(3000)
         }
     }
@@ -467,7 +472,11 @@ private fun PrepSection() {
             title = stringResource(AppR.string.prep_title),
             description = stringResource(AppR.string.prep_desc),
             checked = on,
-            onToggle = { on = it; prep.setEnabled(context, it) }
+            onToggle = {
+                on = it; prep.setEnabled(context, it)
+                // on its own on the charger: Android must let the app start work in the background
+                if (it && !prep.mayRunInBackground(context)) prep.askBackground(context)
+            }
         )
         if (on) {
             Column(modifier = Modifier.padding(horizontal = 28.dp)) {
@@ -487,16 +496,26 @@ private fun PrepSection() {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp)
                 )
-                // what is being done right now (or what it waits for)
+                // what is being done right now (or what it waits for); otherwise how it last ended
                 if (working != null) {
                     Text(working, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 4.dp))
+                } else note?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp))
+                }
+                if (!bgAllowed) {
+                    Text(stringResource(AppR.string.prep_background_need), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp))
+                    TextButton(onClick = { prep.askBackground(context) }) { Text(stringResource(AppR.string.prep_background_allow)) }
                 }
                 Row {
                     if (working != null) TextButton(onClick = { prep.stop(context) }) { Text(stringResource(AppR.string.prep_stop)) }
                     else TextButton(onClick = {
-                        if (!prep.conditionsOk(context)) android.widget.Toast.makeText(context,
-                            context.getString(AppR.string.prep_wait), android.widget.Toast.LENGTH_LONG).show()
+                        // why it cannot start now, said at once (not just "nothing happens")
+                        val why = prep.why(context)
+                        if (why != null) android.widget.Toast.makeText(context,
+                            context.getString(AppR.string.prep_cant_now, why), android.widget.Toast.LENGTH_LONG).show()
                         else prep.kick(context, byHand = true)
                         tick++
                     }) { Text(stringResource(AppR.string.prep_now)) }

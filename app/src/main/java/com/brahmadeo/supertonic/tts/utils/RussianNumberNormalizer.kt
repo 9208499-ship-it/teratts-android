@@ -83,6 +83,110 @@ class RussianNumberNormalizer {
         15L to "пятнадцати", 16L to "шестнадцати", 17L to "семнадцати", 18L to "восемнадцати", 19L to "девятнадцати",
         20L to "двадцати", 30L to "тридцати")
 
+    // ---- cardinals in the oblique cases ---------------------------------------
+    // "из 2 вариантов" → "из двух вариантов", "к 5 часам" → "к пяти часам", "с 15 друзьями" →
+    // "с пятнадцатью друзьями", "о 2 вариантах" → "о двух вариантах" (ollejeek, 4PDA: numbers were
+    // always read in the nominative). The case comes from the noun after the number (its plural
+    // ending: -ах / -ам / -ами) or, failing that, from the preposition before it.
+    private val CASE_GEN = 0; private val CASE_DAT = 1; private val CASE_INS = 2; private val CASE_PREP = 3
+    private val unitsCase = arrayOf(
+        arrayOf("нуля", "нулю", "нулём", "нуле"), arrayOf("одного", "одному", "одним", "одном"),
+        arrayOf("двух", "двум", "двумя", "двух"), arrayOf("трёх", "трём", "тремя", "трёх"),
+        arrayOf("четырёх", "четырём", "четырьмя", "четырёх"), arrayOf("пяти", "пяти", "пятью", "пяти"),
+        arrayOf("шести", "шести", "шестью", "шести"), arrayOf("семи", "семи", "семью", "семи"),
+        arrayOf("восьми", "восьми", "восемью", "восьми"), arrayOf("девяти", "девяти", "девятью", "девяти"),
+        arrayOf("десяти", "десяти", "десятью", "десяти"), arrayOf("одиннадцати", "одиннадцати", "одиннадцатью", "одиннадцати"),
+        arrayOf("двенадцати", "двенадцати", "двенадцатью", "двенадцати"), arrayOf("тринадцати", "тринадцати", "тринадцатью", "тринадцати"),
+        arrayOf("четырнадцати", "четырнадцати", "четырнадцатью", "четырнадцати"), arrayOf("пятнадцати", "пятнадцати", "пятнадцатью", "пятнадцати"),
+        arrayOf("шестнадцати", "шестнадцати", "шестнадцатью", "шестнадцати"), arrayOf("семнадцати", "семнадцати", "семнадцатью", "семнадцати"),
+        arrayOf("восемнадцати", "восемнадцати", "восемнадцатью", "восемнадцати"), arrayOf("девятнадцати", "девятнадцати", "девятнадцатью", "девятнадцати"))
+    private val tensCase = arrayOf(arrayOf(), arrayOf(),
+        arrayOf("двадцати", "двадцати", "двадцатью", "двадцати"), arrayOf("тридцати", "тридцати", "тридцатью", "тридцати"),
+        arrayOf("сорока", "сорока", "сорока", "сорока"), arrayOf("пятидесяти", "пятидесяти", "пятьюдесятью", "пятидесяти"),
+        arrayOf("шестидесяти", "шестидесяти", "шестьюдесятью", "шестидесяти"), arrayOf("семидесяти", "семидесяти", "семьюдесятью", "семидесяти"),
+        arrayOf("восьмидесяти", "восьмидесяти", "восемьюдесятью", "восьмидесяти"), arrayOf("девяноста", "девяноста", "девяноста", "девяноста"))
+    private val hundredsCase = arrayOf(arrayOf(),
+        arrayOf("ста", "ста", "ста", "ста"), arrayOf("двухсот", "двумстам", "двумястами", "двухстах"),
+        arrayOf("трёхсот", "трёмстам", "тремястами", "трёхстах"), arrayOf("четырёхсот", "четырёмстам", "четырьмястами", "четырёхстах"),
+        arrayOf("пятисот", "пятистам", "пятьюстами", "пятистах"), arrayOf("шестисот", "шестистам", "шестьюстами", "шестистах"),
+        arrayOf("семисот", "семистам", "семьюстами", "семистах"), arrayOf("восьмисот", "восьмистам", "восемьюстами", "восьмистах"),
+        arrayOf("девятисот", "девятистам", "девятьюстами", "девятистах"))
+    private val thousandOne = arrayOf("тысячи", "тысяче", "тысячей", "тысяче")
+    private val thousandMany = arrayOf("тысяч", "тысячам", "тысячами", "тысячах")
+
+    private fun triadCase(n: Int, c: Int, feminine: Boolean): List<String> {
+        val out = ArrayList<String>()
+        if (n / 100 > 0) out.add(hundredsCase[n / 100][c])
+        val r = n % 100
+        fun unit(u: Int) = if (u == 1 && feminine) "одной" else unitsCase[u][c]
+        if (r in 1..19) out.add(unit(r))
+        else if (r >= 20) { out.add(tensCase[r / 10][c]); if (r % 10 > 0) out.add(unit(r % 10)) }
+        return out
+    }
+
+    /** [n] (under a million) in an oblique case; [feminine]: "одной" for a final 1. */
+    fun spellCardinalCase(n: Long, c: Int, feminine: Boolean = false): String? {
+        if (n < 0 || n >= 1_000_000) return null
+        if (n == 0L) return unitsCase[0][c]
+        val th = (n / 1000).toInt()
+        val rest = (n % 1000).toInt()
+        val words = ArrayList<String>()
+        if (th > 0) {
+            if (th > 1) words.addAll(triadCase(th, c, feminine = true))
+            words.add(if (th % 10 == 1 && th % 100 != 11) thousandOne[c] else thousandMany[c])
+        }
+        words.addAll(triadCase(rest, c, feminine))
+        return words.joinToString(" ")
+    }
+
+    private val genPreps = setOf("из", "изо", "от", "ото", "до", "около", "свыше", "без", "безо", "для", "после", "кроме",
+        "вместо", "среди", "возле", "вокруг", "у", "более", "менее", "больше", "меньше", "против", "мимо", "вне",
+        "старше", "младше", "выше", "ниже", "нет", "накануне", "посреди", "сверх", "ради", "вдоль", "внутри", "позади",
+        "впереди", "вроде", "насчёт", "насчет", "порядка", "с", "со")
+    private val datPreps = setOf("к", "ко", "благодаря", "согласно", "вопреки", "навстречу", "подобно")
+    private val insPreps = setOf("между", "над", "надо", "под", "подо", "перед", "передо")
+    private val prepPreps = setOf("о", "об", "обо", "при")
+    // a date: "1 мая" → "первое мая", "с 1 января" → "с первого января", "к 9 мая" → "к девятому мая"
+    private val dateRegex = Regex("(?<![\\p{L}\\d])(\\d{1,2})\\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)(?![\\p{L}])",
+        RegexOption.IGNORE_CASE)
+    private val prevWordRegex = Regex("(\\p{L}+)[\\s\\u00A0]*$")
+    private val nextWordRegex = Regex("^[\\s\\u00A0]*(\\p{L}+)")
+
+    /** The case a number stands in, from the word before it and the noun after it; -1: the nominative. */
+    /** [case] (-1: the nominative), "одной" wanted, the case read from the noun (not only the preposition). */
+    private class CaseAt(val case: Int, val feminine: Boolean, val byNoun: Boolean)
+
+    private fun caseAround(before: String, after: String, n: Long): CaseAt {
+        val p = prevWordRegex.find(before)?.groupValues?.get(1)?.lowercase() ?: ""
+        val w = nextWordRegex.find(after)?.groupValues?.get(1)?.lowercase() ?: ""
+        val single = n % 10 == 1L && n % 100 != 11L
+        // the noun's ending says it best (plural: -ами, -ах, -ам; after "с" and a final 1, the
+        // singular instrumental: "с 1 книгой")
+        val byNoun = when {
+            w.length > 3 && (w.endsWith("ами") || w.endsWith("ями") || w.endsWith("ьми") ||
+                w.endsWith("ыми") || w.endsWith("ими")) -> CASE_INS
+            w.length > 3 && (w.endsWith("ах") || w.endsWith("ях")) -> CASE_PREP
+            w.length > 3 && (w.endsWith("ам") || w.endsWith("ям")) -> CASE_DAT
+            single && (p == "с" || p == "со") && w.length > 2 &&
+                listOf("ом", "ем", "ём", "ой", "ей", "ью").any { w.endsWith(it) } -> CASE_INS
+            else -> -1
+        }
+        val c = if (byNoun >= 0) byNoun else when (p) {
+            in genPreps -> CASE_GEN
+            in datPreps -> CASE_DAT
+            in insPreps -> CASE_INS
+            in prepPreps -> CASE_PREP
+            else -> -1
+        }
+        // "одной": a feminine noun after a final 1 ("из 1 книги", "с 1 книгой")
+        val fem = when (c) {
+            CASE_GEN -> w.endsWith("ы") || (w.endsWith("и") && !w.endsWith("ии"))
+            CASE_INS -> w.endsWith("ой") || w.endsWith("ей") || w.endsWith("ью")
+            else -> false
+        }
+        return CaseAt(c, fem, byNoun >= 0)
+    }
+
     // ---- units of measurement ------------------------------------------------
     /** one / few / many, gender of the unit noun (for 1 and 2), after a fraction = few form. */
     private class MeasureUnit(val one: String, val few: String, val many: String, val feminine: Boolean = false)
@@ -439,6 +543,7 @@ class RussianNumberNormalizer {
             "ую", "юю", "ю" -> "facc"
             "ей" -> "fobl"
             "ое", "ее", "е" -> if (n >= 10 && n % 10L == 0L) "plnom" else "nnom"
+            "#ое" -> "nnom"   // a date: "двадцатое августа" (not "двадцатые", as "90-е")
             "ых", "их", "х" -> "plgen"
             "ыми", "ими", "ми" -> "plins"
             else -> "mnom"
@@ -578,6 +683,12 @@ class RussianNumberNormalizer {
             val prep = m.groupValues[1]
             val n = m.groupValues[2].toLongOrNull() ?: return@replace m.value
             val noun = m.groupValues[3]
+            // a count, not a year: "прошло 21 год", "ему 3 года" (was "двадцать первый год")
+            val low = noun.lowercase()
+            if (n < 1000 && prep.isEmpty() && (low == "год" ||
+                    (low == "года" && n % 10 in 2..4 && n % 100 !in 12..14))) {
+                return@replace "${spellInteger(n)} $noun"
+            }
             val dative = prep.isNotEmpty() && noun.lowercase() in setOf("году", "веку", "столетию")
             val ending = if (dative) "му" else when (noun.lowercase()) {
                 "году", "веке", "столетии" -> "м"
@@ -588,6 +699,25 @@ class RussianNumberNormalizer {
             }
             val phrase = spellOrdinal(n) ?: return@replace m.value
             (if (prep.isNotEmpty()) "$prep " else "") + "${declineOrdinal(phrase, ending, n)} $noun"
+        }
+
+        // dates: the day is an ordinal (neuter), in the case its preposition asks for
+        run {
+            val src0 = t
+            t = dateRegex.replace(src0) { m ->
+                val n = m.groupValues[1].toLongOrNull() ?: return@replace m.value
+                if (n !in 1..31) return@replace m.value
+                val p = prevWordRegex.find(src0.substring(0, m.range.first))?.groupValues?.get(1)?.lowercase() ?: ""
+                val ending = when (p) {
+                    in datPreps -> "му"
+                    in prepPreps -> "м"
+                    in insPreps -> "ым"
+                    in genPreps -> "го"
+                    else -> "#ое"
+                }
+                val phrase = spellOrdinal(n) ?: return@replace m.value
+                declineOrdinal(phrase, ending, n) + " " + m.groupValues[2]
+            }
         }
 
         // "1-5-й уровень" → "первый — пятый уровень" (was "один-пятый")
@@ -692,9 +822,18 @@ class RussianNumberNormalizer {
 
         // Plain integers — last, after compound forms above have already
         // rewritten themselves into "<number> <unit>".
-        t = integerRegex.replace(t) { m ->
+        val src = t
+        t = integerRegex.replace(src) { m ->
             val raw = m.groupValues[1]
             val n = raw.toLongOrNull() ?: return@replace raw
+            // in the case the preposition or the noun asks for ("из двух вариантов")
+            if (n >= 0) {
+                val at = caseAround(src.substring(0, m.range.first), src.substring(m.range.last + 1), n)
+                // 1000–2100 alone after a preposition is most likely a year ("с 1941 по 1945"):
+                // left as it was; with a noun's ending ("к 2000 метрам") it is a count
+                val yearLike = n in 1000..2100 && !at.byNoun
+                if (at.case >= 0 && !yearLike) spellCardinalCase(n, at.case, at.feminine)?.let { return@replace it }
+            }
             natural(spellInteger(n))
         }
 

@@ -339,6 +339,9 @@ object SupertonicTTS {
 
     /** Unload the models if nothing has been synthesized for [minIdleMs]. */
     @Synchronized
+    /** How long no phrase has been made (by anyone: the reading, BookPrep, a reader app). */
+    fun idleMs(): Long = System.currentTimeMillis() - lastUse
+
     fun releaseIfIdle(minIdleMs: Long): Boolean {
         if (nativePtr == 0L || System.currentTimeMillis() - lastUse < minIdleMs) return false
         release()

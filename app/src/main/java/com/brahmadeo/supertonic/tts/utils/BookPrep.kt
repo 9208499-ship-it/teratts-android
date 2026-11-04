@@ -82,16 +82,61 @@ object BookPrep {
         kick(context, byHand = true)
     }
 
-    /** May the phone make audio now: charging, or (if chosen) at least half the battery and no power saving. */
-    fun conditionsOk(context: Context): Boolean {
-        if (!enabled(context)) return false
-        val bm = context.getSystemService(android.os.BatteryManager::class.java) ?: return false
-        if (bm.isCharging) return true
-        if (mode(context) != MODE_HALF) return false
-        val level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
-        val saver = (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isPowerSaveMode == true
-        return level >= 50 && !saver
+    /**
+     * On the charger: plugged in (mains, USB, wireless). Not "charging": a full battery, or one held
+     * at 80 % by the phone's battery care, is not charging, yet the phone is on the charger
+     * (SECTORAS, 4PDA: on the charger preparing did not start).
+     */
+    fun plugged(context: Context): Boolean = try {
+        val i = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        (i?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+    } catch (e: Exception) {
+        context.getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
     }
+
+    /** Why the phone may not make audio now (for the settings), or null if it may. */
+    fun why(context: Context): String? {
+        if (!enabled(context)) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_off)
+        if (plugged(context)) return null
+        if (mode(context) != MODE_HALF) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_unplugged)
+        val bm = context.getSystemService(android.os.BatteryManager::class.java)
+        val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
+        if (level < 50) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_low)
+        val saver = (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isPowerSaveMode == true
+        if (saver) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_saver)
+        return null
+    }
+
+    /** May the phone make audio now: on the charger, or (if chosen) at least half the battery and no power saving. */
+    fun conditionsOk(context: Context): Boolean = why(context) == null
+
+    /**
+     * May the app start working when it is closed (Android 12+: only an app let off battery
+     * optimisation may start its foreground work from the background — the system's job on the
+     * charger, or after the reading has stopped).
+     */
+    fun mayRunInBackground(context: Context): Boolean =
+        android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+            (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)
+                ?.isIgnoringBatteryOptimizations(context.packageName) == true
+
+    /** Asks Android to let the app work in the background (the system's dialog). */
+    fun askBackground(context: Context) {
+        try {
+            context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            try { context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
+        }
+    }
+
+    /** How the last preparing ended ("18:40 — Остановлено: телефон отключён от зарядки."), kept for the settings. */
+    fun setNote(context: Context, text: String) {
+        val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("note", "$time — $text").apply()
+    }
+
+    fun note(context: Context): String? = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("note", null)
 
     // ---- the system's job: looks every 15 minutes (only on charge, if so chosen) ----
     private const val JOB_ID = 7341
