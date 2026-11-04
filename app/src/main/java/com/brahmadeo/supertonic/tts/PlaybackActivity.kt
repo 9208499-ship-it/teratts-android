@@ -59,7 +59,7 @@ class PlaybackActivity : ComponentActivity() {
         val chapter = result.data?.getIntExtra(BookSearchActivity.EXTRA_CHAPTER, -1) ?: -1
         val offset = result.data?.getIntExtra(BookSearchActivity.EXTRA_OFFSET, 0) ?: 0
         if (chapter < 0) return@registerForActivityResult
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        uiScope.launch {
             val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try { com.brahmadeo.supertonic.tts.utils.BookSession.chapterAt(this@PlaybackActivity, chapter) } catch (e: Exception) { null }
             }
@@ -88,6 +88,7 @@ class PlaybackActivity : ComponentActivity() {
         val ranges = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(prepared, sentencesState.value)
         val idx = ranges.indexOfLast { it != null && it.first <= offset }.coerceAtLeast(0)
         currentIndexState.intValue = idx
+        jumpSeq.intValue++
         if (wasPlaying) playFromIndex(idx)
         else try { if (playbackService?.isServiceActive == true) playbackService?.stop() } catch (_: Exception) {}
     }
@@ -132,6 +133,7 @@ class PlaybackActivity : ComponentActivity() {
         currentIndexState.intValue = if (atPlace) {
             PlaybackService.resumeIndex(this, prepared, sentencesState.value, currentSpeed) ?: 0
         } else 0
+        jumpSeq.intValue++
         if (wasPlaying || atPlace) playFromIndex(currentIndexState.intValue)
         else try { if (playbackService?.isServiceActive == true) playbackService?.stop() } catch (_: Exception) {}
     }
@@ -139,7 +141,7 @@ class PlaybackActivity : ComponentActivity() {
     /** The chapter before ([dir] = -1) or after (+1) the one on screen. */
     private fun stepChapter(dir: Int) {
         com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        uiScope.launch {
             val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try { com.brahmadeo.supertonic.tts.utils.BookSession.stepChapter(this@PlaybackActivity, dir) } catch (e: Exception) { null }
             }
@@ -364,6 +366,8 @@ class PlaybackActivity : ComponentActivity() {
                     onRoles = { on -> com.brahmadeo.supertonic.tts.utils.RolePrefs.setEnabled(this@PlaybackActivity, on); restartReading() },
                     onQuote = { i -> addQuote(i) },
                     onQuotes = { quotesOpenState.value = true },
+                    onEyePlace = { i -> saveEyePlace(i) },
+                    jumpSeq = jumpSeq.intValue,
                     sentences = sentencesState.value,
                     text = textState.value,
                     title = textState.value.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }?.take(80) ?: "",
@@ -394,7 +398,7 @@ class PlaybackActivity : ComponentActivity() {
                         if (changed) try {
                             val i = currentIndexState.intValue
                             if (isPlayingState.value && i >= 0) playFromIndex(i)
-                            else if (isServiceActiveState.value) playbackService?.stop()
+                            else if (isServiceActiveState.value) restartOnPlay = true
                         } catch (_: Exception) { }
                     },
                     onSentenceLongClick = { i -> showSpeakerDialog(i) },
@@ -432,7 +436,12 @@ class PlaybackActivity : ComponentActivity() {
                         quotes = qList,
                         onGo = { q ->
                             val i = sentencesState.value.indexOfFirst { it.trim() == q.text }
-                            if (i >= 0) { quotesOpenState.value = false; playFromIndex(i) }
+                            if (i >= 0) {
+                                quotesOpenState.value = false
+                                // listening: read on from the quote; reading by eye: just show it
+                                if (isServiceActiveState.value) playFromIndex(i)
+                                else { currentIndexState.intValue = i; jumpSeq.intValue++ }
+                            }
                             else Toast.makeText(this@PlaybackActivity, getString(R.string.quote_other_chapter, q.chapter), Toast.LENGTH_SHORT).show()
                         },
                         onShare = { q ->
@@ -590,7 +599,8 @@ class PlaybackActivity : ComponentActivity() {
                 // a real pause: the sound stops at once and goes on from the same word
                 playbackService?.pause()
             } else if (isServiceActiveState.value) {
-                playbackService?.play()
+                if (restartOnPlay) { restartOnPlay = false; playFromIndex(currentIndexState.intValue.coerceAtLeast(0)) }
+                else playbackService?.play()
             } else {
                 if (currentIndexState.intValue >= 0) {
                     playFromIndex(currentIndexState.intValue)
@@ -632,9 +642,19 @@ class PlaybackActivity : ComponentActivity() {
         try {
             val i = currentIndexState.intValue
             if (isPlayingState.value && i >= 0) playFromIndex(i)
-            else if (isServiceActiveState.value) playbackService?.stop()
+            // paused: stays paused with its panel; "play" starts afresh from the phrase, with the change
+            else if (isServiceActiveState.value) restartOnPlay = true
         } catch (_: Exception) { }
     }
+
+    /** Something that changes the sound was changed while paused: the next "play" makes the phrase again. */
+    private var restartOnPlay = false
+
+    /** A place chosen in this chapter (search, contents, a quote): the screen goes there. */
+    private val jumpSeq = mutableIntStateOf(0)
+
+    /** The screen's own tasks: ended with it (a dialog must not come up on a closed window). */
+    private val uiScope = kotlinx.coroutines.MainScope()
 
     /** A voice chosen in the sheet: it becomes the main one, the reading goes on in it. */
     private fun useVoice(file: String) {
@@ -654,6 +674,32 @@ class PlaybackActivity : ComponentActivity() {
         try { startService(Intent(this, PlaybackService::class.java).setAction("RESET_ENGINE")) } catch (_: Exception) { }
     }
 
+    /**
+     * Read by eye (no voice): the phrase at the top of the screen becomes the book's place, as the voice
+     * keeps it — so going to another book and back lands where the reading stopped.
+     */
+    private fun saveEyePlace(i: Int) {
+        val text = currentText
+        val s = sentencesState.value
+        if (i !in s.indices || text.isEmpty()) return
+        val ctx = applicationContext
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            try {
+                val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, s).getOrNull(i) ?: return@launch
+                val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
+                if (scope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.BookPositions.save(ctx, scope,
+                    com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(ctx),
+                    r.first.toFloat() / text.length.coerceAtLeast(1), text.substring(r.first, minOf(text.length, r.first + 80)))
+                val now = System.currentTimeMillis()
+                val key = PlaybackService.positionKey(text)
+                ctx.getSharedPreferences("TeraReadingPositions", MODE_PRIVATE).edit()
+                    .putInt(key, i).putLong(key + "_t", now)
+                    .putString("last_pos_prefix", text.trim().take(160)).putInt("last_pos_index", i)
+                    .putLong("last_pos_time", now).apply()
+            } catch (_: Exception) { }
+        }
+    }
+
     /** ★: phrase [i] (the one being heard) to the book's quotes. */
     private fun addQuote(i: Int) {
         val s = sentencesState.value.getOrNull(i) ?: return
@@ -665,6 +711,7 @@ class PlaybackActivity : ComponentActivity() {
 
     private fun playFromIndex(index: Int) {
         if (currentText.isEmpty()) return
+        restartOnPlay = false
         saveState()
         try {
             playbackService?.synthesizeAndPlay(currentText, currentLang, currentVoicePath, currentSpeed, currentSteps, index)
@@ -679,7 +726,7 @@ class PlaybackActivity : ComponentActivity() {
         val sentences = sentencesState.value
         if (index !in sentences.indices) return
         val ctx = this
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        uiScope.launch {
             val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
             val roster = com.brahmadeo.supertonic.tts.utils.BookRoster.cached(ctx, scope)
             val (result, line, now) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -702,6 +749,8 @@ class PlaybackActivity : ComponentActivity() {
             val names = (result.characters.map { it.name } + (roster?.ranking ?: emptyList())).distinct()
             val labels = names.map { if (it == hero) getString(R.string.characters_hero) else it } +
                 listOf(getString(R.string.speaker_unknown), getString(R.string.speaker_narrator))
+            // the screen was closed while the chapter was being analysed: no dialog on a closed window
+            if (isFinishing || isDestroyed) return@launch
             com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
                 .setTitle(getString(R.string.speaker_who) + "\n«" + line.trim().take(80) + "»\n" +
                     getString(R.string.speaker_now, when (now) { null -> getString(R.string.speaker_unknown)
@@ -867,6 +916,8 @@ class PlaybackActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // what this screen started (a chapter being opened, a dialog being prepared) ends with it
+        uiScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         if (isBound) {
             try {
                 playbackService?.removeListener(playbackListenerStub)

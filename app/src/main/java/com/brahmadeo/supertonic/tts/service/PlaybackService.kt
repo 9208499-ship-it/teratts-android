@@ -138,7 +138,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     private val textNormalizer = TextNormalizer()
     private var resumeOnFocusGain = false
     
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    // a failure in one background task (an export, a chapter's preparation) is logged, not fatal to the app
+    private val serviceScope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob() +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Log.e(TAG, "background task failed", e) })
     
     /** Engine start-up (models load in the background); reading waits for it. */
     
@@ -432,6 +434,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         } else if (intent?.action == ACTION_PREVIEW) {
             previewVoice(intent.getStringExtra("text") ?: "", intent.getStringExtra("voice") ?: "",
                 intent.getFloatExtra("speed", 1f))
+        } else if (intent?.action == "RESET_ENGINE" && com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere) {
+            // an audiobook is being saved: the new model is taken after it (cutting it would lose the save)
+            Log.i(TAG, "model change postponed: an export is running")
+            serviceScope.launch {
+                while (com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere) delay(2000)
+                try { startService(Intent(this@PlaybackService, PlaybackService::class.java).setAction("RESET_ENGINE")) } catch (_: Exception) { }
+            }
         } else if (intent?.action == "RESET_ENGINE") {
             // reload in the background: loading the models takes seconds, and on the
             // main thread it froze the app ("не отвечает"); reading waits for engineReady
@@ -724,7 +733,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             text.substring(r.first, minOf(text.length, r.first + 80)))
                     }
                 }
-                val validStartIndex = if (requestedIndex in 0 until totalSentences) requestedIndex else 0
+                val validStartIndex = if (requestedIndex in 0 until totalSentences) requestedIndex
+                    else if (requestedIndex >= totalSentences) (totalSentences - 1).coerceAtLeast(0) else 0
                 currentSentenceIndex = validStartIndex
                 // a timer that ran out while nothing was read does not stop the reading just started
                 if (com.brahmadeo.supertonic.tts.utils.SleepTimer.expired(this@PlaybackService)) {
@@ -903,6 +913,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             delay(100)
                         }
                         if (SupertonicTTS.isCancelled() || !isActive || !isSynthesizing) break
+                        // the CPU stays awake while reading — renewed every phrase (a long chapter outlasted
+                        // the single 10 minutes taken at the start, and the phone could doze off mid-chapter)
+                        try { wakeLock?.acquire(10 * 60 * 1000L) } catch (_: Exception) { }
 
                         // marker: "sentence <index> starts here" (see sentenceMarkers)
                         val marker = ByteArray(0)
@@ -1030,14 +1043,31 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     if (isSynthesizing && isActive) {
                         val wasCancelled = SupertonicTTS.isCancelled()
                         isSynthesizing = false
+                        // not one phrase made (the engine failed to load, the voice is missing): stop here —
+                        // going on would run through the whole book in seconds and lose the place in it
+                        if (!wasCancelled && !sawAnyAudio && totalSentences - validStartIndex >= 3) {
+                            Log.e(TAG, "no audio was made: stopping instead of going on to the next chapter")
+                            notifyListenerState(false)
+                            stopPlayback()
+                            return@withContext
+                        }
                         if (!wasCancelled) {
                             notifyListenerProgress(totalSentences, totalSentences)
-                            // read to the end: next time start from the beginning
-                            getSharedPreferences(POSITIONS_PREFS, MODE_PRIVATE).edit()
-                                .remove(positionKey(text)).apply()
+                            // read to the end: next time start from the beginning (the "last place" too, or
+                            // play on a finished text gave its last phrase only)
+                            val pp = getSharedPreferences(POSITIONS_PREFS, MODE_PRIVATE)
+                            val e = pp.edit().remove(positionKey(text)).remove(positionKey(text) + "_t")
+                            if (text.trim().startsWith(pp.getString("last_pos_prefix", null) ?: "\u0000"))
+                                e.remove("last_pos_prefix").remove("last_pos_index").remove("last_pos_time")
+                            e.apply()
+                            currentSentenceIndex = -1
                         }
                         notifyListenerState(true)
-                        if (!wasCancelled && com.brahmadeo.supertonic.tts.utils.SleepTimer.atChapterEnd(this@PlaybackService)) {
+                        // the sleep timer ran out during the last phrase: no next chapter either
+                        if (!wasCancelled && com.brahmadeo.supertonic.tts.utils.SleepTimer.expired(this@PlaybackService)) {
+                            com.brahmadeo.supertonic.tts.utils.SleepTimer.off(this@PlaybackService)
+                            stopPlayback()
+                        } else if (!wasCancelled && com.brahmadeo.supertonic.tts.utils.SleepTimer.atChapterEnd(this@PlaybackService)) {
                             // sleep timer "to the end of the chapter": no next chapter, no queue
                             com.brahmadeo.supertonic.tts.utils.SleepTimer.off(this@PlaybackService)
                             stopPlayback()
@@ -1334,6 +1364,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         } finally {
             if (!ok) { writer.abort(); made.delete() }
         }
+        // stopped half-way: nothing to finish (finishing an aborted WAV made an empty file again)
+        if (!ok) return
         if (writer.finish()) {
             prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath)
             Log.i(TAG, "Prepare: chapter ready (${samples / rate} s): ${made.name}")
@@ -1423,6 +1455,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 Log.e(TAG, "AudioTrack write exception", e)
                 return false
             }
+            if (written == 0 && !isPlaying) continue   // paused mid-write: wait above, then write the rest
             if (written <= 0) {
                 Log.w(TAG, "AudioTrack write returned $written, aborting chunk")
                 return false
@@ -1519,6 +1552,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         if (!isPlaying) {
             if (requestAudioFocus()) {
                 isPlaying = true
+                try { wakeLock?.acquire(10 * 60 * 1000L) } catch (_: Exception) { }
                 try {
                     if (audioTrack?.state == AudioTrack.STATE_INITIALIZED) {
                         audioTrack?.play()
@@ -1550,6 +1584,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             notifyListenerState(false)
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
             updateNotification(getString(R.string.notif_paused))
+            // paused: nothing to keep the CPU awake for (play takes the lock again)
+            try { if (wakeLock?.isHeld == true && !preparing) wakeLock?.release() } catch (_: Exception) { }
             // While paused, the engine is held by the phrase it was making (it waits for room in
             // the audio queue). A short pause keeps that — "play" goes on from the very word. A
             // longer one lets the engine go, so a reader app (Moon+) asking for speech is not left
@@ -1798,6 +1834,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             music?.close()
             if (!complete) { writer.abort(); made.delete() }
         }
+        // stopped half-way: no file (finishing an aborted WAV made an empty one that later counted as done)
+        if (!complete) return null
         try {
             if (!writer.finish()) return null
             // chapter title, book, author, track number and the cover — players show them

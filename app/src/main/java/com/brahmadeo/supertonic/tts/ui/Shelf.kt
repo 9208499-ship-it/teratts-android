@@ -78,7 +78,8 @@ internal fun BookShelf(
     onToc: (RecentBook) -> Unit,
     onRename: (RecentBook) -> Unit,
     onDelete: (RecentBook) -> Unit,
-    labels: ShelfLabels
+    labels: ShelfLabels,
+    refresh: Int = 0
 ) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val wall = remember(dark) { woodTile(dark) }
@@ -97,7 +98,7 @@ internal fun BookShelf(
                     verticalAlignment = Alignment.Bottom
                 ) {
                     for (book in rows[r]) {
-                        ShelfBook(book, titleOf(book), Modifier.weight(1f), onOpen, onToc, onRename, onDelete, labels)
+                        ShelfBook(book, titleOf(book), Modifier.weight(1f), onOpen, onToc, onRename, onDelete, labels, refresh)
                     }
                     repeat(3 - rows[r].size) { Spacer(modifier = Modifier.weight(1f)) }
                 }
@@ -115,12 +116,12 @@ internal class ShelfLabels(val toc: String, val rename: String, val delete: Stri
 private fun ShelfBook(
     book: RecentBook, title: String, modifier: Modifier,
     onOpen: (RecentBook) -> Unit, onToc: (RecentBook) -> Unit,
-    onRename: (RecentBook) -> Unit, onDelete: (RecentBook) -> Unit, labels: ShelfLabels
+    onRename: (RecentBook) -> Unit, onDelete: (RecentBook) -> Unit, labels: ShelfLabels, refresh: Int = 0
 ) {
     val ctx = LocalContext.current
     var cover by remember(book.path) { mutableStateOf<android.graphics.Bitmap?>(null) }
-    var share by remember(book.path) { mutableStateOf(com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path)) }
-    LaunchedEffect(book.path) {
+    var share by remember(book.path, refresh) { mutableStateOf(com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path)) }
+    LaunchedEffect(book.path, refresh) {
         cover = com.brahmadeo.supertonic.tts.utils.BookProgress.cover(ctx, book.path)
         if (share == null && com.brahmadeo.supertonic.tts.utils.BookPositions.get(ctx, java.io.File(book.path).name) != null) {
             com.brahmadeo.supertonic.tts.utils.BookProgress.lengths(ctx, book.path)

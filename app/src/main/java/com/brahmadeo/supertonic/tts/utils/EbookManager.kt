@@ -17,7 +17,8 @@ data class RecentBook(
 object EbookManager {
     private const val PREFS_NAME = "EbookPrefs"
     private const val KEY_RECENT_BOOKS = "recent_books"
-    private const val MAX_BOOKS = 15
+    // books leave the library only by «Удалить» (it used to drop the 16th silently, its file kept)
+    private const val MAX_BOOKS = 1000
 
     fun getRecentBooks(context: Context): List<RecentBook> {
         return try {

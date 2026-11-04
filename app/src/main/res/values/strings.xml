@@ -2,7 +2,7 @@
     <string name="app_name">TeraTTS</string>
     
     <!-- Main Activity -->
-    <string name="default_input_text">Hello world, this is Supertonic TTS on Android. Select a voice and speed below!</string>
+    <string name="default_input_text">Hello! This is TeraTTS, an offline Russian speech synthesizer. Paste your text and tap Synthesize.</string>
     <string name="voice_style_label">Voice Style</string>
     <string name="mix_voices_label">Mix Voices</string>
     <string name="voice_style_2_label">Secondary Voice</string>
@@ -315,7 +315,7 @@
     <string name="dict_switch_title">Switch to the Silero dictionary?</string>
     <string name="dict_switch_msg">The old dictionary «%1$s» is no longer used: it has wrong stresses in places, and one stress for both meanings of words like замок. Download Silero (%2$d MB, once) — without it the engine places stresses itself and makes more mistakes.</string>
     <string name="stress_hint_yo">Tap the stressed vowel; tap «е» again to make it «ё». Add a word next to it to set the stress for that phrase only</string>
-    <string name="library_untitled">Untitled (hold to rename)</string>
+    <string name="library_untitled">Untitled</string>
     <string name="library_rename">Rename</string>
     <string name="library_actions">Book actions</string>
     <string name="library_delete_title">Remove the book?</string>
@@ -521,4 +521,18 @@
     <string name="page_anim_slide">Slide</string>
     <string name="page_sound">Rustle when turning</string>
     <string name="page_next_chapter">Next chapter ›</string>
+    <string name="book_opening">Opening the book…</string>
+    <string name="voice_importing">Importing the voice…</string>
+    <string name="accent_dict_importing">Loading the dictionary…</string>
+    <string name="outline_book">Book</string>
+    <string name="outline_chapters">Chapters</string>
+    <string name="outline_pages">Pages</string>
+    <string name="outline_opening">Opening the chapter…</string>
+    <string name="outline_load_pages">Open pages: %1$d</string>
+    <string name="outline_page_n">Page %1$d</string>
+    <string name="outline_preview_na">No preview</string>
+    <string name="outline_preview_error">The page could not be shown</string>
+    <string name="outline_load_page">Read this page</string>
+    <string name="main_show_less">Show less</string>
+    <string name="main_show_more">Show all (%1$d more lines)</string>
 </resources>

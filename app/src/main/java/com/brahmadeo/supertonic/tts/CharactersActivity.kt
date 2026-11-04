@@ -125,7 +125,12 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
                 item {
                     Text(
                         if (scope.isEmpty()) stringResource(AppR.string.characters_scope_global)
-                        else stringResource(AppR.string.characters_scope_book, scope),
+                        // the book's title, not its file name inside the app (book_3fa9….epub)
+                        else stringResource(AppR.string.characters_scope_book, remember(scope) {
+                            com.brahmadeo.supertonic.tts.utils.EbookManager.getRecentBooks(context)
+                                .firstOrNull { java.io.File(it.path).name == scope }
+                                ?.let { com.brahmadeo.supertonic.tts.utils.EbookManager.displayTitle(context, it) } ?: scope
+                        }),
                         style = MaterialTheme.typography.titleSmall
                     )
                 }

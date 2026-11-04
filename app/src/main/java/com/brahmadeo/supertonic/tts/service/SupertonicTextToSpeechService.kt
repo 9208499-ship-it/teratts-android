@@ -514,7 +514,9 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 // Best-effort.
             }
             for (data in ttsChannel) {
-                if (SupertonicTTS.isCancelled()) break
+                // stopped: the rest is drained, not played — leaving the loop stranded the engine in a
+                // full channel's send (a reader's stop() during a long paragraph locked the engine for good)
+                if (SupertonicTTS.isCancelled()) continue
                 var offset = 0
                 while (offset < data.size) {
                     val length = 4096.coerceAtMost(data.size - offset)

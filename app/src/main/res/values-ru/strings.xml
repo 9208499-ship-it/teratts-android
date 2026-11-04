@@ -2,7 +2,7 @@
     <string name="app_name">TeraTTS</string>
 
     <!-- Main Activity -->
-    <string name="default_input_text">Привет, мир. Это Supertonic TTS для Android. Выберите голос и скорость ниже.</string>
+    <string name="default_input_text">Привет! Это TeraTTS — офлайн-синтезатор русской речи. Вставьте свой текст и нажмите «Озвучить».</string>
     <string name="voice_style_label">Стиль голоса</string>
     <string name="mix_voices_label">Смешивать голоса</string>
     <string name="voice_style_2_label">Дополнительный голос</string>
@@ -173,7 +173,7 @@
     <string name="punct_tight_cp_title">Без пробела перед запятой и точкой</string>
     <string name="punct_tight_cp_desc">Пропускать стандартную стабилизацию пробелов перед «,/;» в конце куска и разделение последовательностей «.»/«!»/«?» в кавычках. Чище фраза, но чуть выше риск артефактов на редкой пунктуации.</string>
     <string name="dict_offer_title">Скачать словарь ударений?</string>
-    <string name="dict_offer_msg">Для правильных ударений нужен словарь: 3,3 млн словоформ, размеченных нейросетью silero-stress (%1$d МБ, один раз). Омографы (за́мок/замо́к) движок всё равно решает по контексту. Можно и позже: Настройки → меню (⋮) → Скачать словарь.</string>
+    <string name="dict_offer_msg">Для правильных ударений нужен словарь: 3,3 млн словоформ, размеченных нейросетью silero-stress (%1$d МБ, один раз). Омографы (за́мок/замо́к) движок всё равно решает по контексту. Можно и позже: Настройки → «Ударения и словарь» → ⋮ → «Скачать общий словарь ударений».</string>
     <string name="dict_offer_download">Скачать</string>
     <string name="dict_offer_later">Позже</string>
     <string name="stop_button">Стоп</string>
@@ -232,11 +232,11 @@
     <string name="punct_force_space_title">Принудительный пробел перед знаком препинания</string>
     <string name="punct_force_space_desc">Вставлять пробел между словом и идущим за ним «.,;:!?». Подсказка для токенизатора модели (удивлён, → удивлён ,). Не трогает повторяющиеся знаки (..., ?!) и числа (3,14, 1.5). По умолчанию выключено.</string>
     <string name="chunk_size_title">Размер блока</string>
-    <string name="chunk_size_desc">Small (120) — быстрый старт для коротких сообщений. Default (300) — сбалансированный, текущее поведение. Large (500) — плавнее интонация, для книг. Huge (1000, экспериментально) — упаковывает короткие абзацы в один вызов синтеза.</string>
-    <string name="chunk_size_small">Small</string>
-    <string name="chunk_size_default">Default</string>
-    <string name="chunk_size_large">Large</string>
-    <string name="chunk_size_huge">Huge</string>
+    <string name="chunk_size_desc">Малый (120) — быстрый старт для коротких сообщений. Обычный (300) — сбалансированный. Большой (500) — плавнее интонация, для книг. Огромный (1000, проба) — короткие абзацы озвучиваются за один раз.</string>
+    <string name="chunk_size_small">Малый</string>
+    <string name="chunk_size_default">Обычный</string>
+    <string name="chunk_size_large">Большой</string>
+    <string name="chunk_size_huge">Огромный</string>
     <string name="preroll_title">Буфер предзагрузки</string>
     <string name="preroll_desc">Накопить несколько предложений в RAM (~1–3 МБ) перед началом воспроизведения. Сглаживает паузы между фразами на слабых устройствах. В обмен — чуть больше ожидания в самом начале.</string>
     <string name="preroll_sentences_fmt">Предложений в буфере: %1$d</string>
@@ -315,7 +315,7 @@
     <string name="dict_switch_title">Перейти на словарь Silero?</string>
     <string name="dict_switch_msg">Старый словарь «%1$s» больше не используется: в нём встречаются неверные ударения, а у слов вроде за́мок/замо́к ударение одно на все случаи. Скачайте Silero (%2$d МБ, один раз) — без него ударения ставит сам движок, и ошибок больше.</string>
     <string name="stress_hint_yo">Нажмите на ударную гласную; на «е» ещё раз — станет «ё». Добавьте соседнее слово, чтобы ударение было только в этом сочетании</string>
-    <string name="library_untitled">Без названия (удерживайте, чтобы переименовать)</string>
+    <string name="library_untitled">Без названия</string>
     <string name="library_rename">Переименовать</string>
     <string name="library_actions">Действия с книгой</string>
     <string name="library_delete_title">Убрать книгу?</string>
@@ -393,8 +393,8 @@
     <string name="engine_tera">TeraTTS</string>
     <string name="engine_tera_desc">Русская модель, встроенная</string>
     <string name="engine_shtorm">Pocket TTS (голос по записи)</string>
-    <string name="engine_shtorm_desc_download">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 215 МБ</string>
-    <string name="engine_shtorm_desc_ready">Русская PocketTTS от ArtShtorm: говорит голосом любой короткой записи. Свою запись добавьте через «Импорт голоса». Скачана</string>
+    <string name="engine_shtorm_desc_download">Русская модель Pocket TTS (автор ArtShtorm): говорит голосом любой короткой записи, хорошо ставит ударения. Скачивается при выборе, около 215 МБ</string>
+    <string name="engine_shtorm_desc_ready">Русская модель Pocket TTS (автор ArtShtorm): говорит голосом любой короткой записи. Свою запись добавьте через «Импорт голоса». Скачана</string>
     <string name="engine_shtorm_delete">Удалить Pocket TTS (%1$d МБ)</string>
     <string name="shtorm_liveliness_title">Живость Pocket TTS</string>
     <string name="shtorm_liveliness_desc">Влево — ровнее и спокойнее, меньше оговорок. Вправо — живее и выразительнее, но чаще запинается. Сейчас %1$s, обычно 0,30</string>
@@ -521,4 +521,18 @@
     <string name="page_anim_slide">Сдвиг</string>
     <string name="page_sound">Шелест при листании</string>
     <string name="page_next_chapter">Следующая глава ›</string>
+    <string name="book_opening">Открываю книгу…</string>
+    <string name="voice_importing">Импортирую голос…</string>
+    <string name="accent_dict_importing">Загружаю словарь…</string>
+    <string name="outline_book">Книга</string>
+    <string name="outline_chapters">Главы</string>
+    <string name="outline_pages">Страницы</string>
+    <string name="outline_opening">Открываю главу…</string>
+    <string name="outline_load_pages">Открыть страницы: %1$d</string>
+    <string name="outline_page_n">Страница %1$d</string>
+    <string name="outline_preview_na">Просмотр недоступен</string>
+    <string name="outline_preview_error">Не удалось показать страницу</string>
+    <string name="outline_load_page">Читать страницу</string>
+    <string name="main_show_less">Свернуть</string>
+    <string name="main_show_more">Показать всё (ещё %1$d строк)</string>
 </resources>

@@ -256,6 +256,8 @@ object SupertonicTTS {
             return null
         } finally {
             currentSession.set(null)
+            // the end of use too: a phrase held through a long pause must not count as idle time
+            lastUse = System.currentTimeMillis()
         }
     }
 

@@ -153,7 +153,7 @@ class EbookOutlineActivity : ComponentActivity() {
             publication = result.getOrNull()
             isLoading = false
             if (publication == null) {
-                Toast.makeText(this@EbookOutlineActivity, "Failed to open ebook", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@EbookOutlineActivity, getString(R.string.book_open_failed), Toast.LENGTH_SHORT).show()
                 onBack()
             } else {
                 // Better detection using Readium metadata
@@ -198,7 +198,7 @@ class EbookOutlineActivity : ComponentActivity() {
                         title = { Text(EbookManager.customName(this@EbookOutlineActivity, ebookFile.absolutePath)
                             ?: EbookManager.readableTitle(publication?.metadata?.title)
                             ?: EbookManager.originalName(this@EbookOutlineActivity, ebookFile.absolutePath)
-                            ?: "Ebook Details", maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                            ?: getString(R.string.outline_book), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                         navigationIcon = {
                             IconButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -210,13 +210,13 @@ class EbookOutlineActivity : ComponentActivity() {
                             Tab(
                                 selected = selectedTabIndex == 0,
                                 onClick = { selectedTabIndex = 0 },
-                                text = { Text("Chapters") }
+                                text = { Text(getString(R.string.outline_chapters)) }
                             )
                             if (isPdf) {
                                 Tab(
                                     selected = selectedTabIndex == 1,
                                     onClick = { selectedTabIndex = 1 },
-                                    text = { Text("Pages") }
+                                    text = { Text(getString(R.string.outline_pages)) }
                                 )
                             }
                         }
@@ -246,7 +246,7 @@ class EbookOutlineActivity : ComponentActivity() {
                         ) {
                             CircularProgressIndicator()
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text("Extracting text...", fontWeight = FontWeight.Bold)
+                            Text(getString(R.string.outline_opening), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -311,6 +311,9 @@ class EbookOutlineActivity : ComponentActivity() {
                                     autoPlay = true
                                     openPlayer = true
                                     onTextExtracted(text)
+                                }.onFailure {
+                                    android.widget.Toast.makeText(this@EbookOutlineActivity, getString(R.string.book_open_failed),
+                                        android.widget.Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -460,7 +463,7 @@ class EbookOutlineActivity : ComponentActivity() {
                         .padding(bottom = 16.dp)
                         .fillMaxWidth(0.8f)
                 ) {
-                    Text("Load ${selectedPages.size} Page(s)")
+                    Text(getString(R.string.outline_load_pages, selectedPages.size))
                 }
             }
         }
@@ -536,7 +539,7 @@ class EbookOutlineActivity : ComponentActivity() {
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("Page ${pageIndex + 1} Preview", style = MaterialTheme.typography.headlineSmall)
+                    Text(getString(R.string.outline_page_n, pageIndex + 1), style = MaterialTheme.typography.headlineSmall)
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     if (isLoadingPreview) {
@@ -557,10 +560,10 @@ class EbookOutlineActivity : ComponentActivity() {
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Preview not available for this format", style = MaterialTheme.typography.bodyMedium)
+                            Text(getString(R.string.outline_preview_na), style = MaterialTheme.typography.bodyMedium)
                         }
                     } else {
-                        Text("Error loading preview", color = MaterialTheme.colorScheme.error)
+                        Text(getString(R.string.outline_preview_error), color = MaterialTheme.colorScheme.error)
                     }
                     
                     Spacer(modifier = Modifier.height(16.dp))
@@ -568,8 +571,8 @@ class EbookOutlineActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceAround
                     ) {
-                        TextButton(onClick = onDismiss) { Text("Cancel") }
-                        Button(onClick = { onLoadPage(pageIndex) }) { Text("Load Page") }
+                        TextButton(onClick = onDismiss) { Text(getString(R.string.cancel_action)) }
+                        Button(onClick = { onLoadPage(pageIndex) }) { Text(getString(R.string.outline_load_page)) }
                     }
                 }
             }

@@ -263,7 +263,7 @@ fun LexiconScreen(
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                                 Text(
-                                    text = "%,d entries · %.1f MB".format(
+                                    text = "%,d слов · %.1f МБ".format(
                                         accentDictBanner.entries,
                                         accentDictBanner.sizeBytes / 1_048_576.0
                                     ),
@@ -422,8 +422,9 @@ private fun settingsPages() = listOf(
 private fun MainVoiceRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
-    val voices = remember { com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(context) }
-    var current by remember {
+    // the list and the choice follow the model chosen just below and the voices imported / deleted here
+    val voices = remember(engineShown.value, ownVoicesTick.intValue) { com.brahmadeo.supertonic.tts.utils.RolePrefs.availableVoices(context) }
+    var current by remember(engineShown.value, ownVoicesTick.intValue) {
         mutableStateOf(com.brahmadeo.supertonic.tts.utils.RolePrefs.forEngine(context, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json"))
     }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -968,33 +969,33 @@ private fun MusicSection() {
     var tracks by remember { mutableStateOf(music.tracks(context)) }
     var chosen by remember { mutableStateOf(music.track(context)?.id) }
     var volume by remember { mutableStateOf(music.volume(context).toFloat()) }
+    val scope = rememberCoroutineScope()
+    // the files are copied / the folder is read in the background, then the list shows the choice
+    fun importing(work: () -> String) {
+        scope.launch {
+            val msg = try {
+                val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { work() }
+                tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
+                context.getString(AppR.string.music_own_done, name)
+            } catch (e: Exception) {
+                context.getString(AppR.string.music_own_failed, e.message ?: "?")
+            }
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
     // one file (copied into the app, as before) or several (they play one after another)
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        val msg = try {
-            val name = music.importFiles(context, uris)
-            tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
-            context.getString(AppR.string.music_own_done, name)
-        } catch (e: Exception) {
-            context.getString(AppR.string.music_own_failed, e.message ?: "?")
-        }
-        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        importing { music.importFiles(context, uris) }
     }
     // a whole folder: its songs one after another (a playlist: the folder its songs lie in)
     val folderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val msg = try {
-            val name = music.importFolder(context, uri)
-            tracks = music.tracks(context); chosen = music.track(context)?.id; on = true
-            context.getString(AppR.string.music_own_done, name)
-        } catch (e: Exception) {
-            context.getString(AppR.string.music_own_failed, e.message ?: "?")
-        }
-        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        importing { music.importFolder(context, uri) }
     }
     Column {
         PunctuationToggleRow(
@@ -1107,22 +1108,29 @@ private fun OwnVoicesRow() {
 private fun ImportVoiceRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
     var checking by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
-        val msg = try {
-            val name = com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
-            ownVoicesTick.intValue++
-            // a recording: listen to it at once, another piece of it can be taken
-            if (name.endsWith(".wav")) { checking = name; null }
-            else context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))
-        } catch (e: Exception) {
-            context.getString(AppR.string.voice_import_failed, e.message ?: "?")
+        // decoding and resampling up to two minutes of a recording takes seconds: in the background
+        android.widget.Toast.makeText(context, context.getString(AppR.string.voice_importing), android.widget.Toast.LENGTH_SHORT).show()
+        scope.launch {
+            val msg = try {
+                val name = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.brahmadeo.supertonic.tts.utils.VoiceImport.import(context, uris)
+                }
+                ownVoicesTick.intValue++
+                // a recording: listen to it at once, another piece of it can be taken
+                if (name.endsWith(".wav")) { checking = name; null }
+                else context.getString(AppR.string.voice_import_done, name.removeSuffix(".json"))
+            } catch (e: Exception) {
+                context.getString(AppR.string.voice_import_failed, e.message ?: "?")
+            }
+            msg?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
         }
-        msg?.let { android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show() }
     }
-    checking?.let { name -> VoiceCheckDialog(name) { checking = null } }
+    checking?.let { name -> VoiceCheckDialog(name) { checking = null; ownVoicesTick.intValue++ } }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
@@ -1246,7 +1254,13 @@ private fun VoiceCheckDialog(name: String, onClose: () -> Unit) {
             }
         },
         dismissButton = {
-            TextButton(onClick = { vi.delete(context, name); close() }) { Text(stringResource(AppR.string.voice_check_delete)) }
+            TextButton(onClick = {
+                val main = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+                    .getString("selected_voice", "")?.substringBeforeLast('.') ?: ""
+                if (name.substringBeforeLast('.') == main) android.widget.Toast.makeText(context,
+                    context.getString(AppR.string.own_voice_in_use), android.widget.Toast.LENGTH_LONG).show()
+                else { vi.delete(context, name); close() }
+            }) { Text(stringResource(AppR.string.voice_check_delete)) }
         }
     )
 }

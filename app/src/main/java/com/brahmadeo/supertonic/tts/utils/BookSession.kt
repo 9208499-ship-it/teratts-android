@@ -45,8 +45,19 @@ object BookSession {
     /** Beginnings of all chapters of the current book seen so far: prefix → reading-order index. */
     private const val KEY_CHAPTERS = "chapters"
 
+    /** Chapter beginnings of every book read: beginning → the book's file name (see [scopeFor]). */
+    private const val SCOPES = "TeraBookScopes"
+
     private fun rememberChapter(context: Context, prefix: String, index: Int) {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        p.getString(KEY_PATH, null)?.let { path ->
+            val s = context.getSharedPreferences(SCOPES, Context.MODE_PRIVATE)
+            if (prefix.isNotEmpty() && s.getString(prefix, null) != File(path).name) {
+                val e = s.edit()
+                if (s.all.size > 20000) e.clear()
+                e.putString(prefix, File(path).name).apply()
+            }
+        }
         val map = try { org.json.JSONObject(p.getString(KEY_CHAPTERS, "{}") ?: "{}") } catch (e: Exception) { org.json.JSONObject() }
         if (map.length() > 2000) return
         map.put(prefix, index)
@@ -88,8 +99,13 @@ object BookSession {
     fun scopeFor(context: Context, text: String): String {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val prefix = p.getString(KEY_PREFIX, null)
-        val path = p.getString(KEY_PATH, null) ?: return ""
-        return if (!prefix.isNullOrEmpty() && text.trim().startsWith(prefix)) File(path).name else ""
+        val path = p.getString(KEY_PATH, null)
+        val t = text.trim()
+        if (path != null && !prefix.isNullOrEmpty() && t.startsWith(prefix)) return File(path).name
+        // not the session's current chapter (the screen of another book, a chapter left behind): its book
+        // is known by its beginning — before, such a text fell into the common "no book" settings, shared
+        // by all books (a reset of characters there touched every book read that way)
+        return context.getSharedPreferences(SCOPES, Context.MODE_PRIVATE).getString(prefixOf(t), null) ?: ""
     }
 
     fun clear(context: Context) =

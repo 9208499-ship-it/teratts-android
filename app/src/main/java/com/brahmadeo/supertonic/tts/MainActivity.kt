@@ -117,14 +117,18 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            val localPath = EbookManager.importBook(this, it)
-            if (localPath != null) {
-                val intent = Intent(this, EbookOutlineActivity::class.java).apply {
-                    putExtra(EbookOutlineActivity.EXTRA_URI, localPath)
+            // copying and converting a book takes seconds: not on the screen's thread (it froze the app)
+            Toast.makeText(this, getString(R.string.book_opening), Toast.LENGTH_SHORT).show()
+            uiScope.launch {
+                val localPath = withContext(Dispatchers.IO) { try { EbookManager.importBook(this@MainActivity, it) } catch (e: Exception) { null } }
+                if (localPath != null) {
+                    val intent = Intent(this@MainActivity, EbookOutlineActivity::class.java).apply {
+                        putExtra(EbookOutlineActivity.EXTRA_URI, localPath)
+                    }
+                    ebookOutlineLauncher.launch(intent)
+                } else {
+                    Toast.makeText(this@MainActivity, getString(R.string.book_open_failed), Toast.LENGTH_SHORT).show()
                 }
-                ebookOutlineLauncher.launch(intent)
-            } else {
-                Toast.makeText(this, "Failed to import book", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -136,7 +140,11 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode != RESULT_OK) {
             // "Back" in the library that is the home screen: leave the app; «Вставить текст»: stay here
             if (result.data?.getBooleanExtra(EbookLibraryActivity.EXTRA_EXIT, false) == true) finish()
-            else libraryIsHome = false
+            else {
+                // «Вставить текст»: an empty field for the user's own text (not the chapter being read)
+                libraryIsHome = false
+                viewModel.inputText.value = ""
+            }
         }
         if (result.resultCode == RESULT_OK) {
             val text = com.brahmadeo.supertonic.tts.utils.TextHandoff.unwrap(this, result.data?.getStringExtra(EbookOutlineActivity.EXTRA_TEXT))
@@ -150,7 +158,6 @@ class MainActivity : ComponentActivity() {
                 startService(stopIntent)
                 
                 viewModel.inputText.value = prepareTextForTts(text, viewModel.currentLang.value)
-                Toast.makeText(this, "Chapter loaded", Toast.LENGTH_SHORT).show()
                 // "Continue where I stopped" in the outline: start reading at once (it resumes at the place)
                 val autoPlay = result.data?.getBooleanExtra("auto_play", false) == true
                 // the library is the home screen: a chapter chosen in the contents opens in the reader
@@ -549,7 +556,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveStringPref(key: String, value: String) {
-        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit(commit = true) {
+        // in the background (it was written to disk synchronously on every typed letter)
+        getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit {
             putString(key, value)
         }
     }
@@ -587,6 +595,8 @@ class MainActivity : ComponentActivity() {
                 withContext(Dispatchers.Main) {
                     viewModel.isDownloading.value = false
                     initializeEngine()
+                    // the first start: the models are here now — the library is the home screen, as on every start
+                    if (intent?.action == Intent.ACTION_MAIN && !libraryIsHome) openLibraryHome()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -778,17 +788,24 @@ class MainActivity : ComponentActivity() {
 
     /** A book file sent to the app (a file manager, a browser): imported and opened like one from the library. */
     private fun openBookFile(uri: Uri): Boolean {
-        val localPath = try { EbookManager.importBook(this, uri) } catch (e: Exception) { null }
-        if (localPath == null) {
-            Toast.makeText(this, getString(R.string.book_open_failed), Toast.LENGTH_LONG).show()
-            return true
+        Toast.makeText(this, getString(R.string.book_opening), Toast.LENGTH_SHORT).show()
+        uiScope.launch {
+            // copying and converting the book: in the background (on the screen's thread it froze the start)
+            val localPath = withContext(Dispatchers.IO) { try { EbookManager.importBook(this@MainActivity, uri) } catch (e: Exception) { null } }
+            if (localPath == null) {
+                Toast.makeText(this@MainActivity, getString(R.string.book_open_failed), Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (!libraryIsHome && AssetManager.isReady(this@MainActivity)) openLibraryHome()
+            ebookOutlineLauncher.launch(Intent(this@MainActivity, EbookOutlineActivity::class.java).apply {
+                putExtra(EbookOutlineActivity.EXTRA_URI, localPath)
+            })
         }
-        if (!libraryIsHome && AssetManager.isReady(this)) openLibraryHome()
-        ebookOutlineLauncher.launch(Intent(this, EbookOutlineActivity::class.java).apply {
-            putExtra(EbookOutlineActivity.EXTRA_URI, localPath)
-        })
         return true
     }
+
+    /** The screen's own tasks (importing a book), ended with it. */
+    private val uiScope = kotlinx.coroutines.MainScope()
 
     private fun launchPlaybackActivity(text: String, stylePath: String) {
         val intent = Intent(this, PlaybackActivity::class.java).apply {
@@ -861,6 +878,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        uiScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         if (isBound) {
             try {
                 playbackService?.removeListener(playbackListener)

@@ -230,7 +230,11 @@ fun PlaybackScreen(
     onRoles: (Boolean) -> Unit = {},
     // ★: phrase i to the book's quotes; the list of the quotes
     onQuote: ((Int) -> Unit)? = null,
-    onQuotes: (() -> Unit)? = null
+    onQuotes: (() -> Unit)? = null,
+    // read by eye: the phrase at the top after scrolling / turning a page by hand (kept as the book's place)
+    onEyePlace: (Int) -> Unit = {},
+    // bumped when a place in this chapter is chosen (search, contents, a quote): the screen goes to it
+    jumpSeq: Int = 0
 ) {
     // ⚙ while reading: the sheet of the reading's settings
     var sheetOpen by remember { mutableStateOf(false) }
@@ -259,6 +263,16 @@ fun PlaybackScreen(
     var followVoice by remember(text) { mutableStateOf(true) }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     LaunchedEffect(dragged) { if (dragged) followVoice = false }
+    // read by eye: the phrase at the top after scrolling / turning by hand — the place shown (%, the
+    // line, ★) follows it, not the voice's place; and where the pages stand (kept through a rotation)
+    var eyeAt by remember(text) { mutableStateOf<Int?>(null) }
+    var pageAnchor by remember(text) { mutableIntStateOf(-1) }
+    val eyePlace: (Int) -> Unit = { i -> eyeAt = i; onEyePlace(i) }
+    // the chapter cut into pages, kept while the voice reads in the ribbon (cutting it again on every
+    // stop made the screen freeze for a moment)
+    val pageCache = remember(book) { PageCache() }
+    // a place chosen in this chapter: shown even after scrolling by hand
+    LaunchedEffect(jumpSeq) { if (jumpSeq > 0) { followVoice = true; pageAnchor = -1; eyeAt = null } }
     // what is being heard right now: the sentence inside the phrase (a phrase may be long and run
     // over several short paragraphs — following only its start let the voice go on below the
     // control panel, out of sight)
@@ -270,8 +284,8 @@ fun PlaybackScreen(
             ?.let { mapSub(book.text, r, sentences[index], it) } ?: r
     } else null
     val heardKey = heard?.first ?: -1
-    LaunchedEffect(currentIndex, heardKey, showList, followVoice, book) {
-        if (!showList || !followVoice || currentIndex !in sentences.indices || (pageMode && book != null)) return@LaunchedEffect
+    LaunchedEffect(currentIndex, heardKey, showList, followVoice, book, isServiceActive || isPlaying) {
+        if (!showList || !followVoice || currentIndex !in sentences.indices || (pageMode && book != null && !(isServiceActive || isPlaying))) return@LaunchedEffect
         if (book == null) { listState.animateScrollToItem(currentIndex); return@LaunchedEffect }
         val target = heard ?: return@LaunchedEffect
         val p1 = book.paraAt(target.first)
@@ -335,8 +349,25 @@ fun PlaybackScreen(
     // (title above; below: the place in the book and the buttons, 🔊 first); reading aloud — the
     // narrow panel of the voice stays below and a tap on the text reads from there.
     val speaking = isServiceActive || isPlaying
+    // read by eye: where the ribbon was left after scrolling by hand is the book's place (the next
+    // opening of the book comes back to it, as after listening)
+    LaunchedEffect(listState, speaking, book) {
+        if (speaking) return@LaunchedEffect
+        snapshotFlow { listState.isScrollInProgress }.collect { moving ->
+            if (!moving && !followVoice && !(pageMode && book != null)) eyePlace(topVisibleChunk())
+        }
+    }
+    LaunchedEffect(speaking) { if (speaking) { pageAnchor = -1; eyeAt = null } }
     var chrome by remember { mutableStateOf(false) }
-    LaunchedEffect(speaking) { if (speaking) chrome = false }
+    // reading starts: the bars go; it stops (■, the sleep timer, a long pause): they come back, so
+    // "play" is at hand at once
+    var wasSpeaking by remember { mutableStateOf(speaking) }
+    LaunchedEffect(speaking) {
+        if (speaking) chrome = false else if (wasSpeaking) chrome = true
+        wasSpeaking = speaking
+    }
+    // the place shown: the voice's, or, read by eye after scrolling, the phrase at the top
+    val shown = if (!speaking && !followVoice) (eyeAt ?: index) else index
     // a long press on the text: read from here / who says this
     var longFor by remember { mutableStateOf<Int?>(null) }
     val tapText: (Int) -> Unit = { i -> if (speaking) playFrom(i) else chrome = !chrome }
@@ -348,8 +379,8 @@ fun PlaybackScreen(
     }
     // the place: share of this chapter (by characters where the text is laid out) and of the whole book
     val chapterShare = run {
-        val r = book?.ranges?.getOrNull(index)
-        if (n == 0) 0f else if (book != null && r != null) r.first.toFloat() / book.text.length.coerceAtLeast(1) else index.toFloat() / n
+        val r = book?.ranges?.getOrNull(shown)
+        if (n == 0) 0f else if (book != null && r != null) r.first.toFloat() / book.text.length.coerceAtLeast(1) else shown.toFloat() / n
     }
     val placeLabel = listOfNotNull(
         chapterNumber?.let { "${it.first}/${it.second}" },
@@ -385,7 +416,7 @@ fun PlaybackScreen(
             onVoicePick = onVoicePick,
             onEngine = onEngine,
             onRoles = onRoles,
-            onQuote = onQuote?.let { q -> { q(index) } },
+            onQuote = onQuote?.let { q -> { q(if (speaking || followVoice) index else topVisibleChunk()) } },
             onQuotes = onQuotes,
             onToc = onToc,
             onSearch = onSearch,
@@ -435,25 +466,32 @@ fun PlaybackScreen(
             }
         }
     ) { paddingValues ->
-        val paged = pageMode && showList && book != null
+        // reading aloud: always the ribbon (it scrolls after the voice, the phrase heard is lit); pages — by eye
+        val paged = pageMode && showList && book != null && !speaking
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 // pages: under the bars (the top bar lies over the page, as in readers)
-                .padding(if (paged) PaddingValues(bottom = paddingValues.calculateBottomPadding()) else paddingValues)
+                .padding(if (paged) PaddingValues(bottom = paddingValues.calculateBottomPadding())
+                    else PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                        bottom = paddingValues.calculateBottomPadding()))
         ) {
             if (paged && book != null) {
                 PagedBookView(
                     book = book, sentences = sentences, index = index,
                     fraction = currentFraction,
-                    heardAt = heard?.first ?: book.ranges.getOrNull(index)?.first ?: -1,
+                    heardAt = if (pageAnchor >= 0) pageAnchor else heard?.first ?: book.ranges.getOrNull(index)?.first ?: -1,
                     speaking = speaking, followVoice = followVoice, onFollow = { followVoice = it },
                     anim = pageAnim, pageStyle = pageStyle,
-                    reserve = if (speaking && sleepLeft != null) 160.dp else 116.dp,
+                    // only the line of the place under the text: the bars, when shown, lie over the page
+                    reserve = 28.dp,
+                    cache = pageCache, onAnchor = { a -> pageAnchor = a },
+                    onBlankTap = { chrome = !chrome },
                     footer = if (!speaking && !chrome) placeLabel else null,
                     onTap = { i -> tapText(i) }, onLongPress = { i -> longFor = i }, onWord = onWordDoubleTap,
                     onNextChapter = onNextChapter,
                     register = { t, j -> pagedTop = t; pagedJump = j },
+                    onPageShown = eyePlace,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -471,7 +509,9 @@ fun PlaybackScreen(
                             state = listState,
                             contentPadding = PaddingValues(vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize().pointerInput(Unit) {
+                                detectTapGestures(onTap = { if (!(isServiceActive || isPlaying)) chrome = !chrome })
+                            }
                         ) {
                             items(book.paragraphs.size) { p ->
                                 BookParagraph(
@@ -531,7 +571,7 @@ fun PlaybackScreen(
                     Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(horizontal = 12.dp).padding(top = 2.dp, bottom = 6.dp)) {
                             var seeking by remember { mutableStateOf<Float?>(null) }
-                            val fraction = if (n > 1) index.toFloat() / (n - 1) else 0f
+                            val fraction = if (n > 1) shown.toFloat() / (n - 1) else 0f
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 // ‹ › around the line: the chapter before / after, as in Moon+
                                 if (onPrevChapter != null) {
@@ -557,6 +597,7 @@ fun PlaybackScreen(
                                                 // reading: go on from there; not: just show that place
                                                 if (speaking) playFrom(i) else {
                                                     followVoice = false
+                                                    eyePlace(i)
                                                     val jump = pagedJump
                                                     if (pageMode && showList && jump != null) jump(i)
                                                     else onItemClickSilently(i, book, layouts, listState, scope)
@@ -746,6 +787,12 @@ private class PageFrag(val p: Int, val first: Int, val last: Int, val top: Int, 
 /** A page: its pieces and where it starts in the chapter's text. */
 private class BookPageOut(val frags: List<PageFrag>, val start: Int)
 
+/** The pages of one chapter for one size of the screen (kept while the ribbon is shown). */
+private class PageCache {
+    var key: Any? = null
+    var pages: List<BookPageOut> = emptyList()
+}
+
 /** The chapter cut into pages of [heightPx] (the same type the page is drawn with). */
 private fun paginate(
     book: BookPage, measure: (Int) -> TextLayoutResult, heightPx: Int, gapPx: Int
@@ -805,6 +852,10 @@ private fun PagedBookView(
     onWord: (String, String?, String?) -> Unit,
     onNextChapter: (() -> Unit)?,
     register: (top: (() -> Int)?, jump: ((Int) -> Unit)?) -> Unit,
+    onPageShown: (Int) -> Unit = {},
+    cache: PageCache = PageCache(),
+    onAnchor: (Int) -> Unit = {},
+    onBlankTap: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val dens = LocalDensity.current
@@ -820,7 +871,10 @@ private fun PagedBookView(
             val gap = with(dens) { 10.dp.roundToPx() }
             val wPx = constraints.maxWidth - 2 * padX
             val hPx = constraints.maxHeight - padTop - padBottom
-            val pages: List<BookPageOut> = if (wPx <= 0 || hPx <= 0) emptyList() else remember(book, wPx, hPx, style, dens) {
+            val pageKey = listOf(wPx, hPx, style, dens.density, dens.fontScale)
+            val pages: List<BookPageOut> = if (wPx <= 0 || hPx <= 0) emptyList()
+            else if (cache.key == pageKey) cache.pages
+            else remember(book, wPx, hPx, style, dens) {
                 paginate(book, { p ->
                     val r = book.paragraphs[p]
                     measurer.measure(
@@ -830,7 +884,7 @@ private fun PagedBookView(
                         style = style,
                         constraints = Constraints(maxWidth = wPx)
                     )
-                }, hPx, gap)
+                }, hPx, gap).also { cache.key = pageKey; cache.pages = it }
             }
             val starts = remember(pages) { IntArray(pages.size) { pages[it].start } }
             fun pageOf(abs: Int): Int {
@@ -855,8 +909,10 @@ private fun PagedBookView(
                 var lastSettled by remember { mutableStateOf(pager.settledPage) }
                 LaunchedEffect(pager.settledPage) {
                     val s = pager.settledPage
+                    val lastSettled0 = lastSettled
                     if (s != lastSettled && !speaking) PageSound.play(ctx)
                     lastSettled = s
+                    if (s != lastSettled0 && !speaking && s < pages.size) { onAnchor(starts[s]); onPageShown(book.chunkAt(starts[s])) }
                     if (s >= pages.size) onNextChapter?.invoke()
                 }
                 DisposableEffect(pages) {
@@ -918,7 +974,11 @@ private fun PagedBookView(
                                 modifier = Modifier.align(Alignment.Center)
                             )
                         } else {
-                            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(top = 12.dp)) {
+                            // a tap on what is not text (between paragraphs, the margins, below the last line):
+                            // the bars come and go, as on the text
+                            Column(modifier = Modifier.fillMaxSize()
+                                .pointerInput(Unit) { detectTapGestures(onTap = { onBlankTap() }) }
+                                .padding(horizontal = 20.dp).padding(top = 12.dp)) {
                                 val frags = pages[page].frags
                                 for ((k, f) in frags.withIndex()) {
                                     if (k > 0) Spacer(modifier = Modifier.height(10.dp))

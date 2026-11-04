@@ -357,7 +357,18 @@ class LexiconActivity : ComponentActivity() {
     }
 
     private fun performImportAccentDict(uri: Uri) {
-        val count = AccentDictionaryManager.importFromUri(this, uri)
+        // copying and reading a dictionary of hundreds of megabytes: in the background (it froze the screen)
+        Toast.makeText(this, getString(R.string.accent_dict_importing), Toast.LENGTH_SHORT).show()
+        CoroutineScope(Dispatchers.Main).launch {
+            val count = withContext(Dispatchers.IO) {
+                try { AccentDictionaryManager.importFromUri(this@LexiconActivity, uri) } catch (e: Exception) { AccentDictionaryManager.ERR_IO }
+            }
+            if (isFinishing || isDestroyed) return@launch
+            showAccentDictImport(count)
+        }
+    }
+
+    private fun showAccentDictImport(count: Int) {
         when {
             count > 0 -> {
                 refreshRules()

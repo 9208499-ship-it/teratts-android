@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
@@ -74,6 +75,22 @@ class EbookLibraryActivity : ComponentActivity() {
 
     private val isHome get() = intent.getBooleanExtra(EXTRA_HOME, false)
 
+    /** The screen's own tasks (importing a book), ended with it. */
+    private val uiScope = kotlinx.coroutines.MainScope()
+
+    /** Bumped on every return to the library: the books, their places and shares are read again. */
+    private val resumeTick = androidx.compose.runtime.mutableIntStateOf(0)
+
+    override fun onResume() {
+        super.onResume()
+        resumeTick.intValue++
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        uiScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+    }
+
     private fun leave() {
         if (isHome) setResult(RESULT_CANCELED, Intent().putExtra(EXTRA_EXIT, true))
         finish()
@@ -92,11 +109,14 @@ class EbookLibraryActivity : ComponentActivity() {
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            val localPath = EbookManager.importBook(this, it)
-            if (localPath != null) {
-                openBook(localPath)
-            } else {
-                Toast.makeText(this, "Failed to import book", Toast.LENGTH_SHORT).show()
+            // copying and converting a book takes seconds: in the background (it froze the library)
+            Toast.makeText(this, getString(R.string.book_opening), Toast.LENGTH_SHORT).show()
+            uiScope.launch {
+                val localPath = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try { EbookManager.importBook(this@EbookLibraryActivity, it) } catch (e: Exception) { null }
+                }
+                if (localPath != null) openBook(localPath)
+                else Toast.makeText(this@EbookLibraryActivity, getString(R.string.book_open_failed), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -137,6 +157,9 @@ class EbookLibraryActivity : ComponentActivity() {
         onTocClick: (RecentBook) -> Unit = {}
     ) {
         var recentBooks by remember { mutableStateOf(EbookManager.getRecentBooks(this@EbookLibraryActivity)) }
+        // back in the library (from a book, the contents, a new book): the list and places as they are now
+        val tick = resumeTick.intValue
+        LaunchedEffect(tick) { recentBooks = EbookManager.getRecentBooks(this@EbookLibraryActivity) }
         // the book whose menu is open, the one being renamed, the one asked about deleting
         var menuFor by remember { mutableStateOf<String?>(null) }
         var renaming by remember { mutableStateOf<RecentBook?>(null) }
@@ -234,7 +257,8 @@ class EbookLibraryActivity : ComponentActivity() {
                     onRename = { renaming = it },
                     onDelete = { deleting = it },
                     labels = com.brahmadeo.supertonic.tts.ui.ShelfLabels(getString(R.string.player_toc),
-                        getString(R.string.library_rename), getString(R.string.delete))
+                        getString(R.string.library_rename), getString(R.string.delete)),
+                    refresh = tick
                 )
             } else {
                 LazyColumn(
@@ -247,14 +271,14 @@ class EbookLibraryActivity : ComponentActivity() {
                                 Text(titleOf(book), maxLines = 2, overflow = TextOverflow.Ellipsis)
                             },
                             supportingContent = {
-                                val pos = remember(book.path) {
+                                val pos = remember(book.path, tick) {
                                     com.brahmadeo.supertonic.tts.utils.BookPositions.get(this@EbookLibraryActivity, java.io.File(book.path).name)
                                 }
                                 // how much of the book is read (its chapters are counted once, then kept)
-                                var share by remember(book.path) {
+                                var share by remember(book.path, tick) {
                                     mutableStateOf(com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path))
                                 }
-                                LaunchedEffect(book.path) {
+                                LaunchedEffect(book.path, tick) {
                                     if (share == null && pos != null) {
                                         com.brahmadeo.supertonic.tts.utils.BookProgress.lengths(ctx, book.path)
                                         share = com.brahmadeo.supertonic.tts.utils.BookProgress.savedShare(ctx, book.path)

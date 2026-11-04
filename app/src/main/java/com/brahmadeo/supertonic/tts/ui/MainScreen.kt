@@ -290,7 +290,7 @@ fun MainScreen(
 
                     if (lineCount > 5) {
                         Text(
-                            text = if (isTextExpanded) "Show less" else "Show more (${lineCount - 5} more lines)",
+                            text = if (isTextExpanded) stringResource(AppR.string.main_show_less) else stringResource(AppR.string.main_show_more, lineCount - 5),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
