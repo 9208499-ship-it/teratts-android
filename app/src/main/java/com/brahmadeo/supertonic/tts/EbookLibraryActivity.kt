@@ -127,6 +127,7 @@ class EbookLibraryActivity : ComponentActivity() {
         com.brahmadeo.supertonic.tts.utils.NoAutofill.apply(this)
         setContent {
             SupertonicTheme {
+                com.brahmadeo.supertonic.tts.ui.UpdateDialogHost()
                 // the home screen: system "Back" leaves the app (as from Moon+ Reader's bookshelf)
                 androidx.activity.compose.BackHandler(enabled = isHome) { leave() }
                 LibraryScreen(

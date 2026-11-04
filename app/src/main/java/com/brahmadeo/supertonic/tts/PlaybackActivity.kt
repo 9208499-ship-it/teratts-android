@@ -340,6 +340,7 @@ class PlaybackActivity : ComponentActivity() {
                 }
             }
             SupertonicTheme(voiceFile = currentVoicePath) {
+                com.brahmadeo.supertonic.tts.ui.UpdateDialogHost()
                 // the place in the whole book: its chapters counted once (in the background), then kept
                 var bookLens by remember { mutableStateOf<Map<Int, Int>?>(null) }
                 var chapterIdx by remember { mutableStateOf(-1) }

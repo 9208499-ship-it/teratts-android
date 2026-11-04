@@ -459,7 +459,7 @@
     <string name="settings_perf">Производительность</string>
     <string name="settings_perf_desc">Ядра процессора, тест скорости, синтезатор наготове</string>
     <string name="settings_about">О программе</string>
-    <string name="settings_about_desc">Версия, отправить журнал разработчику</string>
+    <string name="settings_about_desc">Версия, обновления, журнал для разработчика</string>
     <string name="settings_about_text">Офлайн-синтезатор русской речи: TeraTTS и Pocket TTS (Shtorm). Исходники и релизы — github.com/9208499-ship-it/teratts-android, обсуждение — 4PDA.</string>
     <string name="main_voice_label">Основной голос</string>
     <string name="player_voice_settings">Настройки озвучки</string>
@@ -535,4 +535,19 @@
     <string name="outline_load_page">Читать страницу</string>
     <string name="main_show_less">Свернуть</string>
     <string name="main_show_more">Показать всё (ещё %1$d строк)</string>
+    <string name="update_title">Вышла TeraTTS %1$s</string>
+    <string name="update_size">Размер: %1$.0f МБ</string>
+    <string name="update_now">Обновить</string>
+    <string name="update_install">Установить</string>
+    <string name="update_later">Позже</string>
+    <string name="update_skip">Пропустить эту версию</string>
+    <string name="update_allow">Разрешите TeraTTS установку приложений (сейчас откроется настройка), вернитесь и нажмите «Установить»</string>
+    <string name="update_failed">Не удалось скачать: %1$s</string>
+    <string name="update_check_title">Проверить обновления</string>
+    <string name="update_check_desc">Новые версии берутся с GitHub — те же, что на 4PDA</string>
+    <string name="update_checking">Проверяю…</string>
+    <string name="update_none">У вас последняя версия (%1$s)</string>
+    <string name="update_check_failed">Не удалось проверить: нет связи с GitHub</string>
+    <string name="update_auto_title">Проверять при запуске</string>
+    <string name="update_auto_desc">Раз в день; если вышла новая версия — предложит обновиться</string>
 </resources>

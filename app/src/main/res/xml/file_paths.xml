@@ -2,4 +2,5 @@
 <paths>
     <external-path name="external_music" path="Music/" />
     <cache-path name="cache_tts" path="tts_output/" />
+    <cache-path name="updates" path="updates/" />
 </paths>

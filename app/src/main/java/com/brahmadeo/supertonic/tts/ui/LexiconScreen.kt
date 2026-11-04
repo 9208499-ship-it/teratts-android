@@ -239,6 +239,7 @@ fun LexiconScreen(
           }
           "about" -> {
             item { AboutRow() }
+            item { UpdateRow() }
             item { SendLogRow() }
           }
           else -> {
@@ -491,6 +492,52 @@ private fun PrepSection() {
                 }
             }
         }
+    }
+}
+
+/** New versions: once a day at start (can be turned off), or checked now by hand. */
+@Composable
+private fun UpdateRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val up = com.brahmadeo.supertonic.tts.utils.Updater
+    var auto by remember { mutableStateOf(up.auto(context)) }
+    var checking by remember { mutableStateOf(false) }
+    UpdateDialogHost()
+    Column {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp)
+                .clickable(enabled = !checking) {
+                    checking = true
+                    scope.launch {
+                        val r = up.checkNow(context)
+                        checking = false
+                        if (r != true) android.widget.Toast.makeText(context,
+                            if (r == null) context.getString(AppR.string.update_check_failed)
+                            else context.getString(AppR.string.update_none, up.current(context)),
+                            android.widget.Toast.LENGTH_LONG).show()
+                    }
+                },
+            shape = MaterialTheme.shapes.small
+        ) {
+            Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                Text(text = stringResource(AppR.string.update_check_title), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = stringResource(if (checking) AppR.string.update_checking else AppR.string.update_check_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        PunctuationToggleRow(
+            title = stringResource(AppR.string.update_auto_title),
+            description = stringResource(AppR.string.update_auto_desc),
+            checked = auto,
+            onToggle = { v -> auto = v; up.setAuto(context, v) }
+        )
     }
 }
 

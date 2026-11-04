@@ -227,6 +227,9 @@ class MainActivity : ComponentActivity() {
 
         handleIntent(intent)
 
+        // once a day: is a newer TeraTTS out on GitHub (offered on whatever screen is open)
+        if (savedInstanceState == null) uiScope.launch { com.brahmadeo.supertonic.tts.utils.Updater.checkAtStart(applicationContext) }
+
         // As in Moon+ Reader: launching the app opens the last book at its place (paused), with the
         // library under it — "Back" from the book leads to the books, not to this text screen
         // (it is «Вставить текст» in the library now)
