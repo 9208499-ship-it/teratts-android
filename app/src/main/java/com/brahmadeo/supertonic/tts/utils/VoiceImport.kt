@@ -49,8 +49,11 @@ object VoiceImport {
     private val AUDIO = listOf(".wav", ".m4a", ".mp3", ".ogg", ".opus", ".flac", ".aac", ".3gp", ".amr", ".webm", ".mp4")
     private const val RATE = 24000
 
-    /** A recording → mono 24 kHz (Android's own decoders: anything the phone can play), and its own rate. */
-    private fun decode(context: Context, uri: Uri): Pair<FloatArray, Int> {
+    /** A decoded recording: 24 kHz mono, its own rate, the overloaded peaks repaired in it. */
+    private class Decoded(val x: FloatArray, val rate: Int, val clipRuns: Int)
+
+    /** A recording → mono 24 kHz (Android's own decoders: anything the phone can play). */
+    private fun decode(context: Context, uri: Uri): Decoded {
         val ex = android.media.MediaExtractor()
         context.contentResolver.openFileDescriptor(uri, "r")?.use { ex.setDataSource(it.fileDescriptor) }
             ?: throw Failure("файл не читается")
@@ -111,9 +114,11 @@ object VoiceImport {
                 else FloatArray(raw.remaining() / 2) { raw.short / 32768f }
             val ch = channels.coerceAtLeast(1)
             val mono = FloatArray(samples.size / ch) { i -> var a = 0f; for (c in 0 until ch) a += samples[i * ch + c]; a / ch }
+            // peaks cut flat by overload drawn round again — at the recording's own rate
+            val (fixed, runs) = VoicePrep.declip(mono)
             // a proper resampler: the straight-line one used before dulled the highs and let what
             // lies above 12 kHz fold back as hiss — and Shtorm copies the sample's sound as it is
-            return resample(mono, rate, RATE) to rate
+            return Decoded(resample(fixed, rate, RATE), rate, runs)
         } finally {
             ex.release()
         }
@@ -224,11 +229,11 @@ object VoiceImport {
         // a recording: a voice for Shtorm
         val audio = named.firstOrNull { (n, _) -> AUDIO.any { n.endsWith(it, true) } }
         if (audio != null) {
-            val (raw, rate) = try { decode(context, audio.second) } catch (e: Failure) { throw e }
+            val d = try { decode(context, audio.second) } catch (e: Failure) { throw e }
                 catch (e: Exception) { throw Failure("запись не читается: ${e.message}") }
-            // what cannot be mended is told; the rumble, long pauses and the level are mended
-            val report = VoicePrep.check(raw, rate)
-            val x = VoicePrep.clean(raw)
+            // what cannot be mended is told; overload, the rumble, long hesitations and the level are mended
+            val report = VoicePrep.check(d.x, d.rate, d.clipRuns)
+            val x = VoicePrep.clean(d.x)
             val clip = sample(x)
             val f = target(context, audio.first, ".wav")
             writeWav(f, clip)

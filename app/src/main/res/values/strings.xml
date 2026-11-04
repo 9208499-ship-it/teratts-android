@@ -555,7 +555,7 @@
     <string name="prep_progress">Preparing chapter %1$d of %2$d · %3$d%%</string>
     <string name="prep_stop">Stop</string>
     <string name="voice_part_auto">Best</string>
-    <string name="voice_note_clipped">The recording is overloaded (the sound rasps): the voice will repeat it. Record more quietly or farther from the microphone.</string>
+    <string name="voice_note_clipped">The recording is overloaded (its peaks are cut). The app smoothed them, but record more quietly or farther from the microphone.</string>
     <string name="voice_note_muffled">The recording is muffled, like a messenger voice note or a call: the voice will sound dull. Use an ordinary voice recorder.</string>
     <string name="voice_note_noisy">Background noise is heard (the voice is only %1$d dB louder): the voice will carry it into the reading. Record in silence.</string>
     <string name="voice_note_short">Less than 6 seconds of clean speech: 6–10 seconds of whole phrases is better.</string>
