@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -121,6 +123,18 @@ class EbookLibraryActivity : ComponentActivity() {
         }
     }
 
+    /** The folder looked through for new books (Android's folder picker; the right to read it is kept). */
+    private val folderTick = androidx.compose.runtime.mutableIntStateOf(0)
+    private val folderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) { com.brahmadeo.supertonic.tts.utils.BookFolder.set(this, uri); folderTick.intValue++ }
+    }
+
+    /** The user's own shelf picture (a .9.png shelf, as AlReader's skins, or any picture of the wall). */
+    private val shelfSkinLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null && !com.brahmadeo.supertonic.tts.utils.Skins.importShelf(this, uri))
+            Toast.makeText(this, getString(R.string.skin_bad_picture), Toast.LENGTH_SHORT).show()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -170,6 +184,50 @@ class EbookLibraryActivity : ComponentActivity() {
         fun titleOf(book: RecentBook) = EbookManager.displayTitle(ctx, book) ?: untitled
         // a list or a shelf of covers (the button above switches, the choice is kept)
         var view by remember { mutableStateOf(com.brahmadeo.supertonic.tts.ui.LibraryView.get(ctx)) }
+        // books in the user's folder not in the library yet: offered once
+        val bf = com.brahmadeo.supertonic.tts.utils.BookFolder
+        var found by remember { mutableStateOf<List<com.brahmadeo.supertonic.tts.utils.BookFolder.Found>>(emptyList()) }
+        val fTick = folderTick.intValue
+        LaunchedEffect(tick, fTick) {
+            found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { bf.scan(ctx) }
+        }
+        if (found.isNotEmpty()) {
+            val chosen = remember(found) { androidx.compose.runtime.mutableStateListOf<Boolean>().apply { repeat(found.size) { add(true) } } }
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text(getString(R.string.folder_new_books, bf.label(ctx) ?: "")) },
+                text = {
+                    LazyColumn(modifier = Modifier.height(300.dp)) {
+                        items(found.size) { i ->
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.combinedClickable(onClick = { chosen[i] = !chosen[i] })) {
+                                androidx.compose.material3.Checkbox(checked = chosen[i], onCheckedChange = { chosen[i] = it })
+                                Text(found[i].name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val add = found.filterIndexed { i, _ -> chosen[i] }
+                        bf.markSeen(ctx, found)
+                        found = emptyList()
+                        if (add.isNotEmpty()) {
+                            Toast.makeText(ctx, getString(R.string.folder_adding, add.size), Toast.LENGTH_SHORT).show()
+                            uiScope.launch {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    for (f in add) try { EbookManager.importBook(ctx, f.uri) } catch (e: Exception) { }
+                                }
+                                recentBooks = EbookManager.getRecentBooks(ctx)
+                            }
+                        }
+                    }) { Text(getString(R.string.folder_add)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { bf.markSeen(ctx, found); found = emptyList() }) { Text(getString(R.string.folder_skip)) }
+                }
+            )
+        }
 
         renaming?.let { book ->
             var name by remember(book.path) { mutableStateOf(EbookManager.displayTitle(ctx, book) ?: "") }
@@ -222,6 +280,37 @@ class EbookLibraryActivity : ComponentActivity() {
                             if (view == com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF)
                                 Icon(Icons.Default.ViewAgenda, contentDescription = getString(R.string.library_view_list))
                             else Icon(Icons.Default.GridView, contentDescription = getString(R.string.library_view_shelf))
+                        }
+                        // the shelf's look: the user's own skin or the app's wood
+                        if (view == com.brahmadeo.supertonic.tts.ui.LibraryView.SHELF) {
+                            var skinMenu by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { skinMenu = true }) {
+                                    Icon(Icons.Default.Palette, contentDescription = getString(R.string.shelf_skin))
+                                }
+                                DropdownMenu(expanded = skinMenu, onDismissRequest = { skinMenu = false }) {
+                                    DropdownMenuItem(text = { Text(getString(R.string.shelf_skin_pick)) },
+                                        onClick = { skinMenu = false; shelfSkinLauncher.launch(arrayOf("image/*")) })
+                                    if (com.brahmadeo.supertonic.tts.utils.Skins.version.intValue >= 0 && com.brahmadeo.supertonic.tts.utils.Skins.hasShelf(ctx))
+                                        DropdownMenuItem(text = { Text(getString(R.string.shelf_skin_default)) },
+                                            onClick = { skinMenu = false; com.brahmadeo.supertonic.tts.utils.Skins.removeShelf(ctx) })
+                                }
+                            }
+                        }
+                        // the folder looked through for new books (Download, the card…)
+                        var folderMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { if (bf.folder(ctx) == null) folderLauncher.launch(null) else folderMenu = true }) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = getString(R.string.folder_title))
+                            }
+                            DropdownMenu(expanded = folderMenu, onDismissRequest = { folderMenu = false }) {
+                                Text(getString(R.string.folder_watching, bf.label(ctx) ?: ""), style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                DropdownMenuItem(text = { Text(getString(R.string.folder_other)) },
+                                    onClick = { folderMenu = false; folderLauncher.launch(null) })
+                                DropdownMenuItem(text = { Text(getString(R.string.folder_stop)) },
+                                    onClick = { folderMenu = false; bf.clear(ctx); folderTick.intValue++ })
+                            }
                         }
                         // your own text (the old main screen) and the settings
                         IconButton(onClick = { setResult(RESULT_CANCELED); finish() }) {

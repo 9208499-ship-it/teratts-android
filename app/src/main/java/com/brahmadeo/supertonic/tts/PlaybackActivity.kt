@@ -688,7 +688,11 @@ class PlaybackActivity : ComponentActivity() {
             try {
                 val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, s).getOrNull(i) ?: return@launch
                 val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
-                if (scope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.BookPositions.save(ctx, scope,
+                // only while this text is the session's chapter: a late save after another book was
+                // opened wrote that book's chapter number into this book's place — and coming back,
+                // the book began from the start
+                if (scope.isNotEmpty() && com.brahmadeo.supertonic.tts.utils.BookSession.isCurrent(ctx, text))
+                    com.brahmadeo.supertonic.tts.utils.BookPositions.save(ctx, scope,
                     com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(ctx),
                     r.first.toFloat() / text.length.coerceAtLeast(1), text.substring(r.first, minOf(text.length, r.first + 80)))
                 val now = System.currentTimeMillis()

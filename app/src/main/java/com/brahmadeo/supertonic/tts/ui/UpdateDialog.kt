@@ -47,7 +47,7 @@ fun UpdateDialogHost() {
     }
     AlertDialog(
         onDismissRequest = { if (progress == null) Updater.later(context) },
-        title = { Text(stringResource(AppR.string.update_title, r.version)) },
+        title = { Text(stringResource(AppR.string.update_title, r.version) + if (r.beta) " " + stringResource(AppR.string.update_beta_mark) else "") },
         text = {
             Column {
                 if (r.notes.isNotEmpty()) {

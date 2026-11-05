@@ -83,16 +83,45 @@ internal fun BookShelf(
 ) {
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val wall = remember(dark) { woodTile(dark) }
+    // the user's own shelf (Skins): a nine-patch shelf (AlReader's skins) or a picture of the wall
+    val ctx = LocalContext.current
+    val skinVersion = com.brahmadeo.supertonic.tts.utils.Skins.version.intValue
+    val skin = remember(skinVersion) { ShelfSkins.get(ctx) }
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    // a nine-patch's pixels are taken as xhdpi ones (2 per dp), as such skins are drawn
+    val k = density / 2f
     val rows = books.chunked(3)
     LazyColumn(
         modifier = modifier.drawWithCache {
             val brush = ShaderBrush(ImageShader(wall, TileMode.Repeated, TileMode.Repeated))
-            onDrawBehind { drawRect(brush) }
+            onDrawBehind {
+                when {
+                    skin == null -> drawRect(brush)
+                    skin.nine != null -> drawRect(skin.mean)
+                    else -> drawCover(skin.image)
+                }
+            }
         },
-        contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp)
+        contentPadding = PaddingValues(top = if (skin?.nine != null) 0.dp else 12.dp, bottom = 96.dp)
     ) {
         items(rows.size) { r ->
-            Column(modifier = Modifier.fillMaxWidth()) {
+            val nine = skin?.nine
+            if (skin != null && nine != null) {
+                // one shelf of the skin per row, stretched round the books; the books stand inside its padding
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .drawWithCache { onDrawBehind { drawNine(skin.image, nine, k) } }
+                        .padding(start = (nine.padL * k / density).dp, top = (nine.padT * k / density).dp,
+                            end = (nine.padR * k / density).dp, bottom = (nine.padB * k / density).dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                        for (book in rows[r]) {
+                            ShelfBook(book, titleOf(book), Modifier.weight(1f), onOpen, onToc, onRename, onDelete, labels, refresh)
+                        }
+                        repeat(3 - rows[r].size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            } else Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.Bottom
@@ -106,6 +135,128 @@ internal fun BookShelf(
             }
         }
     }
+}
+
+/** The user's shelf picture: [image] without a nine-patch's border, [nine] its parts (null — a plain picture). */
+internal class ShelfSkin(val image: ImageBitmap, val nine: NinePatch?, val mean: Color)
+
+/** A nine-patch, in the picture's pixels (its border taken off): the parts along each side, and the padding. */
+internal class NinePatch(val xs: List<NineSeg>, val ys: List<NineSeg>, val padL: Int, val padT: Int, val padR: Int, val padB: Int)
+internal class NineSeg(val from: Int, val to: Int, val stretch: Boolean)
+
+internal object ShelfSkins {
+    @Volatile private var cached: ShelfSkin? = null
+    @Volatile private var version = -1
+
+    fun get(c: android.content.Context): ShelfSkin? {
+        val v = com.brahmadeo.supertonic.tts.utils.Skins.version.intValue
+        if (v != version) { version = v; cached = load(c) }
+        return cached
+    }
+
+    private fun load(c: android.content.Context): ShelfSkin? {
+        val f = com.brahmadeo.supertonic.tts.utils.Skins.shelfFile(c)
+        if (!f.isFile) return null
+        val bmp = try { f.inputStream().use { android.graphics.BitmapFactory.decodeStream(it) } } catch (e: Exception) { null } ?: return null
+        // a compiled nine-patch (taken from an app, as AlReader's skins are): its parts come with it;
+        // a .9.png as drawn: read from its black border lines
+        val compiled = bmp.ninePatchChunk?.let { fromChunk(it, bmp.width, bmp.height) }
+        val nine = compiled ?: parseNine(bmp)
+        val inner = if (compiled == null && nine != null) android.graphics.Bitmap.createBitmap(bmp, 1, 1, bmp.width - 2, bmp.height - 2) else bmp
+        val one = android.graphics.Bitmap.createScaledBitmap(inner, 1, 1, true).getPixel(0, 0)
+        return ShelfSkin(inner.asImageBitmap(), nine, Color(one or (0xff shl 24)))
+    }
+
+    /**
+     * A compiled nine-patch's chunk (Res_png_9patch: counts, offsets, the padding, then the stretched
+     * ranges as pairs); the device's byte order, else the file's.
+     */
+    fun fromChunk(ch: ByteArray, w: Int, h: Int): NinePatch? {
+        if (ch.size < 32) return null
+        val nx = ch[1].toInt() and 0xff; val ny = ch[2].toInt() and 0xff
+        if (ch.size < 32 + 4 * (nx + ny)) return null
+        for (order in listOf(java.nio.ByteOrder.LITTLE_ENDIAN, java.nio.ByteOrder.BIG_ENDIAN)) {
+            val bb = java.nio.ByteBuffer.wrap(ch).order(order)
+            bb.position(12)
+            val pl = bb.int; val pr = bb.int; val pt = bb.int; val pb = bb.int
+            bb.position(32)
+            val xd = IntArray(nx) { bb.int }; val yd = IntArray(ny) { bb.int }
+            fun ok(d: IntArray, n: Int) = d.isNotEmpty() && d.size % 2 == 0 && d.all { it in 0..n } && (1 until d.size).all { d[it] >= d[it - 1] }
+            if (!ok(xd, w) || !ok(yd, h) || listOf(pl, pr, pt, pb).any { it < 0 || it > maxOf(w, h) }) continue
+            fun stretched(d: IntArray): List<Int> = (0 until d.size / 2).flatMap { (d[2 * it] until d[2 * it + 1]).toList() }
+            return NinePatch(segs(w, stretched(xd)), segs(h, stretched(yd)), pl, pt, pr, pb)
+        }
+        return null
+    }
+
+    private fun segs(n: Int, st: List<Int>): List<NineSeg> {
+        val set = st.toHashSet()
+        val out = ArrayList<NineSeg>()
+        var a = 0
+        while (a < n) {
+            val s = a in set
+            var e = a
+            while (e < n && (e in set) == s) e++
+            out.add(NineSeg(a, e, s)); a = e
+        }
+        return out
+    }
+
+    private fun black(p: Int) = (p ushr 24) == 0xff && (p and 0xffffff) == 0
+    // a nine-patch's border holds only clear pixels, black marks and red layout bounds
+    private fun mark(p: Int) = (p ushr 24) == 0 || black(p) || p == (0xffff0000).toInt()
+
+    /** The border of a .9.png read: black on top/left — what stretches, on bottom/right — where the content goes. */
+    fun parseNine(b: android.graphics.Bitmap): NinePatch? {
+        val w = b.width; val h = b.height
+        if (w < 4 || h < 4) return null
+        val top = IntArray(w).also { b.getPixels(it, 0, w, 0, 0, w, 1) }
+        val bottom = IntArray(w).also { b.getPixels(it, 0, w, 0, h - 1, w, 1) }
+        val left = IntArray(h).also { b.getPixels(it, 0, 1, 0, 0, 1, h) }
+        val right = IntArray(h).also { b.getPixels(it, 0, 1, w - 1, 0, 1, h) }
+        if (!(top.all { mark(it) } && bottom.all { mark(it) } && left.all { mark(it) } && right.all { mark(it) })) return null
+        val sx = (1 until w - 1).filter { black(top[it]) }.map { it - 1 }
+        val sy = (1 until h - 1).filter { black(left[it]) }.map { it - 1 }
+        if (sx.isEmpty() || sy.isEmpty()) return null
+        val iw = w - 2; val ih = h - 2
+        val px = (1 until w - 1).filter { black(bottom[it]) }.map { it - 1 }
+        val py = (1 until h - 1).filter { black(right[it]) }.map { it - 1 }
+        val cx = px.ifEmpty { sx }; val cy = py.ifEmpty { sy }
+        return NinePatch(segs(iw, sx), segs(ih, sy), cx.first(), cy.first(), iw - 1 - cx.last(), ih - 1 - cy.last())
+    }
+}
+
+/** A nine-patch drawn over the whole area: the fixed parts at [k] screen pixels per picture pixel, the rest stretched. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNine(img: ImageBitmap, n: NinePatch, k: Float) {
+    fun place(segs: List<NineSeg>, dst: Float): List<Pair<NineSeg, Pair<Int, Int>>> {
+        val fixed = segs.filter { !it.stretch }.sumOf { it.to - it.from } * k
+        val stretch = segs.filter { it.stretch }.sumOf { it.to - it.from }.toFloat().coerceAtLeast(1f)
+        val squeeze = if (fixed > dst && fixed > 0f) dst / fixed else 1f
+        val rest = (dst - fixed * squeeze).coerceAtLeast(0f)
+        var at = 0f
+        return segs.map { s ->
+            val len = if (s.stretch) rest * (s.to - s.from) / stretch else (s.to - s.from) * k * squeeze
+            val r = s to (Math.round(at) to Math.round(at + len))
+            at += len
+            r
+        }
+    }
+    for ((sx, dx) in place(n.xs, size.width)) for ((sy, dy) in place(n.ys, size.height)) {
+        val dw = dx.second - dx.first; val dh = dy.second - dy.first
+        if (dw <= 0 || dh <= 0) continue
+        drawImage(img, srcOffset = androidx.compose.ui.unit.IntOffset(sx.from, sy.from),
+            srcSize = androidx.compose.ui.unit.IntSize(sx.to - sx.from, sy.to - sy.from),
+            dstOffset = androidx.compose.ui.unit.IntOffset(dx.first, dy.first), dstSize = androidx.compose.ui.unit.IntSize(dw, dh),
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.Medium)
+    }
+}
+
+/** A plain picture over the whole wall, cut to fill it. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCover(img: ImageBitmap) {
+    val k = maxOf(size.width / img.width, size.height / img.height)
+    val sw = (size.width / k).toInt().coerceIn(1, img.width); val sh = (size.height / k).toInt().coerceIn(1, img.height)
+    drawImage(img, srcOffset = androidx.compose.ui.unit.IntOffset((img.width - sw) / 2, (img.height - sh) / 2),
+        srcSize = androidx.compose.ui.unit.IntSize(sw, sh), dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()))
 }
 
 /** The words of the book's menu on the shelf. */

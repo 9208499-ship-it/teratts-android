@@ -96,6 +96,8 @@ object EbookManager {
         context.getSharedPreferences(NAMES, Context.MODE_PRIVATE).edit { remove(path); remove("title:$path") }
         context.getSharedPreferences("TeraBookPositions", Context.MODE_PRIVATE).edit { remove(file.name) }
         try { BookRoster.clear(context, file.name) } catch (e: Exception) { }
+        // its prepared audio goes with it (it stayed, taking hundreds of megabytes)
+        try { BookPrep.bookDir(context, path).deleteRecursively() } catch (e: Exception) { }
         if (BookSession.currentPath(context) == path) BookSession.clear(context)
     }
 

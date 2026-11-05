@@ -111,6 +111,13 @@ object BookSession {
     fun clear(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
 
+    /** Is [text] the session's current chapter (no logging: asked often)? */
+    fun isCurrent(context: Context, text: String): Boolean {
+        val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefix = p.getString(KEY_PREFIX, null)
+        return !prefix.isNullOrEmpty() && p.getString(KEY_PATH, null) != null && text.trim().startsWith(prefix)
+    }
+
     /** Is [text] (just finished) the session's current chapter? */
     fun matches(context: Context, text: String): Boolean {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

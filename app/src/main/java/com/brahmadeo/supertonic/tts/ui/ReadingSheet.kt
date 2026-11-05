@@ -53,9 +53,10 @@ import androidx.compose.ui.unit.dp
 import com.brahmadeo.supertonic.tts.R as AppR
 
 /**
- * The reading's own settings, a sheet from below the player (after eReader Prestigio's TTS panel):
- * what is at hand while listening — the phrase to the quotes, the contents, the pace, the sleep timer,
- * the voice (two taps, reading goes on in it), the model, the roles — without leaving the book.
+ * The reading's own settings, a sheet from below the player (after eReader Prestigio's TTS panel).
+ * What is in it depends on what is going on (as in readers: pallado, 4PDA): reading by eye — the look
+ * of the book (the page, own picture, the type, pages or ribbon); listening — the voice (the pace,
+ * the sleep timer, the voice, the model, the roles). The quotes, the contents, the search — in both.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +86,15 @@ internal fun ReadingSheet(
     pageAnim: String = PageMode.FLIP,
     onPageAnim: (String) -> Unit = {},
     pageSound: Boolean = true,
-    onPageSound: (Boolean) -> Unit = {}
+    onPageSound: (Boolean) -> Unit = {},
+    // the voice is reading (its settings) or not (the book's look)
+    speaking: Boolean = true,
+    hasCustomPage: Boolean = false,
+    onPickPage: () -> Unit = {},
+    fontSize: Float = BookFont.DEFAULT,
+    onFontSize: (Float) -> Unit = {},
+    fontFamily: String = BookFont.SERIF,
+    onFontFamily: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
@@ -97,6 +106,7 @@ internal fun ReadingSheet(
     var voicesOpen by remember { mutableStateOf(false) }
     var roles by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(context)) }
     var pace by remember(speed) { mutableStateOf(speed) }
+    var size by remember(fontSize) { mutableStateOf(fontSize) }
     fun stem(f: String) = f.substringAfterLast('/').substringBeforeLast('.')
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
@@ -121,13 +131,35 @@ internal fun ReadingSheet(
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // ---- the page under the text ----
+            if (!speaking) {
+            // ---- the page under the text: the app's ones or the user's own picture ----
             Text(stringResource(AppR.string.page_style_title), style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                 for ((st, name) in listOf(PageStyles.PLAIN to AppR.string.page_style_plain, PageStyles.PAPER to AppR.string.page_style_paper,
                         PageStyles.PARCHMENT to AppR.string.page_style_parchment, PageStyles.DARK to AppR.string.page_style_dark)) {
                     FilterChip(selected = pageStyle == st, onClick = { onPageStyle(st) }, label = { Text(stringResource(name)) })
                 }
+                if (hasCustomPage) FilterChip(selected = pageStyle == PageStyles.CUSTOM, onClick = { onPageStyle(PageStyles.CUSTOM) },
+                    label = { Text(stringResource(AppR.string.page_style_custom)) })
+                FilterChip(selected = false, onClick = { onPickPage() },
+                    label = { Text(stringResource(if (hasCustomPage) AppR.string.page_style_custom_change else AppR.string.page_style_custom_pick)) })
+            }
+            // ---- the type: its size and kind ----
+            Spacer(modifier = Modifier.padding(top = 6.dp))
+            Text(stringResource(AppR.string.font_title) + "  " + String.format(java.util.Locale.US, "%.0f", size),
+                style = MaterialTheme.typography.titleSmall)
+            Slider(
+                value = size,
+                onValueChange = { size = Math.round(it).toFloat() },
+                onValueChangeFinished = { onFontSize(size) },
+                valueRange = BookFont.MIN..BookFont.MAX,
+                steps = (BookFont.MAX - BookFont.MIN).toInt() - 1
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                FilterChip(selected = fontFamily == BookFont.SERIF, onClick = { onFontFamily(BookFont.SERIF) },
+                    label = { Text(stringResource(AppR.string.font_serif), fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) })
+                FilterChip(selected = fontFamily == BookFont.SANS, onClick = { onFontFamily(BookFont.SANS) },
+                    label = { Text(stringResource(AppR.string.font_sans), fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif) })
             }
             // ---- the text: a ribbon to scroll or pages to turn (how they turn, with a rustle or not) ----
             Spacer(modifier = Modifier.padding(top = 6.dp))
@@ -148,7 +180,9 @@ internal fun ReadingSheet(
                     Switch(checked = pageSound, onCheckedChange = { onPageSound(it) })
                 }
             }
-            Spacer(modifier = Modifier.padding(top = 6.dp))
+            }
+
+            if (speaking) {
 
             // ---- the pace ----
             Text(
@@ -247,10 +281,12 @@ internal fun ReadingSheet(
                 Text(stringResource(AppR.string.roles_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Switch(checked = roles, onCheckedChange = { roles = it; onRoles(it) })
             }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { onDismiss(); onVoiceSettings() }) { Text(stringResource(AppR.string.player_voice_settings)) }
+                if (speaking) TextButton(onClick = { onDismiss(); onVoiceSettings() }) { Text(stringResource(AppR.string.player_voice_settings)) }
+                else Spacer(modifier = Modifier.width(1.dp))
                 TextButton(onClick = { onDismiss(); onSettings() }) { Text(stringResource(AppR.string.sheet_all_settings)) }
             }
         }

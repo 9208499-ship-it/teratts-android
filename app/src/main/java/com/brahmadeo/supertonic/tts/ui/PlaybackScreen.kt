@@ -240,7 +240,20 @@ fun PlaybackScreen(
     var sheetOpen by remember { mutableStateOf(false) }
     // the page under the text: plain, paper, parchment, dark (chosen in the reading's sheet)
     val pageCtx = androidx.compose.ui.platform.LocalContext.current
+    // the type, and the user's own page picture (taken again when it is changed)
+    remember { BookFont.load(pageCtx) }
+    val skinVersion = com.brahmadeo.supertonic.tts.utils.Skins.version.intValue
+    remember(skinVersion) { PageStyles.loadCustom(pageCtx); skinVersion }
     var pageStyle by remember { mutableStateOf(PageStyles.get(pageCtx)) }
+    // the user's picture for the page: chosen in the reading sheet
+    val pagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null && com.brahmadeo.supertonic.tts.utils.Skins.importPage(pageCtx, uri)) {
+            PageStyles.loadCustom(pageCtx)
+            pageStyle = PageStyles.CUSTOM; PageStyles.set(pageCtx, PageStyles.CUSTOM)
+        } else if (uri != null) android.widget.Toast.makeText(pageCtx, pageCtx.getString(AppR.string.skin_bad_picture), android.widget.Toast.LENGTH_SHORT).show()
+    }
     // the book as pages to turn (or the ribbon), how a page turns, whether it rustles
     var pageMode by remember { mutableStateOf(PageMode.paged(pageCtx)) }
     var pageAnim by remember { mutableStateOf(PageMode.anim(pageCtx)) }
@@ -382,9 +395,15 @@ fun PlaybackScreen(
         val r = book?.ranges?.getOrNull(shown)
         if (n == 0) 0f else if (book != null && r != null) r.first.toFloat() / book.text.length.coerceAtLeast(1) else shown.toFloat() / n
     }
+    // how the chapter is voiced: from the prepared file or now (only when preparing is in play)
+    val source = com.brahmadeo.supertonic.tts.utils.BookPrep.source.value
+    val sourceShort = source?.let {
+        if (it == stringResource(AppR.string.src_file)) stringResource(AppR.string.src_file_short) else stringResource(AppR.string.src_live_short)
+    }
     val placeLabel = listOfNotNull(
         chapterNumber?.let { "${it.first}/${it.second}" },
-        (bookShare?.invoke(chapterShare) ?: chapterShare).let { String.format(java.util.Locale.getDefault(), "%.1f %%", it * 100f) }
+        (bookShare?.invoke(chapterShare) ?: chapterShare).let { String.format(java.util.Locale.getDefault(), "%.1f %%", it * 100f) },
+        sourceShort
     ).joinToString("  ·  ")
     val startReading: () -> Unit = {
         if (isServiceActive) onPlayPauseClick()
@@ -425,8 +444,13 @@ fun PlaybackScreen(
             onToggleList = { showList = !showList },
             onSettings = onSettings,
             onVoiceSettings = onVoiceSettings,
+            speaking = speaking,
             pageStyle = pageStyle,
             onPageStyle = { s -> pageStyle = s; PageStyles.set(pageCtx, s) },
+            hasCustomPage = com.brahmadeo.supertonic.tts.utils.Skins.version.intValue >= 0 && com.brahmadeo.supertonic.tts.utils.Skins.hasPage(pageCtx),
+            onPickPage = { pagePicker.launch(arrayOf("image/*")) },
+            fontSize = BookFont.size.floatValue, onFontSize = { v -> BookFont.setSize(pageCtx, v) },
+            fontFamily = BookFont.family.value, onFontFamily = { f -> BookFont.setFamily(pageCtx, f) },
             paged = pageMode, onPaged = { v -> pageMode = v; PageMode.setPaged(pageCtx, v) },
             pageAnim = pageAnim, onPageAnim = { a -> pageAnim = a; PageMode.setAnim(pageCtx, a) },
             pageSound = pageSound, onPageSound = { v -> pageSound = v; PageMode.setSound(pageCtx, v) }
@@ -525,12 +549,7 @@ fun PlaybackScreen(
                                 )
                             }
                         }
-                        if (!followVoice && speaking) {
-                            ExtendedFloatingActionButton(
-                                onClick = { followVoice = true },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
-                            ) { Text(stringResource(AppR.string.player_to_current)) }
-                        }
+                        ToCurrentButton(!followVoice && speaking, listState.isScrollInProgress) { followVoice = true }
                     } else if (showList) {
                         LazyColumn(
                             state = listState,
@@ -545,12 +564,7 @@ fun PlaybackScreen(
                                 }, onLongClick = { longFor = i })
                             }
                         }
-                        if (!followVoice && speaking) {
-                            ExtendedFloatingActionButton(
-                                onClick = { followVoice = true },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
-                            ) { Text(stringResource(AppR.string.player_to_current)) }
-                        }
+                        ToCurrentButton(!followVoice && speaking, listState.isScrollInProgress) { followVoice = true }
                     } else {
                         KaraokeText(sentences, index, onClick = { if (speaking) showList = true else chrome = !chrome },
                             onLongClick = { longFor = index }, fraction = currentFraction)
@@ -788,6 +802,25 @@ private class PageFrag(val p: Int, val first: Int, val last: Int, val top: Int, 
 private class BookPageOut(val frags: List<PageFrag>, val start: Int)
 
 /** The pages of one chapter for one size of the screen (kept while the ribbon is shown). */
+/**
+ * «К текущему месту»: shown when the text was scrolled away from the voice, and gone by itself after
+ * a few seconds of no scrolling (it covered the text: pallado, 4PDA) — back on the next scroll.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.ToCurrentButton(show: Boolean, scrolling: Boolean, onClick: () -> Unit) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(show, scrolling) {
+        visible = show
+        if (show && !scrolling) { kotlinx.coroutines.delay(5000); visible = false }
+    }
+    if (visible) {
+        ExtendedFloatingActionButton(
+            onClick = onClick,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+        ) { Text(stringResource(AppR.string.player_to_current)) }
+    }
+}
+
 private class PageCache {
     var key: Any? = null
     var pages: List<BookPageOut> = emptyList()
@@ -860,7 +893,8 @@ private fun PagedBookView(
 ) {
     val dens = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = 0)
-    val style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Serif, fontSize = 19.sp, lineHeight = 1.45.em)
+    // the type chosen in the reading sheet (size, with serifs or without)
+    val style = MaterialTheme.typography.bodyLarge.copy(fontFamily = BookFont.fontFamily(), fontSize = BookFont.size.floatValue.sp, lineHeight = 1.45.em)
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val bg = MaterialTheme.colorScheme.background
     Column(modifier = modifier.background(bg).pageTexture(pageStyle).windowInsetsPadding(WindowInsets.statusBars)) {
@@ -1152,8 +1186,8 @@ private fun BookParagraph(
     Text(
         ann,
         style = MaterialTheme.typography.bodyLarge.copy(
-            fontFamily = FontFamily.Serif,
-            fontSize = 19.sp,
+            fontFamily = BookFont.fontFamily(),
+            fontSize = BookFont.size.floatValue.sp,
             lineHeight = 1.45.em
         ),
         color = MaterialTheme.colorScheme.onSurface,

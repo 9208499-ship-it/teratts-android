@@ -85,6 +85,8 @@ fun MainScreen(
     onTtsSettingsClick: () -> Unit,
     onDeleteModelClick: () -> Unit,
     onOpenEbookClick: () -> Unit,
+    // back to the library (the app's home screen): null — not shown
+    onLibraryClick: (() -> Unit)? = null,
 
     canResume: Boolean,
     onResumeClick: () -> Unit,
@@ -106,6 +108,14 @@ fun MainScreen(
                         stringResource(AppR.string.app_name),
                         style = MaterialTheme.typography.headlineMedium
                     ) 
+                },
+                // the way back to the books (came here by «Вставить текст»: there was none but the ⋮ menu)
+                navigationIcon = {
+                    if (onLibraryClick != null) {
+                        IconButton(onClick = onLibraryClick) {
+                            Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = stringResource(AppR.string.library_title))
+                        }
+                    }
                 },
                 actions = {
                     // the player with the last book, at its place

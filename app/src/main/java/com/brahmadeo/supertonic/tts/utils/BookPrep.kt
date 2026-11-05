@@ -59,6 +59,50 @@ object BookPrep {
     }
 
     fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, false)
+
+    // ---- the audio of books read: deleted by itself (dullish, 4PDA) ----
+    private const val KEY_CLEAN = "clean_read"
+    /** A book read this far, and not opened for [CLEAN_DAYS] days, is done with: its audio goes. */
+    private const val READ_SHARE = 0.9f
+    private const val CLEAN_DAYS = 14
+
+    fun autoClean(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CLEAN, false)
+    fun setAutoClean(context: Context, on: Boolean) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLEAN, on).apply()
+
+    /**
+     * The prepared audio no longer needed: of books gone from the library (always), and — if turned
+     * on — of books read to 90 % and more and not opened for two weeks. Never the book being read.
+     * Returns the bytes freed.
+     */
+    fun cleanUp(context: Context): Long {
+        val base = File(context.getExternalFilesDir(null) ?: context.filesDir, "prepared")
+        val dirs = base.listFiles { f -> f.isDirectory } ?: return 0L
+        val books = EbookManager.getRecentBooks(context).associateBy { bookDir(context, it.path).name }
+        // the library not read (or empty): nothing is taken for gone
+        if (books.isEmpty()) return 0L
+        val current = BookSession.currentPath(context)
+        val on = autoClean(context)
+        val now = System.currentTimeMillis()
+        var freed = 0L
+        for (d in dirs) {
+            val book = books[d.name]
+            val gone = when {
+                book == null -> true
+                !on || book.path == current -> false
+                else -> {
+                    val pos = BookPositions.get(context, File(book.path).name)
+                    val share = BookProgress.savedShare(context, book.path)
+                    pos != null && share != null && share >= READ_SHARE && now - pos.time > CLEAN_DAYS * 24L * 3600_000L
+                }
+            }
+            if (gone) {
+                val size = d.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                if (d.deleteRecursively()) { freed += size; Log.i(TAG, "cleaned ${d.name}: ${size / 1_000_000} MB") }
+            }
+        }
+        return freed
+    }
     fun mode(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MODE, MODE_CHARGING) ?: MODE_CHARGING
 
     fun setEnabled(context: Context, on: Boolean) {
@@ -183,20 +227,75 @@ object BookPrep {
     fun textKey(text: String) = Integer.toHexString(text.hashCode()) + "_" + text.length
 
     /** All the settings that change how a chapter sounds (and the voice it is read in). */
-    fun fingerprint(context: Context, voicePath: String): String {
+    fun fingerprint(context: Context, voicePath: String): String =
+        Integer.toHexString(settings(context, voicePath).joinToString("|") { it.second }.hashCode())
+
+    /**
+     * Fingerprints a chapter made with today's settings may carry: today's, and that of 1.24–1.26
+     * (quality and cleaning always in it) — chapters made then are good too.
+     */
+    fun fingerprints(context: Context, voicePath: String): Set<String> {
+        val p = PunctuationPrefs
+        val base = settings(context, voicePath).filter { it.first != "качество звука" && it.first != "очистка звука" }
+        val i = base.indexOfFirst { it.first == "яркость" } + 1
+        val old = base.map { it.second }.toMutableList().apply {
+            addAll(i, listOf(p.shtormSteps.toString(), (p.shtormDenoise != p.DENOISE_OFF).toString()))
+        }
+        return setOf(fingerprint(context, voicePath), Integer.toHexString(old.joinToString("|").hashCode()))
+    }
+
+    /**
+     * The settings a chapter is made with, each with what it is called in the settings (for "made
+     * with another voice"). What was added later (quality, cleaning) counts only when it is not
+     * as it was before: chapters prepared before it came in stay good (1.24–1.25 made every
+     * prepared chapter useless — read live again, the phone heating up).
+     */
+    fun settings(context: Context, voicePath: String): List<Pair<String, String>> {
         val p = PunctuationPrefs
         val r = RolePrefs
         val lex = File(context.filesDir, "user_lexicon.json").let { "${it.length()}:${it.lastModified()}" }
         val voice = File(AssetManager.voiceForEngine(voicePath.substringBefore(';'))).name
-        val parts = listOf(
-            AssetManager.engine(context), AssetManager.shtormPrecision(context), AssetManager.teacherOn(context),
-            voice, r.enabled(context), r.charactersEnabled(context), r.maleVoice(context), r.femaleVoice(context),
-            r.narratorVoice(context), r.unknownVoice(context), r.mainCount(context),
-            p.noiseScale, p.pauseScale, p.paragraphPause, p.shtormLiveliness, p.shtormBrightness, p.shtormSteps, p.shtormDenoise != p.DENOISE_OFF,
-            p.tightQuestionExclamation, p.tightCommasAndPeriods, AssetManager.commaQuotes,
-            LexiconManager.isEnabled(), lex, EnglishTranscriber.let { it.load(context); it.enabled }
+        val list = arrayListOf<Pair<String, Any?>>(
+            "модель" to AssetManager.engine(context), "точность" to AssetManager.shtormPrecision(context),
+            "учитель" to AssetManager.teacherOn(context),
+            "голос" to voice, "роли" to r.enabled(context), "голоса персонажей" to r.charactersEnabled(context),
+            "мужской голос" to r.maleVoice(context), "женский голос" to r.femaleVoice(context),
+            "голос рассказчика" to r.narratorVoice(context), "голос прочих" to r.unknownVoice(context),
+            "число главных персонажей" to r.mainCount(context),
+            "выразительность" to p.noiseScale, "паузы" to p.pauseScale, "пауза абзаца" to p.paragraphPause,
+            "живость" to p.shtormLiveliness, "яркость" to p.shtormBrightness,
+            "паузы ?!" to p.tightQuestionExclamation, "паузы ,." to p.tightCommasAndPeriods,
+            "замена запятых" to AssetManager.commaQuotes,
+            "словарь" to LexiconManager.isEnabled(), "свой словарь" to lex,
+            "английские слова" to EnglishTranscriber.let { it.load(context); it.enabled }
         )
-        return Integer.toHexString(parts.joinToString("|").hashCode())
+        if (p.shtormSteps != 1) list.add("качество звука" to p.shtormSteps)
+        if (p.shtormDenoise != p.DENOISE_OFF) list.add("очистка звука" to true)
+        return list.map { (k, v) -> k to v.toString() }
+    }
+
+    /** How the chapter being read is voiced, for the player and the notification; null — no preparing in play. */
+    val source = androidx.compose.runtime.mutableStateOf<String?>(null)
+
+    /**
+     * Why the chapter [text] cannot be played from a file now: not made yet; made with other
+     * settings (which, for chapters made from 1.26 on); or its text is not the same.
+     */
+    fun whyNot(context: Context, bookPath: String, text: String, phrases: Int, voicePath: String): String {
+        val json = File(bookDir(context, bookPath), textKey(text) + ".json")
+        if (!json.isFile) return context.getString(com.brahmadeo.supertonic.tts.R.string.src_not_made)
+        return try {
+            val o = JSONObject(json.readText())
+            if (o.getString("fp") !in fingerprints(context, voicePath)) {
+                val was = o.optJSONObject("settings")
+                val changed = if (was == null) emptyList() else settings(context, voicePath)
+                    .filter { (k, v) -> was.optString(k, "") != v }.map { it.first } +
+                    was.keys().asSequence().filter { k -> settings(context, voicePath).none { it.first == k } }.toList()
+                if (changed.isEmpty()) context.getString(com.brahmadeo.supertonic.tts.R.string.src_other_settings)
+                else context.getString(com.brahmadeo.supertonic.tts.R.string.src_other_settings_list, changed.distinct().take(3).joinToString(", "))
+            } else if (o.getInt("phrases") != phrases) context.getString(com.brahmadeo.supertonic.tts.R.string.src_other_text)
+            else context.getString(com.brahmadeo.supertonic.tts.R.string.src_not_made)
+        } catch (e: Exception) { context.getString(com.brahmadeo.supertonic.tts.R.string.src_not_made) }
     }
 
     /** One prepared chapter: phrase i lies at samples [start[i], start[i+1]); [subs]: its sentences. */
@@ -210,7 +309,7 @@ object BookPrep {
         if (!json.isFile) return null
         return try {
             val o = JSONObject(json.readText())
-            if (o.getString("fp") != fingerprint(context, voicePath) || o.getInt("phrases") != phrases) return null
+            if (o.getString("fp") !in fingerprints(context, voicePath) || o.getInt("phrases") != phrases) return null
             val audio = File(dir, o.getString("file"))
             if (!audio.isFile) return null
             val st = o.getJSONArray("starts")
@@ -225,10 +324,16 @@ object BookPrep {
     }
 
     /** Writes the index of a chapter just made into [audio]. */
+    /**
+     * [madeWith]: the settings when the chapter was begun ([settings]) — a setting changed while it
+     * was being made (roles turned off) must not give it today's fingerprint.
+     */
     fun saveIndex(context: Context, bookPath: String, text: String, audio: File, rate: Int, starts: List<Long>,
-                  subs: List<List<Pair<Int, Long>>>, voicePath: String) {
+                  subs: List<List<Pair<Int, Long>>>, voicePath: String, madeWith: List<Pair<String, String>>? = null) {
+        val list = madeWith ?: settings(context, voicePath)
+        val made = JSONObject().apply { list.forEach { (k, v) -> put(k, v) } }
         val o = JSONObject()
-            .put("fp", fingerprint(context, voicePath)).put("phrases", starts.size - 1).put("rate", rate)
+            .put("fp", Integer.toHexString(list.joinToString("|") { it.second }.hashCode())).put("settings", made).put("phrases", starts.size - 1).put("rate", rate)
             .put("file", audio.name)
             .put("starts", JSONArray(starts))
             .put("subs", JSONArray(subs.map { s -> JSONArray(s.map { (c, at) -> JSONArray(listOf(c, at)) }) }))
@@ -240,9 +345,9 @@ object BookPrep {
 
     /** Chapters of [bookPath] ready with today's settings, and the space all prepared audio takes. */
     fun status(context: Context, bookPath: String, voicePath: String): Pair<Int, Long> {
-        val fp = fingerprint(context, voicePath)
+        val fp = fingerprints(context, voicePath)
         val ready = bookDir(context, bookPath).listFiles { f -> f.name.endsWith(".json") }?.count { f ->
-            try { JSONObject(f.readText()).getString("fp") == fp } catch (e: Exception) { false }
+            try { JSONObject(f.readText()).getString("fp") in fp } catch (e: Exception) { false }
         } ?: 0
         val bytes = File(context.getExternalFilesDir(null) ?: context.filesDir, "prepared")
             .walkTopDown().filter { it.isFile }.sumOf { it.length() }

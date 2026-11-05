@@ -143,6 +143,7 @@ class MainActivity : ComponentActivity() {
             else {
                 // «Вставить текст»: an empty field for the user's own text (not the chapter being read)
                 libraryIsHome = false
+                libraryBehind.value = true
                 viewModel.inputText.value = ""
             }
         }
@@ -229,6 +230,10 @@ class MainActivity : ComponentActivity() {
 
         // once a day: is a newer TeraTTS out on GitHub (offered on whatever screen is open)
         if (savedInstanceState == null) uiScope.launch { com.brahmadeo.supertonic.tts.utils.Updater.checkAtStart(applicationContext) }
+        // the prepared audio of deleted books (and, if turned on, of books read) is let go
+        if (savedInstanceState == null) uiScope.launch(Dispatchers.IO) {
+            try { com.brahmadeo.supertonic.tts.utils.BookPrep.cleanUp(applicationContext) } catch (e: Exception) { }
+        }
 
         // As in Moon+ Reader: launching the app opens the last book at its place (paused), with the
         // library under it — "Back" from the book leads to the books, not to this text screen
@@ -303,7 +308,10 @@ class MainActivity : ComponentActivity() {
                         languages.mapKeys { getLocalizedResource(this@MainActivity, viewModel.currentLang.value, it.key) }
                     }
 
+                    // came from the library («Вставить текст»): system "Back" returns to the books, not out of the app
+                    androidx.activity.compose.BackHandler(enabled = libraryBehind.value) { openLibraryHome() }
                     MainScreen(
+                        onLibraryClick = if (AssetManager.isReady(this@MainActivity)) ({ openLibraryHome() }) else null,
                         inputText = viewModel.inputText.value,
                         onInputTextChange = { 
                             viewModel.inputText.value = it
@@ -784,8 +792,12 @@ class MainActivity : ComponentActivity() {
     /** The library as the home screen (for its result: the book chosen there opens over it). */
     private var libraryIsHome = false
 
+    /** On this screen from the library («Вставить текст»): "Back" goes to the books again. */
+    private val libraryBehind = androidx.compose.runtime.mutableStateOf(false)
+
     private fun openLibraryHome() {
         libraryIsHome = true
+        libraryBehind.value = false
         ebookOutlineLauncher.launch(Intent(this, EbookLibraryActivity::class.java).putExtra(EbookLibraryActivity.EXTRA_HOME, true))
     }
 

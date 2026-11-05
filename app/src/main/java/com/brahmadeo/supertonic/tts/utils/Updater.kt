@@ -26,7 +26,8 @@ object Updater {
     private const val TAG = "TeraUpdate"
     private const val DAY = 24 * 60 * 60 * 1000L
 
-    class Release(val version: String, val notes: String, val apkUrl: String, val size: Long)
+    /** [beta]: a test version (a GitHub pre-release) — offered only to those who asked for them. */
+    class Release(val version: String, val notes: String, val apkUrl: String, val size: Long, val beta: Boolean = false)
 
     /** A newer release found (shown as a dialog by whatever screen is open). */
     val found = mutableStateOf<Release?>(null)
@@ -35,6 +36,9 @@ object Updater {
     fun auto(c: Context) = p(c).getBoolean("auto", true)
     fun setAuto(c: Context, on: Boolean) = p(c).edit().putBoolean("auto", on).apply()
     fun skip(c: Context, version: String) = p(c).edit().putString("skipped", version).apply()
+    /** Test versions too (pre-releases): off by default — most get only what was tried. */
+    fun beta(c: Context) = p(c).getBoolean("beta", false)
+    fun setBeta(c: Context, on: Boolean) = p(c).edit().putBoolean("beta", on).putLong("checked", 0L).apply()
 
     /** This app's version: "1.21" (of "1.21-tera"). */
     fun current(c: Context): String = try {
@@ -54,7 +58,7 @@ object Updater {
     }
 
     /** The newest app release on GitHub with an APK (the models' releases are not app versions), or null. */
-    suspend fun latest(): Release? = withContext(Dispatchers.IO) {
+    suspend fun latest(beta: Boolean = false): Release? = withContext(Dispatchers.IO) {
         try {
             val con = URL("https://api.github.com/repos/$REPO/releases?per_page=30").openConnection() as HttpURLConnection
             con.setRequestProperty("Accept", "application/vnd.github+json")
@@ -65,7 +69,8 @@ object Updater {
             var best: Release? = null
             for (i in 0 until a.length()) {
                 val o = a.getJSONObject(i)
-                if (o.optBoolean("draft") || o.optBoolean("prerelease")) continue
+                val pre = o.optBoolean("prerelease")
+                if (o.optBoolean("draft") || (pre && !beta)) continue
                 val tag = o.optString("tag_name")
                 if (!Regex("""v\d+(\.\d+)*""").matches(tag)) continue
                 val assets = o.optJSONArray("assets") ?: continue
@@ -77,7 +82,7 @@ object Updater {
                 }
                 if (url.isNullOrEmpty()) continue
                 val v = tag.removePrefix("v")
-                if (best == null || newer(v, best.version)) best = Release(v, o.optString("body").trim(), url, size)
+                if (best == null || newer(v, best.version)) best = Release(v, o.optString("body").trim(), url, size, pre)
             }
             best
         } catch (e: Exception) { Log.w(TAG, "check: ${e.message}"); null }
@@ -91,7 +96,7 @@ object Updater {
         if (!auto(c)) return
         val now = System.currentTimeMillis()
         if (now - p(c).getLong("checked", 0L) < DAY) return
-        val r = latest() ?: return   // no network: asked again at the next start
+        val r = latest(beta(c)) ?: return   // no network: asked again at the next start
         if (newer(r.version, current(c)) && r.version != p(c).getString("skipped", null)) found.value = r
         else p(c).edit().putLong("checked", now).apply()
     }
@@ -101,7 +106,7 @@ object Updater {
 
     /** By hand (Settings → About): true if a newer one was found (then shown as [found]). */
     suspend fun checkNow(c: Context): Boolean? {
-        val r = latest() ?: return null
+        val r = latest(beta(c)) ?: return null
         p(c).edit().putLong("checked", System.currentTimeMillis()).apply()
         return if (newer(r.version, current(c))) { found.value = r; true } else false
     }

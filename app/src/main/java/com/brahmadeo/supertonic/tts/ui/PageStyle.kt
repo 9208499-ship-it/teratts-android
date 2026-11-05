@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.sin
@@ -27,11 +28,36 @@ internal object PageStyles {
     const val PAPER = "paper"
     const val PARCHMENT = "parchment"
     const val DARK = "dark"
-    val ALL = listOf(PLAIN, PAPER, PARCHMENT, DARK)
+    /** The user's own picture (Skins.pageFile). */
+    const val CUSTOM = "custom"
+    val ALL = listOf(PLAIN, PAPER, PARCHMENT, DARK, CUSTOM)
     private const val KEY = "page_style"
 
     fun get(c: Context): String =
-        c.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getString(KEY, PLAIN)?.takeIf { it in ALL } ?: PLAIN
+        c.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getString(KEY, PLAIN)
+            ?.takeIf { it in ALL && (it != CUSTOM || com.brahmadeo.supertonic.tts.utils.Skins.hasPage(c)) } ?: PLAIN
+
+    // ---- the user's own page: the picture and the colours that go with it ----
+    @Volatile private var customImage: ImageBitmap? = null
+    @Volatile private var customLook: Look? = null
+    @Volatile private var customVersion = -1
+
+    /** The user's picture taken (again, if it was changed); call before drawing. */
+    fun loadCustom(c: Context) {
+        val v = com.brahmadeo.supertonic.tts.utils.Skins.version.intValue
+        if (v == customVersion) return
+        customVersion = v
+        val f = com.brahmadeo.supertonic.tts.utils.Skins.pageFile(c)
+        val bmp = if (f.isFile) try { android.graphics.BitmapFactory.decodeFile(f.path) } catch (e: Exception) { null } else null
+        if (bmp == null) { customImage = null; customLook = null; return }
+        // its mean colour: the page's base; the text dark on a light picture, light on a dark one
+        val one = android.graphics.Bitmap.createScaledBitmap(bmp, 1, 1, true).getPixel(0, 0)
+        val r = (one shr 16) and 0xff; val g = (one shr 8) and 0xff; val b = one and 0xff
+        val light = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0 > 0.5
+        customLook = if (light) Look(one and 0xffffff, 0xFF1E1A16, 0xFF8B5E34, 0xFFFFFFFF, 0, 0, 0f)
+            else Look(one and 0xffffff, 0xFFEDE6DA, 0xFFD9A55B, 0xFF2A1D0E, 0, 0, 0f)
+        customImage = bmp.asImageBitmap()
+    }
 
     fun set(c: Context, style: String) =
         c.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).edit().putString(KEY, style).apply()
@@ -40,6 +66,7 @@ internal object PageStyles {
     class Look(val base: Int, val text: Long, val accent: Long, val onAccent: Long, val grain: Int, val blotch: Int, val edges: Float)
 
     fun look(style: String): Look? = when (style) {
+        CUSTOM -> customLook
         PAPER -> Look(0xF4ECD8, 0xFF2B2118, 0xFF8B5E34, 0xFFFFFFFF, 6, 4, 0.10f)
         PARCHMENT -> Look(0xE8D2A4, 0xFF3A2A17, 0xFF8B5A2B, 0xFFFFFFFF, 8, 8, 0.38f)
         DARK -> Look(0x1E1B18, 0xFFD8CCB6, 0xFFD9A55B, 0xFF2A1D0E, 4, 4, 0.0f)
@@ -51,6 +78,7 @@ internal object PageStyles {
     /** The texture's tile (256×256, seamless), made once. */
     @Synchronized
     fun tile(style: String): ImageBitmap? {
+        if (style == CUSTOM) return customImage
         val l = look(style) ?: return null
         return tiles.getOrPut(style) { makeTile(l, style.hashCode()) }
     }
@@ -106,7 +134,8 @@ internal fun PageTheme(style: String, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme.copy(
         background = base, onBackground = text,
         surface = base, onSurface = text,
-        surfaceVariant = base.copy(alpha = 1f).let { if (style == PageStyles.DARK) Color(0xFF2A2622) else Color(0xFFE6D9BC) },
+        // a dark page (dark, or the user's dark picture): a dark panel under the buttons
+        surfaceVariant = if (base.luminance() < 0.4f) Color(0xFF2A2622) else Color(0xFFE6D9BC),
         onSurfaceVariant = text.copy(alpha = 0.7f),
         surfaceContainer = base, surfaceContainerLow = base, surfaceContainerHigh = base,
         primary = Color(l.accent), onPrimary = Color(l.onAccent),
@@ -119,6 +148,17 @@ internal fun PageTheme(style: String, content: @Composable () -> Unit) {
 internal fun Modifier.pageTexture(style: String): Modifier {
     val l = PageStyles.look(style) ?: return this
     val tile = PageStyles.tile(style) ?: return this
+    // the user's picture: over the whole page, cut to fill it (not repeated)
+    if (style == PageStyles.CUSTOM) return this.drawWithCache {
+        val iw = tile.width.toFloat(); val ih = tile.height.toFloat()
+        val k = max(size.width / iw, size.height / ih)
+        val sw = (size.width / k).toInt().coerceIn(1, tile.width); val sh = (size.height / k).toInt().coerceIn(1, tile.height)
+        val sx = ((tile.width - sw) / 2); val sy = ((tile.height - sh) / 2)
+        onDrawBehind {
+            drawImage(tile, srcOffset = androidx.compose.ui.unit.IntOffset(sx, sy), srcSize = androidx.compose.ui.unit.IntSize(sw, sh),
+                dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()))
+        }
+    }
     return this.drawWithCache {
         val brush = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
         val edge = if (l.edges > 0f) Brush.radialGradient(
@@ -131,4 +171,38 @@ internal fun Modifier.pageTexture(style: String): Modifier {
             if (edge != null) drawRect(edge)
         }
     }
+}
+
+/** The book's type: its size and its kind (with serifs or without), as chosen in the reading sheet. */
+internal object BookFont {
+    const val SERIF = "serif"
+    const val SANS = "sans"
+    const val MIN = 14f
+    const val MAX = 30f
+    const val DEFAULT = 19f
+    val size = androidx.compose.runtime.mutableFloatStateOf(DEFAULT)
+    val family = androidx.compose.runtime.mutableStateOf(SERIF)
+    @Volatile private var loaded = false
+
+    private fun prefs(c: Context) = c.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)
+
+    fun load(c: Context) {
+        if (loaded) return
+        loaded = true
+        size.floatValue = prefs(c).getFloat("book_font_size", DEFAULT).coerceIn(MIN, MAX)
+        family.value = prefs(c).getString("book_font_family", SERIF)?.takeIf { it == SANS } ?: SERIF
+    }
+
+    fun setSize(c: Context, v: Float) {
+        size.floatValue = v.coerceIn(MIN, MAX)
+        prefs(c).edit().putFloat("book_font_size", size.floatValue).apply()
+    }
+
+    fun setFamily(c: Context, f: String) {
+        family.value = if (f == SANS) SANS else SERIF
+        prefs(c).edit().putString("book_font_family", family.value).apply()
+    }
+
+    fun fontFamily(): androidx.compose.ui.text.font.FontFamily =
+        if (family.value == SANS) androidx.compose.ui.text.font.FontFamily.SansSerif else androidx.compose.ui.text.font.FontFamily.Serif
 }

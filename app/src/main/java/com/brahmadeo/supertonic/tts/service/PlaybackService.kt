@@ -724,7 +724,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 } else startIndex
                 // the book's place (Locator-like: chapter, progression, quote) when reading a book
                 val bookScope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text)
-                val bookChapter = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this@PlaybackService)
+                // the session's chapter number only if this text IS the session's chapter: a text of
+                // another book (known by its beginning) would take that book's number — and its
+                // place jumped to another chapter or the start (Huawei, two books, 1.26)
+                val bookChapter = if (com.brahmadeo.supertonic.tts.utils.BookSession.isCurrent(this@PlaybackService, text))
+                    com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this@PlaybackService) else -1
                 val chunkRanges = if (bookScope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
                 fun savePosition(idx: Int) {
                     val now = System.currentTimeMillis()
@@ -751,7 +755,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
                 // the beginning of this chapter made ahead, while the end of the last one played: used;
                 // made for another text (the reader jumped elsewhere): dropped
-                val early = ahead?.takeIf { it.text == text && it.style == stylePath }
+                // …and with the same settings: what was made ahead stayed and was taken again by any
+                // new start of this chapter — roles turned off (or voices changed) and "play", and the
+                // chapter went on in the old voices (tolyos, 1.26)
+                val early = ahead?.takeIf { it.text == text && it.style == stylePath &&
+                    it.fp == com.brahmadeo.supertonic.tts.utils.BookPrep.fingerprint(this@PlaybackService, stylePath) }
                 if (early == null) { ahead?.stop = true; ahead = null; aheadEpoch++ }
                 // who says each phrase, in which voice, at which pace and loudness (shared with BookPrep)
                 val plan = early?.plan ?: voicePlan(text, sentences, stylePath,
@@ -762,6 +770,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val prepared = prepBook?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, it, text, totalSentences, stylePath) }
                 val prepReader = prepared?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.Reader(it) }
                 if (prepared != null) Log.i(TAG, "Prepared audio: the chapter plays from its file")
+                // shown in the player and the notification: from the file, or voiced now — and why
+                // (a phone heating up "though the chapters were prepared" — 1.24 had made them useless)
+                com.brahmadeo.supertonic.tts.utils.BookPrep.source.value = when {
+                    prepBook == null -> null
+                    prepared != null -> getString(R.string.src_file)
+                    !com.brahmadeo.supertonic.tts.utils.BookPrep.enabled(this@PlaybackService) &&
+                        !com.brahmadeo.supertonic.tts.utils.BookPrep.bookDir(this@PlaybackService, prepBook).exists() -> null
+                    else -> getString(R.string.src_live,
+                        com.brahmadeo.supertonic.tts.utils.BookPrep.whyNot(this@PlaybackService, prepBook, text, totalSentences, stylePath))
+                }.also { if (it != null) Log.i(TAG, "Source: $it") }
 
                 // Channel sizing:
                 //  pre-roll OFF: 50 chunks ~ 5 s look-ahead — enough to hide
@@ -1122,7 +1140,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     // ---- the next chapter's beginning, made while the end of the current one plays ----
     /** For [text] in voice [style]: its plan and the first phrases (by what is said and how), as they come. */
-    private class Ahead(val text: String, val style: String) {
+    private class Ahead(val text: String, val style: String, val fp: String) {
         @Volatile var plan: VoicePlan? = null
         val pcm = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<ByteArray?>>()
         @Volatile var stop = false
@@ -1154,7 +1172,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // made beforehand into a file: it plays from there, nothing to make
         if (com.brahmadeo.supertonic.tts.utils.BookPrep.find(this, path, text, sentences.size, stylePath) != null) return
         if (aheadEpoch != epoch) return
-        val a = Ahead(text, stylePath)
+        val a = Ahead(text, stylePath, com.brahmadeo.supertonic.tts.utils.BookPrep.fingerprint(this, stylePath))
         ahead = a
         a.plan = voicePlan(text, sentences, stylePath, File(path).name)
         val plan = a.plan ?: return
@@ -1571,6 +1589,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                        lang: String, stylePath: String, steps: Int, progress: (Int) -> Unit): PrepEnd {
         val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
         val isAdvancedEnabled = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getBoolean("is_advanced_normalization", false)
+        // the settings the chapter is made with, taken before it is begun (saved with it at the end)
+        val madeWith = prep.settings(this, stylePath)
         val plan = voicePlan(text, sentences, stylePath, scope)
         val rate = SupertonicTTS.getAudioSampleRate()
         val dir = prep.bookDir(this, book).apply { mkdirs() }
@@ -1622,7 +1642,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // stopped half-way: nothing to finish (finishing an aborted WAV made an empty file again)
         if (!ok) return PrepEnd.INTERRUPTED
         if (writer.finish()) {
-            prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath)
+            prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath, madeWith)
             Log.i(TAG, "Prepare: chapter ready (${samples / rate} s): ${made.name}")
         } else made.delete()
         return PrepEnd.DONE
@@ -2318,7 +2338,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(nowPhrase.ifEmpty { nowBook.ifEmpty { getString(R.string.app_name) } })
             .setContentText(if (nowPhrase.isNotEmpty()) nowBook else status)
-            .setSubText(if (nowPhrase.isNotEmpty() && status.contains('×')) status else null)
+            .setSubText(listOfNotNull(
+                if (nowPhrase.isNotEmpty() && status.contains('×')) status else null,
+                // from the prepared file, or voiced now (and why)
+                if (showControls) com.brahmadeo.supertonic.tts.utils.BookPrep.source.value else null
+            ).joinToString("  ·  ").ifEmpty { null })
             .setSmallIcon(R.mipmap.ic_launcher)
             .setLargeIcon(appIcon())
             .setContentIntent(pendingIntent)

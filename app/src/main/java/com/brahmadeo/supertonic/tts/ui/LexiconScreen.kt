@@ -523,6 +523,19 @@ private fun PrepSection() {
                         Text(stringResource(AppR.string.prep_delete))
                     }
                 }
+                // the audio of books read (90 % and more, not opened for two weeks) deleted by itself
+                var clean by remember { mutableStateOf(prep.autoClean(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(AppR.string.prep_clean_read), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(AppR.string.prep_clean_read_hint), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = clean, onCheckedChange = { v ->
+                        clean = v; prep.setAutoClean(context, v)
+                        if (v) Thread { prep.cleanUp(context.applicationContext) }.start()
+                    })
+                }
             }
         }
     }
@@ -570,6 +583,14 @@ private fun UpdateRow() {
             description = stringResource(AppR.string.update_auto_desc),
             checked = auto,
             onToggle = { v -> auto = v; up.setAuto(context, v) }
+        )
+        // test versions (GitHub pre-releases): only for those who want to try them first
+        var beta by remember { mutableStateOf(up.beta(context)) }
+        PunctuationToggleRow(
+            title = stringResource(AppR.string.update_beta_title),
+            description = stringResource(AppR.string.update_beta_desc),
+            checked = beta,
+            onToggle = { v -> beta = v; up.setBeta(context, v) }
         )
     }
 }
