@@ -44,6 +44,127 @@ object DialogueAnalyzer2 {
         val aliases: Map<String, String> = emptyMap()
     )
 
+    /**
+     * A name and its everyday forms: "Александр" — Саша, Шура, Санька… One person, called by his full
+     * name in the author words and by a short one in the talk, was two characters with two voices.
+     */
+    private val shortNames: Map<String, Set<String>> = run {
+        val m = HashMap<String, MutableSet<String>>()
+        for ((full, forms) in listOf(
+        "александр" to "саша шура саня санька сашка сашенька шурик сашок",
+        "алексей" to "лёша алёша лёшка лёха алёшка лёшенька",
+        "андрей" to "андрюша андрюха андрюшка",
+        "анатолий" to "толя толик толян",
+        "борис" to "боря борька",
+        "вадим" to "вадик",
+        "валентин" to "валя",
+        "валерий" to "валера",
+        "василий" to "вася васька васёк",
+        "виктор" to "витя витька витёк",
+        "виталий" to "виталик",
+        "владимир" to "вова володя вовка вовчик володька",
+        "владислав" to "влад владик",
+        "вячеслав" to "слава славик",
+        "геннадий" to "гена",
+        "георгий" to "жора гоша",
+        "григорий" to "гриша гришка",
+        "дмитрий" to "дима митя димка митька димочка",
+        "евгений" to "женя женька",
+        "егор" to "егорка",
+        "иван" to "ваня ванька ванечка ванюша",
+        "игорь" to "игорёк",
+        "илья" to "илюша илюха",
+        "константин" to "костя костик",
+        "леонид" to "лёня",
+        "лев" to "лёва",
+        "максим" to "макс",
+        "михаил" to "миша мишка мишаня мишенька",
+        "никита" to "никитка",
+        "николай" to "коля колька николаша коленька",
+        "олег" to "олежек",
+        "павел" to "паша павлик пашка",
+        "пётр" to "петя петька петруша",
+        "роман" to "рома ромка",
+        "сергей" to "серёжа серёга серёжка",
+        "станислав" to "стас",
+        "степан" to "стёпа",
+        "тимофей" to "тима",
+        "фёдор" to "федя федька",
+        "юрий" to "юра юрка",
+        "яков" to "яша",
+        "семён" to "сёма",
+        "аркадий" to "аркаша",
+        "эдуард" to "эдик",
+        "ярослав" to "ярик",
+        "кирилл" to "кирюша",
+        "антон" to "антоша",
+        "артём" to "тёма",
+        "денис" to "дениска",
+        "глеб" to "глебушка",
+        "герман" to "гера",
+        "александра" to "саша шура сашенька",
+        "анастасия" to "настя настенька",
+        "настасья" to "настя настенька",
+        "анна" to "аня анечка нюра аннушка нюша",
+        "валентина" to "валя",
+        "вера" to "верочка",
+        "виктория" to "вика",
+        "галина" to "галя",
+        "дарья" to "даша дашенька",
+        "евгения" to "женя",
+        "екатерина" to "катя катька катюша катенька",
+        "елена" to "лена леночка",
+        "елизавета" to "лиза лизонька",
+        "ирина" to "ира ирочка",
+        "ксения" to "ксюша",
+        "любовь" to "люба",
+        "людмила" to "люда мила",
+        "маргарита" to "рита",
+        "марина" to "мариша",
+        "мария" to "маша машенька маруся машка",
+        "надежда" to "надя наденька",
+        "наталья" to "наташа",
+        "наталия" to "наташа",
+        "нина" to "ниночка",
+        "ольга" to "оля оленька",
+        "полина" to "поля",
+        "светлана" to "света",
+        "софья" to "соня",
+        "софия" to "соня",
+        "тамара" to "тома",
+        "татьяна" to "таня танечка танюша",
+        "юлия" to "юля",
+        "зинаида" to "зина",
+        "лидия" to "лида",
+        "евдокия" to "дуня",
+        "вероника" to "ника",
+        "алёна" to "алёнка",
+        "варвара" to "варя",
+        "кристина" to "кристи",
+        )) for (f in forms.split(' ')) m.getOrPut(f) { HashSet() }.add(full)
+        m
+    }
+
+    private val fullNames: Set<String> by lazy { shortNames.values.flatten().toSet() }
+
+    /** The full names [n] may stand for ("саша" → александр, александра); written with е or ё. */
+    private fun fullsOf(n: String): Set<String> {
+        val r = HashSet<String>()
+        for (c in setOf(n, n.replace('е', 'ё'))) {
+            shortNames[c]?.let { r.addAll(it) }
+            if (c in fullNames) r.add(c)
+        }
+        return r
+    }
+
+    /** May [a] and [b] be one person's names ("Саша" and "Александр", "Лёша" and "Алёша")? */
+    private fun sameFirstName(a: String, b: String): Boolean {
+        val x = a.lowercase(); val y = b.lowercase()
+        if (x == y) return false
+        val fx = fullsOf(x)
+        return fx.isNotEmpty() && fullsOf(y).any { it in fx }
+    }
+
     const val FORCE_NARRATOR = "#narrator"
     const val FORCE_UNKNOWN = "#unknown"
 
@@ -339,6 +460,7 @@ object DialogueAnalyzer2 {
             return null
         }
         var heroGender: G? = null
+        var heroM = 0; var heroF = 0
         fun genderOf(speaker: String?): G? = when {
             speaker == null -> null
             speaker == HERO -> heroGender
@@ -630,7 +752,12 @@ object DialogueAnalyzer2 {
                 }
             }
             if (forced == null && addressee != null) {
-                if (samePerson(speaker, addressee)) {
+                // (named in the author words — "— Алексей, а не Алекс, — спросил я" — stays: the
+                // hero correcting his own name is no call to someone else)
+                // ("— вопрос, который я ожидал" is no "спросил я": only a verb right before "я" counts)
+                val named = attributed && ownHint != null && (ownHint.name != null || (ownHint.hero &&
+                    authors.firstOrNull()?.let { (a, b) -> Regex("""^[\s,—–-]*\p{L}+(л|ла)\s+я(?!\p{L})""").containsMatchIn(text.substring(a, b)) } == true))
+                if (samePerson(speaker, addressee) && !named) {
                     // "— Маша, иди сюда" cannot be Маша's own line
                     speaker = run.lastOrNull { !samePerson(it, addressee) }
                     gender = null
@@ -687,7 +814,12 @@ object DialogueAnalyzer2 {
             if (!p.quoted) { lastAddressee = addressee; lastToGender = addresseeGender(speechText) }
             // a said «…» (with author words or "она ответила:" before) is a turn of the talk too
             if (!p.quoted || authors.isNotEmpty() || fromIntro != null) genderRun.add(gender)
-            if (speaker == HERO && gender != null) heroGender = gender
+            // the hero's sex: what most of his lines say (one line of a chapter told by a woman
+            // made him a woman to the end of the book — and his unnamed lines took her voice)
+            if (speaker == HERO && gender != null) {
+                if (gender == G.M) heroM++ else heroF++
+                heroGender = if (heroF > heroM) G.F else G.M
+            }
             // (a guessed «…» thought is no sign of the hero being there: another character's thoughts
             // in a third-person chapter were taken for his and pulled him into the talk)
             if (speaker == HERO && (!p.quoted || attributed)) heroSeenAt = pi
@@ -822,9 +954,14 @@ object DialogueAnalyzer2 {
             val people = lineCount.keys.filter { it != HERO && it != SYSTEM && it.first().isUpperCase() && it.length >= 3 && it !in merge }
             for (a in people) for (b in people) {
                 if (a == b || a in merge || b in merge) continue
-                val pair = Regex("""(?<![А-Яа-яЁё])""" + Regex.escape(a) + """\s+""" + Regex.escape(b) + """(?![А-Яа-яЁё])""").containsMatchIn(text)
+                // "Лорк Сноук", "Лев Николаевич Мышкин" (a patronymic between the name and the surname)
+                val pair = Regex("""(?<![А-Яа-яЁё])""" + Regex.escape(a) + """\s+(?:[А-ЯЁ][а-яё]+(?:ович|евич|ич|овна|евна|ична|инична)\s+)?""" +
+                    Regex.escape(b) + """(?![А-Яа-яЁё])""").containsMatchIn(text)
                 val short = b.startsWith(a) && b.length >= a.length + 4 && genderOf(a) == genderOf(b)
-                if (!pair && !short) continue
+                // "Саша" and "Александр" (when the text does not say they are of different sex)
+                val sameName = sameFirstName(a, b) &&
+                    (genderOf(a) == null || genderOf(b) == null || genderOf(a) == genderOf(b))
+                if (!pair && !short && !sameName) continue
                 val (from, to) = if ((lineCount[a] ?: 0) >= (lineCount[b] ?: 0)) b to a else a to b
                 if (genderOf(from) != null && genderOf(to) != null && genderOf(from) != genderOf(to)) continue
                 merge[from] = to
@@ -841,6 +978,94 @@ object DialogueAnalyzer2 {
                 val a = mannerCount.remove(from)
                 if (a != null) { val b = mannerCount.getOrPut(to) { IntArray(a.size) }; for (k in a.indices) b[k] += a[k] }
                 aliasOut[from] = to
+            }
+        }
+
+        // Two people talking: a line nobody was found for is the one whose turn it is. In a run of
+        // dash lines between the same two people the turns alternate, and the lines that are known
+        // (on either side — the first line of a talk is often named only by the reply: "— …
+        // — поторопил Аггиус Лорка") say whose turn each one is. A line calling one of them by name
+        // is the other's. Only gaps are filled, a known speaker is never changed, and a talk whose
+        // known lines do not alternate is left as it is. (Неучтённый‑3: «— А знаешь, Лорк, …» and
+        // the line after it were read in the common voice — one man speaking in two voices.)
+        run {
+            val starts = IntArray(paragraphs.size) { paragraphs[it].first }
+            fun parOf(pos: Int): Int {
+                var lo = 0; var hi = starts.size - 1; var ans = 0
+                while (lo <= hi) { val m = (lo + hi) ushr 1; if (starts[m] <= pos) { ans = m; lo = m + 1 } else hi = m - 1 }
+                return ans
+            }
+            // the speech of each paragraph: one turn
+            val turnSpans = java.util.TreeMap<Int, MutableList<Int>>()
+            for (i in out.indices) if (out[i].role != Role.NARRATOR) turnSpans.getOrPut(parOf(out[i].start)) { ArrayList() }.add(i)
+            fun dashTurn(par: Int): Boolean {
+                val (a, b) = paragraphs[par]
+                val t = text.substring(a, b).trimStart()
+                return t.isNotEmpty() && t[0] in "-—–"
+            }
+            fun breakBetween(p1: Int, p2: Int): Boolean {
+                var narration = 0
+                for (q in p1 + 1 until p2) {
+                    val (a, b) = paragraphs[q]
+                    val t = text.substring(a, b)
+                    if (t.contains("***") || t.contains("* * *")) return true
+                    narration += t.trim().length
+                }
+                return narration > 300
+            }
+            val blocks = ArrayList<MutableList<Int>>()
+            var prevPar = -1
+            for (par in turnSpans.keys) {
+                if (!dashTurn(par)) { prevPar = -1; continue }
+                if (prevPar < 0 || breakBetween(prevPar, par)) blocks.add(ArrayList())
+                blocks.last().add(par)
+                prevPar = par
+            }
+            for (block in blocks) {
+                if (block.size < 3) continue
+                // who says each turn (null: nobody known; "?" — two people in one paragraph)
+                val who = block.map { par ->
+                    val sp = turnSpans[par]!!.mapNotNull { out[it].speaker }.toSet()
+                    if (sp.size > 1) "?" else sp.firstOrNull()
+                }
+                if ("?" in who) continue
+                val known = who.filterNotNull().toSet()
+                if (known.size != 2) continue
+                val (a, b) = known.toList()
+                // the known turns must alternate: the same person an even number of turns apart
+                val idx = who.indices.filter { who[it] != null }
+                var alternates = true
+                for (k in 1 until idx.size) {
+                    val same = who[idx[k]] == who[idx[k - 1]]
+                    if (same != ((idx[k] - idx[k - 1]) % 2 == 0)) { alternates = false; break }
+                }
+                if (!alternates) continue
+                for (t in who.indices) {
+                    if (who[t] != null) continue
+                    // only where both sides say it: between two lines of the same person (A ? A)
+                    // (at the edges of a talk a third one — often the hero — may come in unnamed)
+                    val before = who.getOrNull(t - 1)
+                    val after = who.getOrNull(t + 1)
+                    val cand = if (before != null && before == after) (if (before == a) b else a) else continue
+                    val spans = turnSpans[block[t]]!!
+                    // the line's own sex (from "сказала", "я готов") must fit
+                    val lineG = spans.firstNotNullOfOrNull { when (out[it].role) { Role.MALE -> G.M; Role.FEMALE -> G.F; else -> null } }
+                    // (the hero: the sex of his own lines nearby — a chapter told by a woman must not lend him hers)
+                    val heroRole = if (cand == HERO) listOf(t - 1, t + 1, t - 2, t + 2).firstOrNull { who.getOrNull(it) == HERO }
+                        ?.let { turnSpans[block[it]]!!.firstOrNull()?.let { i -> out[i].role } } else null
+                    val candG = if (cand == HERO) when (heroRole) { Role.MALE -> G.M; Role.FEMALE -> G.F; else -> null } else genderOf(cand)
+                    if (lineG != null && candG != null && lineG != candG) continue
+                    // "— Лорк, …", "— Сноук, …" (his other name): not his own line
+                    val (pa, pb) = paragraphs[block[t]]
+                    val callsCand = WORD.findAll(text.substring(pa, pb)).any { m ->
+                        val c = canon(m.value) ?: m.value
+                        c == cand || aliasOut[c] == cand
+                    }
+                    if (callsCand) continue
+                    val role = if (cand == HERO) heroRole else when (candG) { G.M -> Role.MALE; G.F -> Role.FEMALE; null -> null }
+                    for (i in spans) out[i] = out[i].copy(speaker = cand, role = role ?: out[i].role)
+                    lineCount[cand] = (lineCount[cand] ?: 0) + 1
+                }
             }
         }
 
