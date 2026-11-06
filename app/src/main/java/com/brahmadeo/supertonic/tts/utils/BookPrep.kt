@@ -236,7 +236,10 @@ object BookPrep {
      */
     fun fingerprints(context: Context, voicePath: String): Set<String> {
         val p = PunctuationPrefs
-        val base = settings(context, voicePath).filter { it.first != "качество звука" && it.first != "очистка звука" }
+        val all = settings(context, voicePath)
+        // the slow Pocket model came after 1.26: nothing made before was made with it
+        if (all.any { it.first == "модель Pocket" }) return setOf(fingerprint(context, voicePath))
+        val base = all.filter { it.first != "качество звука" && it.first != "очистка звука" }
         val i = base.indexOfFirst { it.first == "яркость" } + 1
         val old = base.map { it.second }.toMutableList().apply {
             addAll(i, listOf(p.shtormSteps.toString(), (p.shtormDenoise != p.DENOISE_OFF).toString()))
@@ -270,6 +273,8 @@ object BookPrep {
             "английские слова" to EnglishTranscriber.let { it.load(context); it.enabled }
         )
         if (p.shtormSteps != 1) list.add("качество звука" to p.shtormSteps)
+        if (AssetManager.engine(context) == AssetManager.ENGINE_SHTORM && AssetManager.shtormVariant(context) != AssetManager.VARIANT_FAST)
+            list.add("модель Pocket" to AssetManager.shtormVariant(context))
         if (p.shtormDenoise != p.DENOISE_OFF) list.add("очистка звука" to true)
         return list.map { (k, v) -> k to v.toString() }
     }

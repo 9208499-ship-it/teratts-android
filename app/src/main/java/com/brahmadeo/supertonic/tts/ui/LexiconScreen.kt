@@ -1078,7 +1078,43 @@ private fun EngineSection() {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         // Shtorm's precision: full (32 bits, 302 MB) or faster (8 bits, 76 MB); the other file is
         // downloaded on choosing it, and the unused one deleted
+        // which Pocket model: the fast one, or the slow one (ArtShtorm v2 «медленная»: another manner of
+        // speaking; downloaded on choosing it, the fast one stays)
+        var variant by remember { mutableStateOf(assets.shtormVariant(context)) }
         if (ready && engine == assets.ENGINE_SHTORM) {
+            Text(stringResource(AppR.string.shtorm_variant_title), style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp))
+            for ((v, label) in listOf(assets.VARIANT_FAST to stringResource(AppR.string.shtorm_variant_fast),
+                    assets.VARIANT_SLOW to stringResource(if (assets.shtormSlowReady(context)) AppR.string.shtorm_variant_slow
+                        else AppR.string.shtorm_variant_slow_download))) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp).clickable(enabled = progress == null) {
+                        if (variant == v) return@clickable
+                        error = null; progress = 0f
+                        scope.launch {
+                            try {
+                                assets.setShtormVariant(context, v) { x -> scope.launch { progress = x } }
+                                restart()
+                            } catch (ex: Exception) {
+                                error = context.getString(AppR.string.engine_download_failed, ex.message ?: "?")
+                            }
+                            variant = assets.shtormVariant(context)
+                            progress = null
+                        }
+                    }
+                ) {
+                    RadioButton(selected = variant == v, onClick = null)
+                    Text(label, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (variant == assets.VARIANT_FAST && assets.shtormSlowReady(context) && progress == null) {
+                TextButton(onClick = { assets.deleteShtormSlow(context); variant = assets.shtormVariant(context) }) {
+                    Text(stringResource(AppR.string.shtorm_variant_slow_delete, assets.shtormSlowSizeMb(context)))
+                }
+            }
+        }
+        if (ready && engine == assets.ENGINE_SHTORM && variant == assets.VARIANT_FAST) {
             Text(stringResource(AppR.string.shtorm_precision_title), style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 8.dp))
             for ((p, label) in listOf("32" to stringResource(AppR.string.shtorm_precision_32), "8" to stringResource(AppR.string.shtorm_precision_8))) {

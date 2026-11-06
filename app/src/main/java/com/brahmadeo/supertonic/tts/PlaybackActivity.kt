@@ -364,6 +364,10 @@ class PlaybackActivity : ComponentActivity() {
                     voiceNow = File(currentVoicePath.substringBefore(';')).name,
                     onVoicePick = { v -> useVoice(v) },
                     onEngine = { e -> useEngine(e) },
+                    onPocketVariant = { v ->
+                        com.brahmadeo.supertonic.tts.utils.AssetManager.chooseShtormVariant(this@PlaybackActivity, v)
+                        try { startService(Intent(this@PlaybackActivity, PlaybackService::class.java).setAction("RESET_ENGINE")) } catch (_: Exception) { }
+                    },
                     onRoles = { on -> com.brahmadeo.supertonic.tts.utils.RolePrefs.setEnabled(this@PlaybackActivity, on); restartReading() },
                     onQuote = { i -> addQuote(i) },
                     onQuotes = { quotesOpenState.value = true },

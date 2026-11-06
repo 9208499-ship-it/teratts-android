@@ -216,7 +216,7 @@
     <string name="fast_cores_desc">Синтез на %1$d быстрых ядрах из %2$d вместо всех. На одних телефонах быстрее, на других медленнее — сравните скорость в уведомлении. Применяется со следующей фразы.</string>
     <string name="fast_cores_same">На этом устройстве не удалось выделить быстрые ядра — переключатель ничего не изменит.</string>
     <string name="keep_ready_title">Держать синтезатор наготове</string>
-    <string name="keep_ready_desc">Синтезатор всегда в памяти, с уведомлением «Работает…»: мгновенный старт. Выключено — через 3 минуты после чтения память освобождается. Включайте, только если при выключенном экране появляются паузы.</string>
+    <string name="keep_ready_desc">Синтезатор всегда в памяти, с уведомлением «Работает…»: мгновенный старт и надёжное чтение при выключенном экране на Huawei. Выключено — через 3 минуты после чтения память освобождается, процесс может закрыть система.</string>
     <string name="roles_title">Чтение по ролям</string>
     <string name="roles_desc">Встроенная читалка: авторский текст — голосом рассказчика, реплики мужчин и женщин — своими голосами. Пол определяется по авторским словам («сказал / сказала», «он / она») и по именам, которые книга сама подсказывает.</string>
     <string name="roles_characters_title">Свой голос каждому персонажу</string>
@@ -613,4 +613,11 @@
     <string name="update_beta_mark">(бета)</string>
     <string name="update_beta_title">Получать бета-версии</string>
     <string name="update_beta_desc">Предлагать и тестовые версии, ещё не проверенные. Обычно выключено</string>
+    <string name="shtorm_variant_title">Модель Pocket</string>
+    <string name="shtorm_variant_fast">Быстрая (Shtorm v2 fast)</string>
+    <string name="shtorm_variant_slow">Медленная (Shtorm v2 slow) — другая манера чтения</string>
+    <string name="shtorm_variant_slow_download">Медленная (Shtorm v2 slow) — скачать ≈ 212 МБ</string>
+    <string name="shtorm_variant_slow_delete">Удалить медленную модель (%1$d МБ)</string>
+    <string name="shtorm_variant_fast_short">Быстрая</string>
+    <string name="shtorm_variant_slow_short">Медленная</string>
 </resources>

@@ -94,7 +94,9 @@ internal fun ReadingSheet(
     fontSize: Float = BookFont.DEFAULT,
     onFontSize: (Float) -> Unit = {},
     fontFamily: String = BookFont.SERIF,
-    onFontFamily: (String) -> Unit = {}
+    onFontFamily: (String) -> Unit = {},
+    // Pocket: the fast or the slow model
+    onPocketVariant: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val assets = com.brahmadeo.supertonic.tts.utils.AssetManager
@@ -274,6 +276,20 @@ internal fun ReadingSheet(
                     },
                     label = { Text(stringResource(AppR.string.sheet_engine_pocket)) }
                 )
+            }
+            // Pocket's two models (when both are here): fast or slow — the reading goes on in the chosen one
+            if (engine == assets.ENGINE_SHTORM && remember { assets.shtormSlowReady(context) }) {
+                var variant by remember { mutableStateOf(assets.shtormVariant(context)) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    FilterChip(selected = variant == assets.VARIANT_FAST, onClick = {
+                        if (variant != assets.VARIANT_FAST) { variant = assets.VARIANT_FAST; onPocketVariant(variant) }
+                    }, label = { Text(stringResource(AppR.string.shtorm_variant_fast_short)) })
+                    FilterChip(selected = variant == assets.VARIANT_SLOW, onClick = {
+                        if (variant != assets.VARIANT_SLOW) { variant = assets.VARIANT_SLOW; onPocketVariant(variant) }
+                    }, label = { Text(stringResource(AppR.string.shtorm_variant_slow_short)) })
+                }
             }
 
             // ---- the roles ----

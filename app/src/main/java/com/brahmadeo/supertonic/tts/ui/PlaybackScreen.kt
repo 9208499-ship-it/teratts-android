@@ -228,6 +228,7 @@ fun PlaybackScreen(
     onVoicePick: (String) -> Unit = {},
     onEngine: (String) -> Unit = {},
     onRoles: (Boolean) -> Unit = {},
+    onPocketVariant: (String) -> Unit = {},
     // ★: phrase i to the book's quotes; the list of the quotes
     onQuote: ((Int) -> Unit)? = null,
     onQuotes: (() -> Unit)? = null,
@@ -435,6 +436,7 @@ fun PlaybackScreen(
             onVoicePick = onVoicePick,
             onEngine = onEngine,
             onRoles = onRoles,
+            onPocketVariant = onPocketVariant,
             onQuote = onQuote?.let { q -> { q(if (speaking || followVoice) index else topVisibleChunk()) } },
             onQuotes = onQuotes,
             onToc = onToc,

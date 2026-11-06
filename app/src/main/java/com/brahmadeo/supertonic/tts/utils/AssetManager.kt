@@ -305,11 +305,83 @@ object AssetManager {
             target.delete()
             throw java.io.IOException("файл очистки звука повреждён, попробуйте ещё раз")
         }
+        if (slowDir(context).isDirectory) denoiserInto(context, slowDir(context))
         onProgress(1f)
     }
 
     fun shtormSizeMb(context: Context): Long =
-        (shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
+        ((shtormDir(context).listFiles()?.sumOf { it.length() } ?: 0L) +
+            (slowDir(context).listFiles()?.sumOf { it.length() } ?: 0L)) / (1024 * 1024)
+
+    // ---- Shtorm v2 «медленная» (ArtShtorm, the same Pocket TTS, trained otherwise): a second set of
+    // the same files, in a folder of its own; exported like the fast one (PocketTTS.cpp export_onnx.py),
+    // its main graph in 8 bits. Chosen by a switch; the fast one stays. ----
+    const val VARIANT_FAST = "fast"
+    const val VARIANT_SLOW = "slow"
+    private const val KEY_VARIANT = "shtorm_variant"
+    private const val SHTORM_SLOW_URL = "https://github.com/9208499-ship-it/teratts-android/releases/download/models-shtorm-v2slow"
+    private val SHTORM_SLOW_FILES = listOf(
+        Remote("flow_lm_flow.onnx", 39081891L, "ff895203a7b767502e5723b6098602ca585669102944c6ea9f9e5314b8603f76"),
+        Remote("flow_lm_main_int8.onnx", 75865936L, "24bdb2a0670fe3f1173da430d70c5c4e8fca0235af946ece5a205dbcbf2dbbf3"),
+        Remote("mimi_decoder.onnx", 41412445L, "630a404ea8bec42bc7f89524a7200acac139483f0745d0ff67840faa770dfb5c"),
+        Remote("mimi_encoder.onnx", 39283560L, "03e06d074bcc6a2d478fbd2e4463bcda982a58815f86990657c5b140c0f7bf85"),
+        Remote("text_conditioner.onnx", 16388310L, "de9504fb2923c374c68b473350960990d2637c89ffdf2842cb7dfdc99fa35b65"),
+        Remote("tokenizer.model", 316834L, "95d0b8e61951408c7744e09fb5b87ff8e318612b0c8168cc593ea0a812f34f81")
+    )
+    private fun slowDir(context: Context) = File(context.filesDir, "$MODEL_VERSION/shtorm_slow")
+
+    fun shtormSlowReady(context: Context) = SHTORM_SLOW_FILES.all { File(slowDir(context), it.name).length() == it.size }
+
+    /** Which Pocket model speaks: the fast one, or the slow one when chosen and downloaded. */
+    fun shtormVariant(context: Context): String {
+        val v = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_VARIANT, VARIANT_FAST)
+        return if (v == VARIANT_SLOW && shtormSlowReady(context)) VARIANT_SLOW else VARIANT_FAST
+    }
+
+    /** Chooses the variant (the slow one downloaded first if it is not here, ≈212 MB, checked). */
+    suspend fun setShtormVariant(context: Context, variant: String, onProgress: (Float) -> Unit) {
+        if (variant == VARIANT_SLOW) downloadShtormSlow(context, onProgress)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_VARIANT, if (variant == VARIANT_SLOW) VARIANT_SLOW else VARIANT_FAST).apply()
+    }
+
+    /** The choice alone (both are here already): for the reading sheet. */
+    fun chooseShtormVariant(context: Context, variant: String) {
+        if (variant == VARIANT_SLOW && !shtormSlowReady(context)) return
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_VARIANT, variant).apply()
+    }
+
+    suspend fun downloadShtormSlow(context: Context, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        val dir = slowDir(context).apply { mkdirs() }
+        val missing = SHTORM_SLOW_FILES.filter { File(dir, it.name).length() != it.size }
+        val total = missing.sumOf { it.size }.coerceAtLeast(1L)
+        var done = 0L
+        for (f in missing) {
+            val target = File(dir, f.name)
+            fetchCounting("$SHTORM_SLOW_URL/${f.name}", target) { n -> onProgress(((done + n).toFloat() / total).coerceIn(0f, 0.99f)) }
+            if (target.length() != f.size || sha256(target) != f.sha) {
+                target.delete()
+                throw java.io.IOException("файл ${f.name} повреждён, попробуйте ещё раз")
+            }
+            done += f.size
+        }
+        onProgress(1f)
+    }
+
+    /** Frees the slow model's space; the fast one speaks again. */
+    fun deleteShtormSlow(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_VARIANT, VARIANT_FAST).apply()
+        slowDir(context).deleteRecursively()
+    }
+
+    fun shtormSlowSizeMb(context: Context): Long = (slowDir(context).listFiles()?.sumOf { it.length() } ?: 0L) / (1024 * 1024)
+
+    /** The cleaning network sits next to the fast model; the slow one's engine looks for it in its own folder. */
+    private fun denoiserInto(context: Context, dir: File) {
+        val src = File(shtormDir(context), DENOISER.name)
+        val dst = File(dir, DENOISER.name)
+        if (src.length() == DENOISER.size && dst.length() != DENOISER.size) try { src.copyTo(dst, overwrite = true) } catch (e: Exception) { }
+    }
 
     /** The model chosen in Settings (TeraTTS unless Shtorm is chosen and downloaded). */
     fun engine(context: Context): String {
@@ -335,7 +407,10 @@ object AssetManager {
         val shtorm = engine(context) == ENGINE_SHTORM
         // the teacher has its own loudness and tempo: what was learned for the fast sampler must not
         // be applied to it (ka3ak78: «звук идёт волной» with the teacher on)
-        engineKey = if (shtorm) "shtorm:" else if (teacherOn(context)) "tt:" else ""
+        // (the slow Pocket model: its own tempo and loudness of each voice, its own folder)
+        val slow = shtorm && shtormVariant(context) == VARIANT_SLOW
+        engineKey = if (slow) "shtorm2:" else if (shtorm) "shtorm:" else if (teacherOn(context)) "tt:" else ""
+        if (slow) { denoiserInto(context, slowDir(context)); return slowDir(context) }
         return if (shtorm) shtormDir(context) else File(context.filesDir, "$MODEL_VERSION/onnx")
     }
 
@@ -399,6 +474,7 @@ object AssetManager {
     fun deleteShtorm(context: Context) {
         setEngine(context, ENGINE_TERA)
         shtormDir(context).deleteRecursively()
+        deleteShtormSlow(context)
     }
 
     private fun sha256(file: File): String {

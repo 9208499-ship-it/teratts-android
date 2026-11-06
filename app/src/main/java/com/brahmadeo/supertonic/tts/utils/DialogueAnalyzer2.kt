@@ -194,10 +194,10 @@ object DialogueAnalyzer2 {
                 forms += if (female == true) listOf(st + "и", st + "ью") else listOf(st + "я", st + "ю", st + "ем", st + "е")
             }
             n.last() !in vowels -> {
-                // fleeting vowel: Павел → Павла
+                // fleeting vowel: Павел → Павла, Ленивец → Ленивца («Где-то там…»: "Ленивца" was a character of its own)
                 val stems = linkedSetOf(n)
-                if (n.length > 4 && Regex(".*[^аеиоуыэюя](ел|ек|ок)$").matches(n)) stems += n.dropLast(2) + n.last()
-                for (st in stems) forms += listOf(st + "а", st + "у", st + "ом", st + "е")
+                if (n.length > 4 && Regex(".*[^аеиоуыэюя](ел|ек|ок|ец)$").matches(n)) stems += n.dropLast(2) + n.last()
+                for (st in stems) forms += listOf(st + "а", st + "у", st + (if (st.last() in "цжшчщ") "ем" else "ом"), st + "е")
             }
         }
         return forms
@@ -214,6 +214,20 @@ object DialogueAnalyzer2 {
     /** A dash opening a line inside a paragraph: after ":" or the end of a sentence, before a capital or a quote. */
     private val INNER_DASH_LINE = Regex("""(?<=[:.!?…])[\s\u00A0\u202F]+[—–―][\s\u00A0\u202F]+(?=[«"„“\p{Lu}])""")
     private val WORD = Regex("""\d+[‑-][а-яё]+|[А-Яа-яЁё]+""")
+    /** After a speech verb, the one spoken to: "сказал я Ленивцу", "ответила ему Маше", "обратился к Глену". */
+    private val TO_WHOM = Regex("""(?:[Сс]казал|[Оо]тветил|[Сс]просил|[Бб]росил|[Кк]рикнул|[Пп]рошептал|[Шш]епнул|[Пп]редложил|[Оо]братил(?:ся|ась))(?:а|и)?\s+(?:я\s+|он\s+|она\s+|мы\s+)?(?:к\s+)?([А-ЯЁ][а-яё]+)""")
+    /** "начал свой рассказ", "стала рассказывать": the speaker's next line is the story going on. */
+    private val STORY_START = Regex("""(?iu)(?:начал[аи]?|продолжил[аи]?)\s+(?:сво[йёю]\s+)?(?:рассказ|повествование|историю)|(?:стал[аи]?|начал[аи]?)\s+рассказывать""")
+    /** «…» introduced as someone's thought or voice: "мысль выглянувшего Ленивца:", "голос Глена:". */
+    private val THOUGHT_OF = Regex("""(?:[Мм]ысл[ьи]|[Гг]олос|[Сс]лова|[Оо]твет|[Вв]опрос)(?:\s+[а-яё\-]+){0,8}\s+([А-ЯЁ][а-яё]+)\s*:\s*$""")
+    /** Titles that stand before a name ("начальник Рафт"): such a speaker is that person in the chapter. */
+    private val TITLES = setOf("начальник", "командир", "капитан", "ректор", "маг", "страж", "стражник", "лейтенант", "генерал",
+        "сержант", "офицер", "профессор", "доктор", "учитель", "мастер", "старейшина", "вождь", "король", "королева", "князь",
+        "княгиня", "граф", "графиня", "барон", "баронесса", "лорд", "леди", "господин", "госпожа", "майор", "полковник", "адмирал")
+    /** A speaker telling his name: «Зовут меня Лениавес», «меня зовут Глен», «моё имя — Рох». */
+    private val SELF_NAME = Regex("""(?iu:меня\s+зовут|зовут\s+меня|мо[её]\s+имя|имя\s+мо[её])\s*[-–—:,]?\s*([А-ЯЁ][а-яё]+)""")
+    /** «Я — Глен» at the start of a line (only a name already known counts). */
+    private val SELF_I_AM = Regex("""^\s*[-–—]?\s*(?:Я|я)\s*[-–—]\s*([А-ЯЁ][а-яё]+)""")
 
     /** First-person narration: "— … — уточнил я". The hero speaks in the narrator's voice. */
     const val HERO = "Я"
@@ -438,6 +452,15 @@ object DialogueAnalyzer2 {
                     (isProper(it) || it.lowercase() in diminutives || diminutives.values.any { v -> it.lowercase() in v })
             }
         }
+        /** "сказал я Ленивцу:", "обратился к Глену:" — the one spoken to, named after the speech verb. */
+        fun toWhom(par: String): String? {
+            for (m in TO_WHOM.findAll(par)) {
+                val w = m.groupValues[1]
+                val c = canon(w) ?: continue
+                if (c != HERO && (oblique(w) || m.value.contains(" к "))) return c
+            }
+            return null
+        }
         fun addresseeIn(speech: String, authorWords: List<String>): String? {
             val sw = WORD.findAll(speech).map { it.value }.toList()
             // "Девочка моя, …", "Мам, …", "…, доченька, …" — family words, any case of letters
@@ -487,6 +510,8 @@ object DialogueAnalyzer2 {
         var pendingQuoteSpeaker: String? = null        // set by "В голове прозвучало:" for the next «…»
         var pendingFromIntro = false                   // true only for an introduction ending with ":"
         var lastAddressee: String? = null              // who the previous line spoke to — likely answers next
+        var introAddr: String? = null                  // "…и сказал Ленивцу:" — the one the next line is said to
+        var goOnNext: String? = null                   // "…и начал свой рассказ." — who speaks on in the next line
         var heroAttributed = 0                         // "сказал я": the book is told in the first person
         var systemSeen = false
         var lastQuoteBody = ""                         // the book has a voice in the head
@@ -558,12 +583,14 @@ object DialogueAnalyzer2 {
                 pendingQuoteSpeaker = introSpeaker(text.substring(p.start, p.end))
                 pendingFromIntro = pendingQuoteSpeaker != null
                 introHint = if (pendingQuoteSpeaker == null) speakerIntro(text.substring(p.start, p.end), ::oblique, ::wordGender) else null
+                // "…и сказал Ленивцу:" — the one spoken to (he answers the line that follows)
+                introAddr = if (text.substring(p.start, p.end).trimEnd().endsWith(":")) toWhom(text.substring(p.start, p.end)) else null
                 // first person outside quoted thoughts (another character's «мне…» is not the narrator)
                 if (firstPersonSingular.containsMatchIn(text.substring(p.start, p.end).replace(Regex("""«[^»]*»|"[^"]*"|„[^“]*“"""), " ")) ||
                     Regex("""(?iu)(^|[^а-яё])(решил|подумал|ответил|спросил|сказал)([^а-яё]|$)""").containsMatchIn(text.substring(p.start, minOf(p.end, p.start + 40)))) heroSeenAt = pi
                 // "Она кивнула." right before a bare line: the line is usually hers
                 beatHint = if (introHint == null && pendingQuoteSpeaker == null) actionBeat(text.substring(p.start, p.end)) else null
-                if (p.end - p.start > 300) { run.clear(); genderRun.clear(); lastAddressee = null }
+                if (p.end - p.start > 300) { run.clear(); genderRun.clear(); lastAddressee = null; goOnNext = null }
                 out.addAll(p.spans(null, null, Manner.NORMAL))
                 continue
             }
@@ -573,6 +600,10 @@ object DialogueAnalyzer2 {
             // a beat yields to a name in the line: "Андрей кивнул. — Что скажешь, Андрей?" is not his
             val beat = beatHint?.takeIf { !p.quoted && addresseeIn(p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }, emptyList()) == null }
             val introBefore = introHint
+            val introAddrBefore = introAddr
+            introAddr = null
+            val storyBy = goOnNext
+            goOnNext = null
             val fromIntro = if (authors.isEmpty()) introHint ?: beat else null
             val ownHint = authors.asSequence().map { (a, b) -> hintAt(words(text, a, b)) }
                 .firstOrNull { it.name != null || it.noun != null || it.hero || it.pronoun != null || it.verbGender != null }
@@ -606,7 +637,9 @@ object DialogueAnalyzer2 {
             val heroNear = heroAttributed > 0 && (HERO in run.takeLast(4) || pi - heroSeenAt <= 4)
             val addressee = if (forced == null) {
                 addresseeIn(speechText, authors.flatMap { (a, b) -> words(text, a, b) })
+                    ?: (if (authors.isEmpty()) introAddrBefore else null)
             } else null
+            var thoughtOwner: String? = null   // "мысль … Ленивца:" — named in the oblique case, yet the speaker
             if (forced != null) {
                 speaker = if (forced == FORCE_UNKNOWN) null else forced
                 gender = genderOf(speaker)
@@ -615,7 +648,13 @@ object DialogueAnalyzer2 {
                 // previous one ("В голове прозвучало:"), or recognisable by its content
                 val intro = authors.firstOrNull()?.let { (a, b) -> introSpeaker(text.substring(a, b)) }
                 val bySubject = h?.let { it.name ?: it.noun ?: if (it.hero) HERO else null }
-                speaker = intro ?: bySubject
+                // "пришла мысль выглянувшего из-за ноги Ленивца: «Хорошая еда»" — whose thought it is
+                val thoughtOf = authors.firstOrNull()?.let { (a, b) ->
+                    THOUGHT_OF.find(text.substring(a, b))?.groupValues?.get(1)?.let { w -> canon(w)?.takeIf { it != HERO && oblique(w) } }
+                }
+                thoughtOwner = thoughtOf
+                // a name as the subject ("— рапортовала Леита … в голосе …") is stronger than "a voice"
+                speaker = h?.name?.let { canon(it) ?: it }?.takeIf { authors.isNotEmpty() } ?: intro ?: thoughtOf ?: bySubject
                 if (speaker == null && authors.isEmpty() && fromIntro == null) {
                     val body = p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
                     speaker = when {
@@ -648,6 +687,14 @@ object DialogueAnalyzer2 {
                     (heroGender == null || heroGender == h.verbGender) &&
                     authors.none { (a, b) -> words(text, a, b).any { it.lowercase() in setOf("мне", "меня", "мной", "мною") } } &&
                     !subjectAfterVerb(authors.first().let { (a, b) -> words(text, a, b) })) {
+                    speaker = HERO; heroAttributed++
+                }
+                // «Интересно, я когда-нибудь смогу… – Но, посмотрев на девушку, понял: – Нет…» — a thought in the
+                // first person, its author words naming nobody else: the hero's (it went to an unknown man's voice)
+                if (speaker == null && authors.isNotEmpty() && heroAttributed > 0 && addressee != HERO &&
+                    (h == null || (h.name == null && h.noun == null && h.pronoun == null)) &&
+                    (h?.verbGender == null || heroGender == null || h.verbGender == heroGender) &&
+                    firstPersonSingular.containsMatchIn(p.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) })) {
                     speaker = HERO; heroAttributed++
                 }
                 pendingQuoteSpeaker = if (authors.isEmpty()) speaker else null
@@ -687,6 +734,8 @@ object DialogueAnalyzer2 {
                         // the one just spoken to answers ("— Ньютон, что ты выяснил? / — Да, Алексей, …, — перешёл на официальный тон")
                         val askedFits = lastAddressee?.takeIf { it != prev && it != HERO && (genderOf(it) == null || genderOf(it) == gender) }
                         speaker = when {
+                            // "…кивнул он и начал свой рассказ. / — Ну, … — Он немного помолчал." — his story goes on
+                            storyBy != null && (genderOf(storyBy) == null || genderOf(storyBy) == gender) -> storyBy
                             goesOn && prev != null && (genderOf(prev) == null || genderOf(prev) == gender) -> prev
                             askedFits != null -> askedFits
                             // turn-taking: "он" right after one man spoke is the other man
@@ -706,10 +755,13 @@ object DialogueAnalyzer2 {
                 // bare line (or author words that do not say who): the one just spoken to answers;
                 // otherwise the two people take turns
                 val asked = lastAddressee
+                if (storyBy != null && !samePerson(storyBy, addressee)) speaker = storyBy
                 // (not straight after the hero's own line: that is someone answering him, calling him by a
                 // name or "бабуль" the book has not tied to the hero)
                 val replyToHero = run.lastOrNull() == HERO && pi - lastSpeechPi == 1
-                if (addressee != null && addressee != HERO && heroNear && !replyToHero && (asked == null || pi - lastSpeechPi > 1)) {
+                if (speaker != null) {
+                    // his story goes on (set just above)
+                } else if (addressee != null && addressee != HERO && heroNear && !replyToHero && (asked == null || pi - lastSpeechPi > 1)) {
                     // a first-person book, the hero in the scene: "— Ньютон, что ты выяснил?",
                     // "— Ника, уведомляй меня" — the hero calls on someone (it went to whoever
                     // spoke before: a woman's voice for the hero's orders)
@@ -757,7 +809,7 @@ object DialogueAnalyzer2 {
                 // ("— вопрос, который я ожидал" is no "спросил я": only a verb right before "я" counts)
                 val named = attributed && ownHint != null && (ownHint.name != null || (ownHint.hero &&
                     authors.firstOrNull()?.let { (a, b) -> Regex("""^[\s,—–-]*\p{L}+(л|ла)\s+я(?!\p{L})""").containsMatchIn(text.substring(a, b)) } == true))
-                if (samePerson(speaker, addressee) && !named) {
+                if (samePerson(speaker, addressee) && !named && speaker != thoughtOwner) {
                     // "— Маша, иди сюда" cannot be Маша's own line
                     speaker = run.lastOrNull { !samePerson(it, addressee) }
                     gender = null
@@ -859,6 +911,13 @@ object DialogueAnalyzer2 {
             // "— Задачу принял, — уведомил Декстер. А вслед за ним отчитался и Ньютон:" — the next line is Ньютон's
             if (!p.quoted && authors.isNotEmpty() && text.substring(p.start, p.end).trimEnd().endsWith(":"))
                 introHint = speakerIntro(text.substring(authors.last().first, authors.last().second), ::oblique, ::wordGender)
+            // …and to whom the next line is said (after a «thought» too: "«Параноики живут дольше», – усмехнулся я
+            // и сказал Ленивцу:" — the next line is said to Ленивец, his answer after it is his)
+            if (authors.isNotEmpty() && text.substring(p.start, p.end).trimEnd().endsWith(":"))
+                introAddr = toWhom(text.substring(authors.last().first, authors.last().second))
+            // "— …, — кивнул он и начал свой рассказ." — the next line is his story going on
+            if (!p.quoted && speaker != null && speaker != HERO && authors.any { (a, b) -> STORY_START.containsMatchIn(text.substring(a, b)) })
+                goOnNext = speaker
         }
 
         // Not a first-person book: unattributed «…» thoughts are not "the hero-narrator's" —
@@ -951,6 +1010,35 @@ object DialogueAnalyzer2 {
         run {
             val merge = LinkedHashMap<String, String>()
             prior?.aliases?.forEach { (from, to) -> if (to != HERO && from in lineCount) merge[from] = to }
+            // one who tells his name: «Зовут меня Лениавес Рыжий», said by the one the hero calls
+            // Ленивец — one creature under two names, read in two voices («Где-то там…», tolyos).
+            // Kept for the whole book (the name he was called by speaks on in later chapters).
+            val introduced = LinkedHashMap<String, String>()
+            for (sp in out) {
+                val who = sp.speaker ?: continue
+                if (who == HERO || who == SYSTEM || sp.role == Role.NARRATOR || !who.first().isUpperCase()) continue
+                val speech = text.substring(sp.start, sp.end)
+                val n = SELF_NAME.find(speech)?.groupValues?.get(1)?.let { canon(it) ?: it }
+                    ?: SELF_I_AM.find(speech)?.groupValues?.get(1)?.let { canon(it) }
+                    ?: continue
+                if (n == who || n == HERO || n.length < 3 || n in notNames) continue
+                if (genderOf(n) != null && genderOf(who) != null && genderOf(n) != genderOf(who)) continue
+                if (n !in merge && n !in introduced) introduced[n] = who
+            }
+            for ((n, who) in introduced) if (merge[who] != n) merge[n] = who
+            // a title with a name after it ("начальник Рафт"): one person in this chapter, when it is
+            // the only name the title stands with here (only here: "командир" is another man elsewhere)
+            val local = HashSet<String>()
+            // (titles only, not kin: "мать Леиты" is her mother; the title and the name in the same case:
+            // "начальник Рафт", "начальника Рафта" — "начальник Флика" is Флик's chief)
+            for (t in lineCount.keys.filter { it in TITLES }) {
+                val names = Regex("(?<![А-Яа-яЁё])" + Regex.escape(t) + "([а-яё]{0,3})\\s+([А-ЯЁ][а-яё]+)", RegexOption.IGNORE_CASE)
+                    .findAll(text).mapNotNull { mm -> canon(mm.groupValues[2])?.takeIf { (mm.groupValues[1].isEmpty()) != oblique(mm.groupValues[2]) } }
+                    .filter { it != HERO }.toSet()
+                val to = names.singleOrNull() ?: continue
+                if (to !in lineCount || (genderOf(t) != null && genderOf(to) != null && genderOf(t) != genderOf(to))) continue
+                merge[t] = to; local += t
+            }
             val people = lineCount.keys.filter { it != HERO && it != SYSTEM && it.first().isUpperCase() && it.length >= 3 && it !in merge }
             for (a in people) for (b in people) {
                 if (a == b || a in merge || b in merge) continue
@@ -977,7 +1065,7 @@ object DialogueAnalyzer2 {
                 lineCount[to] = (lineCount[to] ?: 0) + (lineCount.remove(from) ?: 0)
                 val a = mannerCount.remove(from)
                 if (a != null) { val b = mannerCount.getOrPut(to) { IntArray(a.size) }; for (k in a.indices) b[k] += a[k] }
-                aliasOut[from] = to
+                if (from !in local) aliasOut[from] = to
             }
         }
 
@@ -1693,6 +1781,12 @@ object DialogueAnalyzer2 {
         // a line can also start inside a paragraph: "…и сказала: — Держи себя в руках!"
         // or "Гусеница помолчала. — Держи себя в руках, — сказала она."
         val inner = INNER_DASH_LINE.find(text.substring(start, end))
+        // «…, – отдал я распоряжение. И тут до меня дошло. – А можно ли …?» – спросил я у Искателя.
+        // — the dashes are inside the quote: the author's words put into it, not a new line (it went
+        // to nobody, and was read in another voice than the hero's)
+        val firstClose = if (text[s] in quotePairs) closeOf(text, s, end).takeIf { it > s } else null
+        if (inner != null && firstClose != null && start + inner.range.first > s && start + inner.range.first < firstClose)
+            return parseQuotes(text, start, end)
         if (inner != null) {
             val dashAt = start + inner.range.first + inner.value.indexOfFirst { it in dashes }
             val before = text.substring(start, dashAt)
@@ -1729,6 +1823,43 @@ object DialogueAnalyzer2 {
     /** Opening quote → its closing pair: «ёлочки», „лапки“, “English”, "straight". */
     private val quotePairs = mapOf('«' to '»', '„' to '“', '“' to '”', '"' to '"')
 
+    /**
+     * A quote with the author's words put into it by dashes: «Всё понятно, – отдал я распоряжение. –
+     * А можно ли…?» — the speech, the author's words, the speech again (as a dash line is cut).
+     */
+    private fun quoteInserts(text: String, a: Int, b: Int): List<Triple<Int, Int, Boolean>> {
+        val out = ArrayList<Triple<Int, Int, Boolean>>()
+        var speech = true
+        var pos = a
+        for (m in SPACED_DASH.findAll(text.substring(a, b))) {
+            val x = a + m.range.first
+            val y = a + m.range.last + 1
+            val last = text.substring(pos, x).trimEnd().lastOrNull()
+            val toggle = if (speech) last != null && last in ",.!?…:;" else last != null && last in ",.:"
+            if (toggle) { out.add(Triple(pos, x, speech)); out.add(Triple(x, y, false)); pos = y; speech = !speech }
+        }
+        if (out.isEmpty()) return listOf(Triple(a, b, true))
+        out.add(Triple(pos, b, speech))
+        return out
+    }
+
+    /**
+     * Where the quote opened at [i] closes (before [end]), or -1: quotes inside it counted —
+     * «… рубку «Драккара» и понять …» closes at the last », not after "Драккара".
+     */
+    private fun closeOf(text: String, i: Int, end: Int): Int {
+        val open = text[i]
+        val close = quotePairs[open] ?: return -1
+        if (open == close) return text.indexOf(close, i + 1).let { if (it < 0 || it >= end) -1 else it }
+        var depth = 0
+        for (k in i until end) {
+            if (text[k] == open) depth++
+            else if (text[k] == close) { depth--; if (depth == 0) return k }
+        }
+        // unbalanced: the first closing one, as before
+        return text.indexOf(close, i + 1).let { if (it < 0 || it >= end) -1 else it }
+    }
+
     private fun parseQuotes(text: String, start: Int, end: Int): Parsed {
         val pieces = ArrayList<Triple<Int, Int, Boolean>>()
         var pos = start
@@ -1737,7 +1868,7 @@ object DialogueAnalyzer2 {
         while (i < end) {
             val close = quotePairs[text[i]]
             if (close != null) {
-                val at = text.indexOf(close, i + 1).let { if (it < 0 || it >= end) -1 else it }
+                val at = closeOf(text, i, end)
                 if (at < 0) break
                 val before = text.substring(start, i).trimEnd()
                 // «Ты опоздал», – сказала она. «Опять». — the line goes on after the author words
@@ -1746,7 +1877,7 @@ object DialogueAnalyzer2 {
                     gap.trimStart(',', '.', '!', '?', '…', ' ').firstOrNull()?.let { it in dashes } == true
                 if (before.isEmpty() || before.endsWith(":") || continued) {
                     if (i > pos) pieces.add(Triple(pos, i, false))
-                    pieces.add(Triple(i, at + 1, true))
+                    pieces.addAll(quoteInserts(text, i, at + 1))
                     pos = at + 1
                     lastSpeechEnd = at + 1
                 }

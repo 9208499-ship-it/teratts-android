@@ -24,7 +24,7 @@ object BookRoster {
 
     /** Bumped when the analysis changes: an older roster is built again (1.6.7: one name per person). */
     // 3 (1.6.15): the hero's own name and first name + surname are one person
-    private const val VERSION = 4   // 1.26: one person under a short name ("Саша" = Александр), "Лев Николаевич Мышкин"
+    private const val VERSION = 5   // 1.27: a name told by its owner («Зовут меня Лениавес»), "Ленивца" = Ленивец
 
     /**
      * The roster of the book, built now if there is none (or waited for if it is being built):
