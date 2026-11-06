@@ -613,11 +613,11 @@
     <string name="update_beta_mark">(beta)</string>
     <string name="update_beta_title">Get beta versions</string>
     <string name="update_beta_desc">Offer test versions too, not yet checked. Usually off</string>
-    <string name="shtorm_variant_title">Pocket model</string>
-    <string name="shtorm_variant_fast">Fast (Shtorm v2 fast)</string>
-    <string name="shtorm_variant_slow">Slow (Shtorm v2 slow) — another manner of reading</string>
-    <string name="shtorm_variant_slow_download">Slow (Shtorm v2 slow) — download ≈ 212 MB</string>
+    <string name="shtorm_variant_title">Pocket model — not speed but delivery: choose by ear</string>
+    <string name="shtorm_variant_fast">Shtorm v2 fast — lively delivery, wider intonation</string>
+    <string name="shtorm_variant_slow">Shtorm v2 slow — calm delivery, freer pauses, even tone</string>
+    <string name="shtorm_variant_slow_download">Shtorm v2 slow — calm delivery, freer pauses (download ≈ 212 MB)</string>
     <string name="shtorm_variant_slow_delete">Delete the slow model (%1$d MB)</string>
-    <string name="shtorm_variant_fast_short">Fast</string>
-    <string name="shtorm_variant_slow_short">Slow</string>
+    <string name="shtorm_variant_fast_short">Lively</string>
+    <string name="shtorm_variant_slow_short">Calm</string>
 </resources>

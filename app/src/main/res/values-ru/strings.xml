@@ -613,11 +613,11 @@
     <string name="update_beta_mark">(бета)</string>
     <string name="update_beta_title">Получать бета-версии</string>
     <string name="update_beta_desc">Предлагать и тестовые версии, ещё не проверенные. Обычно выключено</string>
-    <string name="shtorm_variant_title">Модель Pocket</string>
-    <string name="shtorm_variant_fast">Быстрая (Shtorm v2 fast)</string>
-    <string name="shtorm_variant_slow">Медленная (Shtorm v2 slow) — другая манера чтения</string>
-    <string name="shtorm_variant_slow_download">Медленная (Shtorm v2 slow) — скачать ≈ 212 МБ</string>
+    <string name="shtorm_variant_title">Модель Pocket — не скорость, а подача: выберите на слух</string>
+    <string name="shtorm_variant_fast">Shtorm v2 fast — бодрая, живая подача, шире интонация</string>
+    <string name="shtorm_variant_slow">Shtorm v2 slow — спокойная подача, свободнее паузы, ровнее тон</string>
+    <string name="shtorm_variant_slow_download">Shtorm v2 slow — спокойная подача, свободнее паузы (скачать ≈ 212 МБ)</string>
     <string name="shtorm_variant_slow_delete">Удалить медленную модель (%1$d МБ)</string>
-    <string name="shtorm_variant_fast_short">Быстрая</string>
-    <string name="shtorm_variant_slow_short">Медленная</string>
+    <string name="shtorm_variant_fast_short">Бодрая</string>
+    <string name="shtorm_variant_slow_short">Спокойная</string>
 </resources>

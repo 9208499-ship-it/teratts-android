@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -52,7 +53,7 @@ fun UpdateDialogHost() {
             Column {
                 if (r.notes.isNotEmpty()) {
                     Text(r.notes, style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+                        modifier = Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()))
                 }
                 if (r.size > 0) Text(stringResource(AppR.string.update_size, (r.size / 1_048_576.0).toFloat()),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -64,27 +65,29 @@ fun UpdateDialogHost() {
                     modifier = Modifier.padding(top = 8.dp)) }
             }
         },
+        // all three buttons one under another, at the right (with a large font the two slots of the
+        // dialog laid them out apart, the last one cut off below the screen)
         confirmButton = {
-            if (apk != null) TextButton(onClick = { install() }) { Text(stringResource(AppR.string.update_install)) }
-            else TextButton(enabled = progress == null, onClick = {
-                error = null; progress = 0f
-                scope.launch {
-                    try {
-                        apk = Updater.download(context, r) { p -> progress = p }
-                        progress = null
-                        install()
-                    } catch (e: Exception) {
-                        progress = null
-                        error = context.getString(AppR.string.update_failed, e.message ?: "?")
+            Column(horizontalAlignment = Alignment.End) {
+                if (apk != null) TextButton(onClick = { install() }) { Text(stringResource(AppR.string.update_install)) }
+                else TextButton(enabled = progress == null, onClick = {
+                    error = null; progress = 0f
+                    scope.launch {
+                        try {
+                            apk = Updater.download(context, r) { p -> progress = p }
+                            progress = null
+                            install()
+                        } catch (e: Exception) {
+                            progress = null
+                            error = context.getString(AppR.string.update_failed, e.message ?: "?")
+                        }
                     }
-                }
-            }) { Text(stringResource(AppR.string.update_now)) }
-        },
-        dismissButton = {
-            if (progress == null) Column {
-                TextButton(onClick = { Updater.later(context) }) { Text(stringResource(AppR.string.update_later)) }
-                TextButton(onClick = { Updater.skip(context, r.version); Updater.found.value = null }) {
-                    Text(stringResource(AppR.string.update_skip))
+                }) { Text(stringResource(AppR.string.update_now)) }
+                if (progress == null) {
+                    TextButton(onClick = { Updater.later(context) }) { Text(stringResource(AppR.string.update_later)) }
+                    TextButton(onClick = { Updater.skip(context, r.version); Updater.found.value = null }) {
+                        Text(stringResource(AppR.string.update_skip))
+                    }
                 }
             }
         }
