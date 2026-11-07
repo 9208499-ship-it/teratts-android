@@ -221,7 +221,34 @@ object AccentDictionaryManager {
      * Safe to call multiple times: a parse already in progress isn't
      * restarted, and calls after a successful load are a fast-path no-op.
      */
+    /**
+     * Words the homograph resolver decides by the sentence (its own list, spelled with е): the
+     * dictionary leaves them alone. A fixed «с+ёстры» from it hid the word from the resolver —
+     * «красота сестры» was read «сёстры» (tolyos, 4PDA). A word the author wrote with ё
+     * («сёстры», «всё») is not in this list and keeps the dictionary's stress.
+     */
+    @Volatile private var homographs: Set<String> = emptySet()
+    @Volatile private var homographsAsked = false
+
+    private fun loadHomographs(context: Context) {
+        if (homographsAsked) return
+        homographsAsked = true
+        val app = context.applicationContext
+        Thread({
+            try {
+                val json = app.assets.open("homosolver/homodict.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val keys = HashSet<String>()
+                for (k in org.json.JSONObject(json).keys()) keys.add(k)
+                homographs = keys
+                Log.i(TAG, "homographs left to the resolver: ${keys.size}")
+            } catch (e: Exception) {
+                Log.w(TAG, "homographs: ${e.message}")
+            }
+        }, "AccentDict-Homo").start()
+    }
+
     fun load(context: Context) {
+        loadHomographs(context)
         if (isLoaded) return
         // Only the Silero dictionary is used now. An old one (Full, Standard…) left from earlier
         // versions put wrong stresses ("х+олста" for "холст+а") and one stress for both meanings
@@ -385,6 +412,7 @@ object AccentDictionaryManager {
         val bin = binaryDict
         val map = entries
         if (bin == null && map.isEmpty()) return text
+        val homo = homographs
 
         val matcher = wordPattern.matcher(text)
         val sb = StringBuffer()
@@ -393,6 +421,8 @@ object AccentDictionaryManager {
             // already stressed by the user (lexicon, a stress-marked book): keep as is
             if (original.indexOf('+') >= 0 || original.indexOf('\u0301') >= 0 || original.indexOf('\u0300') >= 0) continue
             val lower = original.lowercase()
+            // a homograph: its stress is chosen by the resolver from the sentence
+            if ((lang.isEmpty() || lang.startsWith("ru")) && lower in homo) continue
             // Look up in whichever backend is live. The .sacc reader takes
             // UTF-8 bytes; the JSON HashMap is keyed by the lowercased String.
             val dictHit = if (bin != null) {
