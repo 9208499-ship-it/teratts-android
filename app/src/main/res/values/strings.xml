@@ -174,7 +174,7 @@
     <string name="characters_title">Characters</string>
     <string name="characters_open">Characters of the book →</string>
     <string name="characters_empty">Open a book in the TeraTTS reader — its characters will appear here.</string>
-    <string name="characters_hint">Characters of the text open in the reader. Changes apply the next time reading starts. If one character goes by two names, merge them.</string>
+    <string name="characters_hint">Characters of the whole book, the ones speaking in the open text first. «auto»: the voice was chosen by the app and stays with the character to the end of the book; «common male / female»: no voice of their own (a minor one, or the free voices ran out). Changes apply the next time reading starts. If one character goes by two names, merge them.</string>
     <string name="characters_merged">Merged</string>
     <string name="characters_unmerge">Undo</string>
     <string name="characters_as_narrator">as narrator</string>
@@ -189,7 +189,7 @@
     <string name="roles_unknown_main">as the main character</string>
     <string name="characters_scope_book">Book: %1$s</string>
     <string name="characters_scope_global">Not from a book — shared settings</string>
-    <string name="roles_main_count">Own voices for the main characters: %1$d (others: shared male / female)</string>
+    <string name="roles_main_count">Own voices for the main characters: %1$d (others, and those left without a free voice: shared male / female)</string>
     <string name="speaker_who">Who says this?</string>
     <string name="speaker_unknown">Unknown</string>
     <string name="speaker_narrator">Not a line (narrator reads it)</string>
@@ -208,7 +208,7 @@
     <string name="roles_title">Reading by roles</string>
     <string name="roles_desc">Built-in reader: author text by the narrator, male and female lines in their own voices. Gender comes from the author words (said, he or she) and from names the book itself reveals.</string>
     <string name="roles_characters_title">A voice for every character</string>
-    <string name="roles_characters_desc">Characters (Peter, Lena, the old man, the computer…) get different voices automatically and keep them in every chapter. Their pace follows the text: old people slower, «blurted out» faster, «whispered» quieter. Off: voices by gender only.</string>
+    <string name="roles_characters_desc">Characters (Peter, Lena, the old man, the computer…) get different voices automatically and keep them to the end of the book: the more lines, the earlier one picks, favourite voices (rating below) first. Their pace follows the text: old people slower, «blurted out» faster, «whispered» quieter. Off: voices by gender only.</string>
     <string name="roles_narrator">Narrator</string>
     <string name="roles_narrator_main">as on the main screen</string>
     <string name="roles_male">Male lines</string>
@@ -639,4 +639,21 @@
     <string name="audio_folder_pick">Choose folder…</string>
     <string name="audio_folder_reset">Back to Music</string>
     <string name="audio_folder_desc">Where books saved to files go — any folder, the memory card too. Each book in a folder of its own name. While a book is being saved its folder is hidden («.Book title»): players do not see it half made. When the last chapter is written the folder is renamed — and the player finds the whole book</string>
+    <string name="characters_in_text">In this text</string>
+    <string name="characters_in_book">Other characters of the book</string>
+    <string name="characters_hero_short">main hero</string>
+    <string name="characters_heroine_short">main heroine</string>
+    <string name="characters_auto_fmt">%1$s · auto</string>
+    <string name="characters_common_male">common male</string>
+    <string name="characters_common_female">common female</string>
+    <string name="characters_common_unknown">as unknown lines</string>
+    <string name="characters_book_lines_fmt">in the book: %1$d</string>
+    <string name="roles_hero_m">Main hero</string>
+    <string name="roles_hero_f">Main heroine</string>
+    <string name="roles_hero_auto">by rating</string>
+    <string name="roles_hero_desc">The man and the woman with the most lines in the whole book. In a book told in the first person it may be «I»: his lines are read in this voice, the author’s text stays with the narrator.</string>
+    <string name="voice_rating_open">Voices’ rating for characters →</string>
+    <string name="voice_rating_title">Voices for characters</string>
+    <string name="voice_rating_desc">★ favourite: the characters with the most lines get them first. • normal. ⛔ never given to characters automatically (as the narrator or by hand it can be). Shtorm’s voices recorded by TeraTTS are ⛔ by default.</string>
+    <string name="voice_rating_done">Done</string>
 </resources>

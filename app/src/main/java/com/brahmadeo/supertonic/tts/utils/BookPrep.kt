@@ -275,6 +275,9 @@ object BookPrep {
         if (p.shtormSteps != 1) list.add("качество звука" to p.shtormSteps)
         if (AssetManager.engine(context) == AssetManager.ENGINE_SHTORM && AssetManager.shtormVariant(context) != AssetManager.VARIANT_FAST)
             list.add("модель Pocket" to AssetManager.shtormVariant(context))
+        // 1.34: the main hero's / heroine's voices (only when set: chapters made before stay good)
+        r.heroVoice(context, false).takeIf { it.isNotEmpty() }?.let { list.add("голос главного героя" to it) }
+        r.heroVoice(context, true).takeIf { it.isNotEmpty() }?.let { list.add("голос главной героини" to it) }
         if (p.shtormDenoise != p.DENOISE_OFF) list.add("очистка звука" to true)
         return list.map { (k, v) -> k to v.toString() }
     }

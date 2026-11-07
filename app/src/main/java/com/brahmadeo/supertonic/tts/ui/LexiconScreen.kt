@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
@@ -1603,6 +1604,9 @@ private fun RolesSection() {
     var female by remember { mutableStateOf(prefs.femaleVoice(context)) }
     var narrator by remember { mutableStateOf(prefs.narratorVoice(context)) }
     var unknown by remember { mutableStateOf(prefs.unknownVoice(context)) }
+    var heroM by remember { mutableStateOf(prefs.heroVoice(context, false)) }
+    var heroF by remember { mutableStateOf(prefs.heroVoice(context, true)) }
+    var rating by remember { mutableStateOf(false) }
     var mainCount by remember { mutableStateOf(prefs.mainCount(context).toFloat()) }
     var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
     var evenLoudness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceLoudness.enabled(context)) }
@@ -1648,10 +1652,27 @@ private fun RolesSection() {
             }
             RoleVoicePicker(stringResource(AppR.string.roles_narrator), narrator, voices,
                 mainLabel = stringResource(AppR.string.roles_narrator_main)) { narrator = it; prefs.setNarratorVoice(context, it) }
+            if (perCharacter) {
+                RoleVoicePicker(stringResource(AppR.string.roles_hero_m), heroM,
+                    voices.filter { com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(it) && !it.contains("whisper") },
+                    mainLabel = stringResource(AppR.string.roles_hero_auto)) { heroM = it; prefs.setHeroVoice(context, false, it) }
+                RoleVoicePicker(stringResource(AppR.string.roles_hero_f), heroF,
+                    voices.filter { com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(it) && !it.contains("whisper") },
+                    mainLabel = stringResource(AppR.string.roles_hero_auto)) { heroF = it; prefs.setHeroVoice(context, true, it) }
+                Text(stringResource(AppR.string.roles_hero_desc), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 2.dp))
+            }
             RoleVoicePicker(stringResource(AppR.string.roles_male), male, voices) { male = it; prefs.setMaleVoice(context, it) }
             RoleVoicePicker(stringResource(AppR.string.roles_female), female, voices) { female = it; prefs.setFemaleVoice(context, it) }
             RoleVoicePicker(stringResource(AppR.string.roles_unknown), unknown, voices,
                 mainLabel = stringResource(AppR.string.roles_unknown_main)) { unknown = it; prefs.setUnknownVoice(context, it) }
+            if (perCharacter) {
+                TextButton(onClick = { rating = true }, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(stringResource(AppR.string.voice_rating_open))
+                }
+                if (rating) VoiceRatingDialog(voices) { rating = false }
+            }
             TextButton(
                 onClick = {
                     context.startActivity(android.content.Intent(context, com.brahmadeo.supertonic.tts.CharactersActivity::class.java))
@@ -1660,6 +1681,72 @@ private fun RolesSection() {
             ) { Text(stringResource(AppR.string.characters_open)) }
         }
     }
+}
+
+/**
+ * The voices' rating for characters: ★ the favourite ones go to the characters with the most
+ * lines, ⛔ are never handed out automatically (still the narrator's or chosen by hand).
+ */
+@Composable
+private fun VoiceRatingDialog(voices: List<String>, onClose: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = com.brahmadeo.supertonic.tts.utils.RolePrefs
+    val cv = com.brahmadeo.supertonic.tts.utils.CharacterVoices
+    var tick by remember { mutableStateOf(0) }
+    val sample = stringResource(AppR.string.characters_sample)
+    // men, then women, then voices with no sex set (they are not handed out at all)
+    val list = remember(voices) {
+        voices.filter { !it.contains("whisper") }.sortedWith(compareBy(
+            { if (cv.isMaleVoice(it)) 0 else if (cv.isFemaleVoice(it)) 1 else 2 }, { cv.order(it) }, { it }))
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(stringResource(AppR.string.voice_rating_title)) },
+        text = {
+            Column {
+                Text(stringResource(AppR.string.voice_rating_desc), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).padding(top = 8.dp)) {
+                    items(list, key = { it }) { v ->
+                        val r = remember(v, tick) { prefs.rating(context, v) }
+                        val sex = when {
+                            cv.isMaleVoice(v) -> stringResource(AppR.string.characters_male)
+                            cv.isFemaleVoice(v) -> stringResource(AppR.string.characters_female)
+                            else -> "?"
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            IconButton(onClick = {
+                                val path = prefs.pathOf(context, v) ?: return@IconButton
+                                val speed = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE).getFloat("last_speed", 1f)
+                                context.startService(android.content.Intent(context, com.brahmadeo.supertonic.tts.service.PlaybackService::class.java)
+                                    .setAction(com.brahmadeo.supertonic.tts.service.PlaybackService.ACTION_PREVIEW)
+                                    .putExtra("text", sample).putExtra("voice", path).putExtra("speed", speed))
+                            }) {
+                                Icon(androidx.compose.material.icons.Icons.Default.PlayArrow,
+                                    contentDescription = stringResource(AppR.string.characters_listen))
+                            }
+                            Text("${com.brahmadeo.supertonic.tts.utils.VoiceLibrary.label(v)} · $sex",
+                                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            for ((value, mark) in listOf(prefs.FAVOURITE to "★", prefs.NORMAL to "•", prefs.NOT_FOR_CHARACTERS to "⛔")) {
+                                val on = r == value
+                                TextButton(
+                                    onClick = { prefs.setRating(context, v, value); tick++ },
+                                    colors = if (on) androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    else androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+                                    modifier = Modifier.width(40.dp)
+                                ) { Text(mark) }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text(stringResource(AppR.string.voice_rating_done)) } }
+    )
 }
 
 @Composable

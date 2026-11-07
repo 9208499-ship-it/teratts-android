@@ -186,7 +186,7 @@
     <string name="characters_title">Персонажи</string>
     <string name="characters_open">Персонажи книги →</string>
     <string name="characters_empty">Откройте книгу в читалке TeraTTS — здесь появятся её персонажи.</string>
-    <string name="characters_hint">Персонажи текста, открытого в читалке. Изменения действуют со следующего запуска чтения. Если один персонаж назван по‑разному («искин» и «896‑й»), объедините их.</string>
+    <string name="characters_hint">Персонажи всей книги: сначала те, кто говорит в открытом тексте. «авто» — голос выбран приложением и закреплён за персонажем до конца книги; «общий мужской / женский» — свой голос не достался (второстепенный или свободные голоса кончились). Изменения действуют со следующего запуска чтения. Если один персонаж назван по‑разному («искин» и «896‑й»), объедините их.</string>
     <string name="characters_merged">Объединённые</string>
     <string name="characters_unmerge">Отменить</string>
     <string name="characters_as_narrator">как рассказчик</string>
@@ -201,7 +201,7 @@
     <string name="roles_unknown_main">как главный герой</string>
     <string name="characters_scope_book">Книга: %1$s</string>
     <string name="characters_scope_global">Текст не из книги — общие настройки</string>
-    <string name="roles_main_count">Свои голоса — главным героям: %1$d (остальные — общим мужским / женским)</string>
+    <string name="roles_main_count">Свои голоса — главным героям: %1$d (остальные и те, кому не хватило свободного голоса, — общим мужским / женским)</string>
     <string name="speaker_who">Кто говорит?</string>
     <string name="speaker_unknown">Неизвестный</string>
     <string name="speaker_narrator">Это не реплика (читает рассказчик)</string>
@@ -220,7 +220,7 @@
     <string name="roles_title">Чтение по ролям</string>
     <string name="roles_desc">Встроенная читалка: авторский текст — голосом рассказчика, реплики мужчин и женщин — своими голосами. Пол определяется по авторским словам («сказал / сказала», «он / она») и по именам, которые книга сама подсказывает.</string>
     <string name="roles_characters_title">Свой голос каждому персонажу</string>
-    <string name="roles_characters_desc">Персонажи (Пётр, Лена, старик, компьютер…) автоматически получают разные голоса и сохраняют их во всех главах. Темп — по тексту: старики медленнее, «выпалил» — быстрее, «прошептал» — тише. Выключено — голоса только по полу.</string>
+    <string name="roles_characters_desc">Персонажи (Пётр, Лена, старик, компьютер…) автоматически получают разные голоса и сохраняют их до конца книги: у кого больше реплик — тот раньше выбирает, любимые голоса (рейтинг ниже) — первыми. Темп — по тексту: старики медленнее, «выпалил» — быстрее, «прошептал» — тише. Выключено — голоса только по полу.</string>
     <string name="roles_narrator">Рассказчик</string>
     <string name="roles_narrator_main">как на главном экране</string>
     <string name="roles_male">Мужские реплики</string>
@@ -639,4 +639,21 @@
     <string name="audio_folder_pick">Выбрать папку…</string>
     <string name="audio_folder_reset">Вернуть Music</string>
     <string name="audio_folder_desc">Куда сохраняются книги «в файл» — можно выбрать любую папку, в том числе на карте памяти. Каждая книга — в папке со своим названием. Пока книга сохраняется, её папка скрыта («.Название книги»): плееры не видят недописанное. Когда записана последняя глава, папка переименовывается — и книга появляется в плеере целиком</string>
+    <string name="characters_in_text">В этом тексте</string>
+    <string name="characters_in_book">Остальные персонажи книги</string>
+    <string name="characters_hero_short">главный герой</string>
+    <string name="characters_heroine_short">главная героиня</string>
+    <string name="characters_auto_fmt">%1$s · авто</string>
+    <string name="characters_common_male">общий мужской</string>
+    <string name="characters_common_female">общий женский</string>
+    <string name="characters_common_unknown">как неопознанные</string>
+    <string name="characters_book_lines_fmt">в книге: %1$d</string>
+    <string name="roles_hero_m">Главный герой</string>
+    <string name="roles_hero_f">Главная героиня</string>
+    <string name="roles_hero_auto">по рейтингу</string>
+    <string name="roles_hero_desc">Мужчина и женщина с наибольшим числом реплик во всей книге. В книге от первого лица это может быть «Я» — тогда этим голосом звучат его реплики, авторский текст остаётся у рассказчика.</string>
+    <string name="voice_rating_open">Рейтинг голосов для персонажей →</string>
+    <string name="voice_rating_title">Голоса для персонажей</string>
+    <string name="voice_rating_desc">★ — любимые: их первыми получают персонажи с наибольшим числом реплик. • — обычные. ⛔ — не давать персонажам автоматически (рассказчиком и вручную — можно). Голоса Шторма, записанные TeraTTS, по умолчанию ⛔.</string>
+    <string name="voice_rating_done">Готово</string>
 </resources>

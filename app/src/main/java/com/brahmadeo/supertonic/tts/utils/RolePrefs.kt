@@ -14,6 +14,9 @@ object RolePrefs {
     private const val KEY_UNKNOWN = "roles_unknown_voice"
     private const val KEY_MAIN_COUNT = "roles_main_count"
     private const val KEY_HIDDEN = "hidden_voices"
+    private const val KEY_HERO_M = "roles_hero_voice"
+    private const val KEY_HERO_F = "roles_heroine_voice"
+    private const val RATING_PREFS = "TeraVoiceRating"
 
     /**
      * Only this many main characters (most lines in the book) get their own voices. With the
@@ -42,6 +45,37 @@ object RolePrefs {
 
     fun setCharactersEnabled(context: Context, on: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CHARACTERS, on).apply()
+
+    /**
+     * The voice for the main hero / heroine (the man / the woman with the most lines in the book;
+     * in a book told in the first person it may be «Я»); "" = by the voices' rating, as any other.
+     */
+    fun heroVoice(context: Context, female: Boolean): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(if (female) KEY_HERO_F else KEY_HERO_M, "") ?: ""
+
+    fun setHeroVoice(context: Context, female: Boolean, file: String) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(if (female) KEY_HERO_F else KEY_HERO_M, file).apply()
+
+    /**
+     * How a voice is handed to characters: [FAVOURITE] first (the more lines a character has, the
+     * higher the voice), [NORMAL], or [NOT_FOR_CHARACTERS] — never given automatically (it can still
+     * be the narrator's or chosen by hand). Shtorm's bundled recordings (made by TeraTTS, flat and
+     * synthetic in Shtorm) are not for characters until rated otherwise.
+     */
+    const val FAVOURITE = 1
+    const val NORMAL = 0
+    const val NOT_FOR_CHARACTERS = -1
+
+    fun rating(context: Context, file: String): Int {
+        val p = context.getSharedPreferences(RATING_PREFS, Context.MODE_PRIVATE)
+        return if (p.contains(file)) p.getInt(file, NORMAL) else if (ShtormVoices.bundled(file)) NOT_FOR_CHARACTERS else NORMAL
+    }
+
+    fun setRating(context: Context, file: String, r: Int) =
+        context.getSharedPreferences(RATING_PREFS, Context.MODE_PRIVATE).edit().putInt(file, r.coerceIn(-1, 1)).apply()
+
+    /** All ratings at once (for handing out many voices). */
+    fun ratings(context: Context, files: Collection<String>): Map<String, Int> = files.associateWith { rating(context, it) }
 
     /** Narrator voice file; "" = the main voice chosen on the main screen. */
     fun narratorVoice(context: Context): String =
@@ -108,6 +142,25 @@ object RolePrefs {
     /** Absolute style path for a voice file (in the running model's form, see [forEngine]), or null if it is not installed. */
     fun pathOf(context: Context, file: String): String? =
         File(voicesDir(context), forEngine(context, file)).takeIf { it.exists() }?.absolutePath
+
+    /**
+     * A voice for a common role (male, female, unknown lines, the hero): [file] as the model has it
+     * ([forEngine]) — but if it was set for the other model (or is the default) and here it is a voice
+     * not for characters (Shtorm's ru_m5.wav made by TeraTTS), another of its sex, the best rated.
+     */
+    fun forRole(context: Context, file: String): String {
+        if (file.isEmpty()) return file
+        val v = forEngine(context, file)
+        if (v == file || rating(context, v) != NOT_FOR_CHARACTERS) return v
+        VoiceGender.load(context)
+        val female = CharacterVoices.isFemaleVoice(v)
+        val male = CharacterVoices.isMaleVoice(v)
+        return availableVoices(context)
+            .filter { !it.contains("whisper") && rating(context, it) != NOT_FOR_CHARACTERS &&
+                ((female && CharacterVoices.isFemaleVoice(it)) || (male && CharacterVoices.isMaleVoice(it))) }
+            .sortedWith(compareBy({ -rating(context, it) }, { CharacterVoices.order(it) }, { it }))
+            .firstOrNull() ?: v
+    }
 
     /**
      * [file] as the chosen model has it (ru_m5.json ↔ ru_m5.wav). A voice the model has not got, or

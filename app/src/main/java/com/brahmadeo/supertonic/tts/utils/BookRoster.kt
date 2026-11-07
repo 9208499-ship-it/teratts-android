@@ -15,7 +15,9 @@ import kotlinx.coroutines.launch
 object BookRoster {
     /** [aliases]: one person under two names, found in the whole book ("Сноук" → "Лорк", the hero's own name → "Я"). */
     class Roster(val genders: Map<String, DialogueAnalyzer2.Role>, val ranking: List<String>,
-                 val aliases: Map<String, String> = emptyMap())
+                 val aliases: Map<String, String> = emptyMap(),
+                 /** lines of each character in the whole book (rosters built before 1.34 have none) */
+                 val lines: Map<String, Int> = emptyMap())
 
     private fun file(context: Context, scope: String) =
         File(context.filesDir, "rosters/" + Integer.toHexString(scope.hashCode()) + ".json")
@@ -63,7 +65,10 @@ object BookRoster {
             val al = o.optJSONObject("aliases")
             val aliases = HashMap<String, String>()
             if (al != null) for (k in al.keys()) aliases[k] = al.getString(k)
-            Roster(genders, (0 until r.length()).map { r.getString(it) }, aliases)
+            val ln = o.optJSONObject("lines")
+            val lines = HashMap<String, Int>()
+            if (ln != null) for (k in ln.keys()) lines[k] = ln.optInt(k, 0)
+            Roster(genders, (0 until r.length()).map { r.getString(it) }, aliases, lines)
         } catch (e: Exception) {
             null
         }
@@ -88,11 +93,13 @@ object BookRoster {
             }
             val ranking = JSONArray()
             result.characters.forEach { ranking.put(it.name) }
+            val lines = JSONObject()
+            result.characters.forEach { lines.put(it.name, it.lines) }
             val aliases = JSONObject()
             result.aliases.forEach { (k, v) -> aliases.put(k, v) }
             val f = file(context, scope)
             f.parentFile?.mkdirs()
-            f.writeText(JSONObject().put("v", VERSION).put("genders", genders).put("ranking", ranking).put("aliases", aliases).toString())
+            f.writeText(JSONObject().put("v", VERSION).put("genders", genders).put("ranking", ranking).put("aliases", aliases).put("lines", lines).toString())
             BookSession.log(context, "roster: ${result.characters.size} characters: " +
                 result.characters.take(8).joinToString { "${it.name}(${it.lines})" } + "; одно лицо: " + result.aliases)
         } catch (e: Exception) {

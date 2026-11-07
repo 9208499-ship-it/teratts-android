@@ -6,9 +6,7 @@ import android.content.Context
  * Voices, paces and merges of characters, kept PER BOOK ([scope] = the book's file
  * name, see BookSession.scopeFor; "" = text not from a book). A voice is assigned
  * once and remembered, so Пётр sounds the same in every chapter — and a Пётр in
- * another book gets his own. Main characters (most lines) pick first; Russian
- * voices, then TeraTTS's multilingual English ones, then Supertonic's; whispers
- * and the narrator's voice are not handed out automatically.
+ * another book gets his own. Who gets which voice is decided in [RoleCast].
  */
 object CharacterVoices {
     const val GLOBAL = ""
@@ -38,41 +36,16 @@ object CharacterVoices {
         else -> 3
     }
 
-    /** Voice file for [name] (assigning a free one the first time), or null if the gender is unknown. */
-    fun voiceFor(
-        context: Context, name: String, role: DialogueAnalyzer2.Role, available: List<String>,
-        genderDefault: String, narrator: String, scope: String = GLOBAL,
-        // the common voices for minor and unknown speakers: a named character must not have
-        // one of them, or a passer-by sounds exactly like him (and he like "anyone")
-        reserved: Set<String> = emptySet()
-    ): String? {
-        val p = prefs(context, PREFS, scope)
-        p.getString(name, null)?.let { stored ->
-            // an automatic voice of the wrong gender (the gender became known later) is reassigned
-            val wrongGender = (role == DialogueAnalyzer2.Role.FEMALE && isMale(stored)) ||
-                (role == DialogueAnalyzer2.Role.MALE && isFemale(stored))
-            // an automatic voice that turned out to be the narrator's (the main voice) is reassigned too
-            val manual = isManual(context, name, scope)
-            if (stored in available && ((!wrongGender && stored != narrator && stored !in reserved) || manual)) return stored
-            p.edit().remove(name).apply()
-        }
-        val pool = available.filter {
-            when (role) {
-                DialogueAnalyzer2.Role.MALE -> isMale(it)
-                DialogueAnalyzer2.Role.FEMALE -> isFemale(it)
-                else -> false
-            } && !it.contains("whisper") && it != narrator && it !in reserved
-        }.sortedWith(compareBy({ rank(it) }, { it }))
-        if (pool.isEmpty()) return null
-        val ordered = (listOf(genderDefault).filter { it in pool } + pool).distinct()
-        val usedList = p.all.values.filterIsInstance<String>()
-        val used = usedList.toSet()
-        // all taken (more characters than voices): the voice given to the fewest so far
-        val pick = ordered.firstOrNull { it !in used }
-            ?: ordered.minByOrNull { v -> usedList.count { it == v } } ?: ordered[Math.floorMod(name.hashCode(), ordered.size)]
-        p.edit().putString(name, pick).apply()
-        return pick
-    }
+    /** The order of the voices within one rating: own ones, Russian, TeraTTS's English, Supertonic's. */
+    fun order(v: String) = rank(v)
+
+    /** A voice handed out automatically (see RoleCast): remembered for the book. */
+    fun store(context: Context, name: String, voice: String, scope: String = GLOBAL) =
+        prefs(context, PREFS, scope).edit().putString(name, voice).apply()
+
+    /** An automatic voice that may not stay (wrong sex, taken by a common role, not for characters). */
+    fun forget(context: Context, name: String, scope: String = GLOBAL) =
+        prefs(context, PREFS, scope).edit().remove(name).apply()
 
     fun isFemaleVoice(v: String) = isFemale(v)
     fun isMaleVoice(v: String) = isMale(v)
@@ -81,7 +54,8 @@ object CharacterVoices {
     fun alternative(context: Context, avoid: String, female: Boolean): String? =
         RolePrefs.availableVoices(context)
             .filter { (if (female) isFemale(it) else isMale(it)) && !it.contains("whisper") && it != avoid }
-            .sortedWith(compareBy({ rank(it) }, { it }))
+            // the best rated; a voice not for characters only if there is no other
+            .sortedWith(compareBy({ -RolePrefs.rating(context, it) }, { rank(it) }, { it }))
             .firstOrNull()
 
     /** The voice set for [name] (by hand or assigned earlier), or null for "automatic". */
