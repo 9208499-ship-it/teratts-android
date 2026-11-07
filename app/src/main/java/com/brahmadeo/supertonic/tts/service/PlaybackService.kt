@@ -1989,7 +1989,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).edit().putString("last_text", prepared)
                 .putLong("last_text_time", System.currentTimeMillis()).apply()
             notifyListenerTextChanged()
-            synthesizeAndPlay(prepared, lang, stylePath, liveSpeed, steps, RESUME_INDEX)
+            // the next chapter, reached by reading to the end of this one: from its start. It used to
+            // go on where it had once been left — chapter 5 begun by chance, back to chapter 4, and
+            // at the end of chapter 4 the reading jumped to the middle of chapter 5 (tolyos, 4PDA)
+            getSharedPreferences(POSITIONS_PREFS, MODE_PRIVATE).edit()
+                .remove(positionKey(prepared)).remove(positionKey(prepared) + "_t").apply()
+            synthesizeAndPlay(prepared, lang, stylePath, liveSpeed, steps, 0)
         }
     }
 
