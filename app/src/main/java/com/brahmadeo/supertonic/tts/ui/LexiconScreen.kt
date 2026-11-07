@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import kotlinx.coroutines.launch
@@ -232,8 +233,10 @@ fun LexiconScreen(
             }
           }
           "roles" -> { item { RolesSection() } }
-          "prep" -> { item { PrepSection() } }
+          "prep" -> { item { PrepSection() }; item { AudioFolderRow() } }
+          "look" -> { item { AppThemeSection() } }
           "perf" -> {
+            item { LibraryFirstRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
             item { SpeedTestRow() }
@@ -413,6 +416,8 @@ private fun settingsPages() = listOf(
         androidx.compose.material.icons.Icons.Default.People),
     SettingsPage("prep", stringResource(AppR.string.settings_prep), stringResource(AppR.string.settings_prep_desc),
         androidx.compose.material.icons.Icons.Default.BatteryChargingFull),
+    SettingsPage("look", stringResource(AppR.string.settings_look), stringResource(AppR.string.settings_look_desc),
+        androidx.compose.material.icons.Icons.Default.Palette),
     SettingsPage("perf", stringResource(AppR.string.settings_perf), stringResource(AppR.string.settings_perf_desc),
         androidx.compose.material.icons.Icons.Default.Speed),
     SettingsPage("about", stringResource(AppR.string.settings_about), stringResource(AppR.string.settings_about_desc),
@@ -1501,6 +1506,66 @@ private fun EnglishWordsRow() {
             on = v
             com.brahmadeo.supertonic.tts.utils.EnglishTranscriber.setEnabled(context, v)
         }
+    )
+}
+
+/**
+ * Where saved audiobooks go: Music/Supertonic Audio, or a folder of the user's own (any storage:
+ * the memory card too); a book being saved stays in a hidden folder until it is complete.
+ */
+@Composable
+private fun AudioFolderRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val af = com.brahmadeo.supertonic.tts.utils.AudioFolder
+    var label by remember { mutableStateOf(af.label(context)) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()
+    ) { uri -> if (uri != null) { af.set(context, uri); label = af.label(context) } }
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(stringResource(AppR.string.audio_folder_title), style = MaterialTheme.typography.titleSmall)
+        Text(label?.let { stringResource(AppR.string.audio_folder_own, it) } ?: stringResource(AppR.string.audio_folder_music),
+            style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(AppR.string.audio_folder_desc), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row {
+            TextButton(onClick = { pick.launch(null) }) { Text(stringResource(AppR.string.audio_folder_pick)) }
+            if (label != null) TextButton(onClick = { af.clear(context); label = null }) { Text(stringResource(AppR.string.audio_folder_reset)) }
+        }
+    }
+}
+
+/** The app's colours (AppTheme): their kind, and dark or light. */
+@Composable
+private fun AppThemeSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val t = com.brahmadeo.supertonic.tts.ui.theme.AppTheme
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(stringResource(AppR.string.theme_title), style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+            for ((v, label) in listOf(t.AUTO to AppR.string.theme_auto, t.BROWN to AppR.string.theme_brown, t.INDIGO to AppR.string.theme_indigo))
+                FilterChip(selected = t.style.value == v, onClick = { t.setStyle(context, v) }, label = { Text(stringResource(label)) })
+        }
+        Text(stringResource(AppR.string.theme_auto_hint), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(AppR.string.theme_mode_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
+            for ((v, label) in listOf(t.MODE_SYSTEM to AppR.string.theme_mode_system, t.MODE_DARK to AppR.string.theme_mode_dark, t.MODE_LIGHT to AppR.string.theme_mode_light))
+                FilterChip(selected = t.mode.value == v, onClick = { t.setMode(context, v) }, label = { Text(stringResource(label)) })
+        }
+    }
+}
+
+/** At start: the library only, not the last book (time for the engine to load on a slow phone: pallado, 4PDA). */
+@Composable
+private fun LibraryFirstRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = context.getSharedPreferences("SupertonicPrefs", android.content.Context.MODE_PRIVATE)
+    var on by remember { mutableStateOf(prefs.getBoolean("start_in_library", false)) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.start_library_title),
+        description = stringResource(AppR.string.start_library_desc),
+        checked = on,
+        onToggle = { v -> on = v; prefs.edit().putBoolean("start_in_library", v).apply() }
     )
 }
 

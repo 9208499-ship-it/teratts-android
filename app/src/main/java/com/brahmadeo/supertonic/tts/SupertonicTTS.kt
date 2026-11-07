@@ -127,6 +127,9 @@ object SupertonicTTS {
         // the threads made while loading (ONNX Runtime's workers) and this one: the system is told
         // how fast they must be (ADPF), so it may raise the clock of the cores they run on
         if (nativePtr != 0L) openHint((taskIds() - before + tid).toIntArray())
+        // ONNX Runtime's workers (made just now, at the audio priority): lowered while a book is prepared
+        workerTids = (taskIds() - before).toIntArray()
+        calm = null
         val success = nativePtr != 0L
         if (success) {
             cachedSampleRate = getSampleRate(nativePtr)
@@ -251,15 +254,21 @@ object SupertonicTTS {
             // it is not pushed aside on the few cores Huawei leaves to the app with the screen off
             val me = android.os.Process.myTid()
             val oldPriority = try { android.os.Process.getThreadPriority(me) } catch (e: Exception) { null }
-            try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) } catch (e: Exception) { }
-            hintAddThread(me)
+            // a book prepared or an audiobook saved ahead of time: no one is listening, no hurry — the
+            // engine works below everything else on the phone (it took the audio priority there too, the
+            // phone slowed down and heated: dullish, 4PDA); while reading — the audio priority again
+            val calmNow = com.brahmadeo.supertonic.tts.utils.BookPrep.making || com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere
+            setCalm(calmNow)
+            try { android.os.Process.setThreadPriority(if (calmNow) CALM_PRIORITY else android.os.Process.THREAD_PRIORITY_AUDIO) } catch (e: Exception) { }
+            if (!calmNow) hintAddThread(me)
             val t0 = System.nanoTime()
             val data = try {
                 synthesize(nativePtr, text, lang, voice, speed, bufferDuration, steps, gain)
             } finally {
                 oldPriority?.let { p -> try { android.os.Process.setThreadPriority(p) } catch (e: Exception) { } }
             }
-            reportHint(data.size / 2f / cachedSampleRate.coerceAtLeast(1), System.nanoTime() - t0)
+            // (no hurry asked of the system while preparing: it would raise the cores' clock — the heat)
+            if (!calmNow) reportHint(data.size / 2f / cachedSampleRate.coerceAtLeast(1), System.nanoTime() - t0)
             return if (data.isNotEmpty()) data else null
         } catch (e: Exception) {
             Log.e("SupertonicTTS", "Native synthesis exception: ${e.message}")
@@ -353,6 +362,26 @@ object SupertonicTTS {
     @Volatile var appContext: android.content.Context? = null
     private var hint: Any? = null              // PerformanceHintManager.Session
     private val hintTids = java.util.TreeSet<Int>()
+
+    /** ONNX Runtime's worker threads (made at the engine's start). */
+    @Volatile private var workerTids = IntArray(0)
+    /** Are they lowered now (null: as made, at the audio priority)? */
+    @Volatile private var calm: Boolean? = null
+    /**
+     * Below the phone's own work (0) and above the background group (10, which would put them on the
+     * slow cores only): with nothing else to do the phone gives them all it has, yet anything else —
+     * the screen, the console, another app — goes first.
+     */
+    private const val CALM_PRIORITY = 5
+
+    /** The workers lowered (preparing) or back at the audio priority (reading). */
+    private fun setCalm(on: Boolean) {
+        if (calm == on) return
+        calm = on
+        val p = if (on) CALM_PRIORITY else android.os.Process.THREAD_PRIORITY_AUDIO
+        for (t in workerTids) try { android.os.Process.setThreadPriority(t, p) } catch (_: Exception) { }
+        Log.i("SupertonicTTS", "engine threads (${workerTids.size}): " + if (on) "calm ($p) — preparing" else "audio priority — reading")
+    }
 
     private fun taskIds(): Set<Int> =
         java.io.File("/proc/self/task").list()?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()

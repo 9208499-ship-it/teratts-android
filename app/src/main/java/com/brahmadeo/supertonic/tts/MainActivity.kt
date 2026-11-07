@@ -240,7 +240,9 @@ class MainActivity : ComponentActivity() {
         // (it is «Вставить текст» in the library now)
         if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN && AssetManager.isReady(this)) {
             openLibraryHome()
-            if (!getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getString("last_text", "").isNullOrEmpty()) {
+            val sp = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE)
+            // (or the library alone, if so chosen: «Открывать с библиотеки»)
+            if (!sp.getBoolean("start_in_library", false) && !sp.getString("last_text", "").isNullOrEmpty()) {
                 startActivity(Intent(this, PlaybackActivity::class.java)
                     .putExtra("is_resume", true)
                     .putExtra("no_autoplay", true))

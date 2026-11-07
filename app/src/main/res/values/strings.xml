@@ -620,4 +620,23 @@
     <string name="shtorm_variant_slow_delete">Delete the slow model (%1$d MB)</string>
     <string name="shtorm_variant_fast_short">Lively</string>
     <string name="shtorm_variant_slow_short">Calm</string>
+    <string name="settings_look">Appearance</string>
+    <string name="settings_look_desc">App colours: warm brown, indigo or from the wallpaper; dark or light</string>
+    <string name="theme_title">App colours</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_brown">Warm brown</string>
+    <string name="theme_indigo">Indigo</string>
+    <string name="theme_auto_hint">«Auto» — as before: from the wallpaper (Android 12+) or by the chosen voice</string>
+    <string name="theme_mode_title">Dark or light</string>
+    <string name="theme_mode_system">As the system</string>
+    <string name="theme_mode_dark">Dark</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="start_library_title">Start with the library</string>
+    <string name="start_library_desc">At start — the library only, not the last book: the synthesizer loads while you choose (noticeable on slow phones)</string>
+    <string name="audio_folder_title">Folder for audiobooks</string>
+    <string name="audio_folder_music">Now: Music/Supertonic Audio</string>
+    <string name="audio_folder_own">Now: %1$s</string>
+    <string name="audio_folder_pick">Choose folder…</string>
+    <string name="audio_folder_reset">Back to Music</string>
+    <string name="audio_folder_desc">Where books saved to files go — any folder, the memory card too. Each book in a folder of its own name. While a book is being saved its folder is hidden («.Book title»): players do not see it half made. When the last chapter is written the folder is renamed — and the player finds the whole book</string>
 </resources>

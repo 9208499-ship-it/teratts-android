@@ -1414,6 +1414,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
         synthesisJob = serviceScope.launch(Dispatchers.IO) {
             try {
+                // (this pool thread may have been given the audio priority by an earlier reading)
+                try { android.os.Process.setThreadPriority(5) } catch (_: Throwable) { }
                 engineReady?.join()
                 prepareBook()
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2084,6 +2086,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     private suspend fun exportText(text: String, lang: String, stylePath: String, speed: Float, steps: Int,
                                    relDir: String, baseName: String,
                                    tags: com.brahmadeo.supertonic.tts.utils.Mp4Tags.Tags? = null,
+                                   hidden: Boolean = false,
                                    progress: suspend (Int, Int) -> Unit): String? {
         val sentences = textNormalizer.splitIntoSentences(text, lang)
         if (sentences.isEmpty()) { Log.w(TAG, "Export: No sentences found"); return null }
@@ -2119,11 +2122,27 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             if (!writer.finish()) return null
             // chapter title, book, author, track number and the cover — players show them
             if (tags != null && made.extension == "m4a") com.brahmadeo.supertonic.tts.utils.Mp4Tags.write(made, tags)
-            return com.brahmadeo.supertonic.tts.utils.AudioPublisher.publish(this, made, relDir, baseName + "." + made.extension)
+            return saveOut(made, relDir, baseName + "." + made.extension, hidden)
         } finally {
             made.delete()
         }
     }
+
+    // ---- where saved audio goes: the user's own folder (AudioFolder), else Music/Supertonic Audio ----
+    private fun ownFolder() = com.brahmadeo.supertonic.tts.utils.AudioFolder.tree(this) != null
+
+    /** [made] saved as [name]: into the user's folder (the book's hidden one while [hidden]) or into Music/[relDir]. */
+    private fun saveOut(made: File, relDir: String, name: String, hidden: Boolean): String? =
+        if (ownFolder()) com.brahmadeo.supertonic.tts.utils.AudioFolder.publish(this, made, relDir.substringAfterLast('/'), name, hidden)
+        else com.brahmadeo.supertonic.tts.utils.AudioPublisher.publish(this, made, relDir, name)
+
+    private fun savedAlready(relDir: String, name: String): Boolean =
+        if (ownFolder()) com.brahmadeo.supertonic.tts.utils.AudioFolder.exists(this, relDir.substringAfterLast('/'), name)
+        else com.brahmadeo.supertonic.tts.utils.AudioPublisher.exists(this, relDir, name)
+
+    private fun deleteSaved(relDir: String, name: String) =
+        if (ownFolder()) com.brahmadeo.supertonic.tts.utils.AudioFolder.delete(this, relDir.substringAfterLast('/'), name)
+        else com.brahmadeo.supertonic.tts.utils.AudioPublisher.delete(this, relDir, name)
 
     /** Stops whatever is going on and takes the engine for saving; [body] runs in the background. */
     private fun runExport(body: suspend kotlinx.coroutines.CoroutineScope.() -> Pair<Boolean, String>) {
@@ -2232,7 +2251,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             }
             val publisher = com.brahmadeo.supertonic.tts.utils.AudioPublisher
             val relDir = publisher.relDirOf(outputDir)
-            val shownDir = "${android.os.Environment.DIRECTORY_MUSIC}/$relDir"
+            val shownDir = if (ownFolder()) com.brahmadeo.supertonic.tts.utils.AudioFolder.shown(this@PlaybackService, relDir.substringAfterLast('/'))
+                else "${android.os.Environment.DIRECTORY_MUSIC}/$relDir"
             val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this@PlaybackService)
             if (chapters.isEmpty()) return@runExport false to shownDir
             val digits = maxOf(2, chapters.size.toString().length)
@@ -2252,8 +2272,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val k = chapters.indexOfFirst { it.index == onlyChapter }
                 if (k < 0) return@runExport false to shownDir
                 val name = fileName(k)
-                publisher.delete(this@PlaybackService, relDir, "$name.m4a")
-                publisher.delete(this@PlaybackService, relDir, "$name.wav")
+                deleteSaved(relDir, "$name.m4a")
+                deleteSaved(relDir, "$name.wav")
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
                 val shown = exportText(chapters[k].text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(s, n) }
@@ -2265,18 +2285,22 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             for ((k, c) in chapters.withIndex()) {
                 if (!isActive || SupertonicTTS.isCancelled()) { all = false; break }
                 val name = fileName(k)
-                if (publisher.exists(this@PlaybackService, relDir, "$name.m4a") ||
-                    publisher.exists(this@PlaybackService, relDir, "$name.wav")) {
+                if (savedAlready(relDir, "$name.m4a") || savedAlready(relDir, "$name.wav")) {
                     saved++
                     continue
                 }
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
-                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
+                // (in the user's folder: into the book's hidden folder until the whole book is there)
+                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name, tagsFor(k), hidden = true) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(k * 1000 + s * 1000 / maxOf(n, 1), chapters.size * 1000) }
                 }
                 if (shown != null) { saved++; job.chapterDone(this@PlaybackService, saved) }
                 else { all = false; if (!isActive || SupertonicTTS.isCancelled()) break }
             }
+            // the whole book is there: its hidden folder becomes the book's own — players see it complete
+            if (all && saved > 0 && ownFolder() &&
+                !com.brahmadeo.supertonic.tts.utils.AudioFolder.finish(this@PlaybackService, relDir.substringAfterLast('/')))
+                Log.w(TAG, "Export: the book's folder could not be renamed")
             if (resumed && all && saved > 0) job.notifyDone(this@PlaybackService, shownDir)
             (all && saved > 0) to shownDir
         }

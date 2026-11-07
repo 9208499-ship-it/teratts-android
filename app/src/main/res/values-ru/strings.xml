@@ -466,7 +466,7 @@
     <string name="library_paste_text">Вставить текст</string>
     <string name="book_open_failed">Книгу открыть не удалось</string>
     <string name="settings_prep">Аудио заранее</string>
-    <string name="settings_prep_desc">Озвучивать открытую книгу заранее, на зарядке — потом она играет как обычный плеер</string>
+    <string name="settings_prep_desc">Озвучивать открытую книгу заранее, на зарядке — потом она играет как обычный плеер. Папка для аудиокниг</string>
     <string name="prep_title">Готовить аудио открытой книги заранее</string>
     <string name="prep_desc">Главы от текущей и дальше озвучиваются в фоне тем же голосом и с теми же ролями, что при чтении. Готовая глава играет из файла: батарея почти не тратится, пауз не бывает. Сменили голос, модель, роли или словарь — глава читается вживую и готовится заново.</string>
     <string name="prep_mode_charging">Только на зарядке</string>
@@ -620,4 +620,23 @@
     <string name="shtorm_variant_slow_delete">Удалить медленную модель (%1$d МБ)</string>
     <string name="shtorm_variant_fast_short">Бодрая</string>
     <string name="shtorm_variant_slow_short">Спокойная</string>
+    <string name="settings_look">Оформление</string>
+    <string name="settings_look_desc">Цвета программы: тёплая коричневая, индиго или по обоям; тёмная или светлая</string>
+    <string name="theme_title">Цвета программы</string>
+    <string name="theme_auto">Авто</string>
+    <string name="theme_brown">Тёплая коричневая</string>
+    <string name="theme_indigo">Индиго</string>
+    <string name="theme_auto_hint">«Авто» — как раньше: по цветам обоев (Android 12+) или по выбранному голосу</string>
+    <string name="theme_mode_title">Тёмная или светлая</string>
+    <string name="theme_mode_system">Как в системе</string>
+    <string name="theme_mode_dark">Тёмная</string>
+    <string name="theme_mode_light">Светлая</string>
+    <string name="start_library_title">Открывать с библиотеки</string>
+    <string name="start_library_desc">При запуске — только библиотека, без последней книги: пока выбираете, синтезатор успевает загрузиться (на слабых телефонах это заметно)</string>
+    <string name="audio_folder_title">Папка для аудиокниг</string>
+    <string name="audio_folder_music">Сейчас: Music/Supertonic Audio</string>
+    <string name="audio_folder_own">Сейчас: %1$s</string>
+    <string name="audio_folder_pick">Выбрать папку…</string>
+    <string name="audio_folder_reset">Вернуть Music</string>
+    <string name="audio_folder_desc">Куда сохраняются книги «в файл» — можно выбрать любую папку, в том числе на карте памяти. Каждая книга — в папке со своим названием. Пока книга сохраняется, её папка скрыта («.Название книги»): плееры не видят недописанное. Когда записана последняя глава, папка переименовывается — и книга появляется в плеере целиком</string>
 </resources>

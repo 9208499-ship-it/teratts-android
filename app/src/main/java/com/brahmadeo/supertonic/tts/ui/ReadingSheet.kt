@@ -297,6 +297,15 @@ internal fun ReadingSheet(
                 Text(stringResource(AppR.string.roles_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Switch(checked = roles, onCheckedChange = { roles = it; onRoles(it) })
             }
+            // ---- the background music (when music is chosen in the settings): on / off at hand ----
+            val music = com.brahmadeo.supertonic.tts.utils.BackgroundMusic
+            if (remember { music.track(context) != null }) {
+                var musicOn by remember { mutableStateOf(music.enabled(context)) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text(stringResource(AppR.string.music_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Switch(checked = musicOn, onCheckedChange = { musicOn = it; music.setEnabled(context, it) })
+                }
+            }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
