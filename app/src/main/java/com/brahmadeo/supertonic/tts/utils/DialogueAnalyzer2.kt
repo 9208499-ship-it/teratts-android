@@ -300,8 +300,17 @@ object DialogueAnalyzer2 {
         "Привет", "Пока", "Товарищи", "Друзья", "Ребята", "Господа", "Дамы", "Мама", "Папа", "Сынок", "Дочка"
     )
 
+    /**
+     * Role nouns that speak: the ones below and the book's own (a race, a kind of creature —
+     * «ответил корнол», «спросил оборотень»: found in the text, see [bookNouns]).
+     */
+    private val speakerNouns: Map<String, G> get() = nounsTL.get() ?: BASE_NOUNS
+    private val nounsTL = ThreadLocal<Map<String, G>>()
+    /** The book's own speaker nouns of this analysis (not [BASE_NOUNS]). */
+    private val ownNounsTL = ThreadLocal<Set<String>>()
+
     /** Role nouns that speak, with grammatical gender (the voice follows it). */
-    private val speakerNouns: Map<String, G> = mapOf(
+    private val BASE_NOUNS: Map<String, G> = mapOf(
         "старик" to G.M, "старуха" to G.F, "мальчик" to G.M, "девочка" to G.F, "девушка" to G.F,
         "женщина" to G.F, "мужчина" to G.M, "парень" to G.M, "юноша" to G.M, "ребёнок" to G.M,
         "капитан" to G.M, "доктор" to G.M, "врач" to G.M, "солдат" to G.M, "командир" to G.M,
@@ -350,7 +359,77 @@ object DialogueAnalyzer2 {
         properTL.set(proper)
         // stems of those names: "Анита" seen only at sentence starts, but "Аните", "Аниту" inside them
         stemTL.set(proper.filter { it.length >= 4 }.flatMap { listOf(it.dropLast(1), it.dropLast(2)) }.toHashSet())
-        try { return analyzeImpl(text, prior) } finally { properTL.remove(); stemTL.remove() }
+        // the book's own speaker nouns: found in this text, and the whole book's (a chapter may show
+        // «ответил корнол» once — the book shows it forty times)
+        val own = HashMap(bookNouns(text))
+        prior?.genders?.forEach { (n, r) ->
+            if (n.length >= 4 && n[0].isLowerCase() && n !in BASE_NOUNS && n !in own)
+                when (r) { Role.MALE -> own[n] = G.M; Role.FEMALE -> own[n] = G.F; else -> {} }
+        }
+        nounsTL.set(if (own.isEmpty()) BASE_NOUNS else BASE_NOUNS + own)
+        ownNounsTL.set(own.keys)
+        try { return analyzeImpl(text, prior) } finally { properTL.remove(); stemTL.remove(); nounsTL.remove(); ownNounsTL.remove() }
+    }
+
+    /** The stems a noun's case forms are built on: "корнол", "оборотен" and "оборотн" (оборотня), "старец"/"старц". */
+    private fun stemsOf(w: String): List<String> {
+        val stem = if (w.last() in "аяьй") w.dropLast(1) else w
+        val out = arrayListOf(stem)
+        // a vowel that drops out: оборотень — оборотня, старец — старца, огонёк — огонька
+        if (stem.length >= 4 && stem[stem.length - 2] in "еоё" && stem.last() !in "аеёиоуыэюя")
+            out.add(stem.dropLast(2) + stem.last())
+        return out
+    }
+
+    /** "ответил корнол", "спросила эльфийка": a speech verb and the one who speaks. */
+    private val NOUN_AFTER_VERB = Regex("""(?<![а-яё])(сказал|ответил|спросил|проговорил|прошептал|пробормотал|буркнул|заметил|""" +
+        """воскликнул|добавил|пояснил|уточнил|возразил|согласился|согласилась|хмыкнул|продолжил|поинтересовался|поинтересовалась|""" +
+        """отозвался|отозвалась|подтвердил|сообщил|протянул|объяснил|предложил|прошипел|рявкнул|крикнул|закричал|""" +
+        """усмехнулся|усмехнулась|вздохнул|кивнул|прокомментировал|предупредил|откликнулся|откликнулась|заявил|""" +
+        """проворчал|огрызнулся|огрызнулась|ухмыльнулся|ухмыльнулась|улыбнулся|улыбнулась|рассмеялся|рассмеялась|""" +
+        """фыркнул|потребовал|напомнил|признался|призналась|удивился|удивилась|откликнулся|констатировал|прорычал|""" +
+        """прохрипел|простонал|прокричал|выкрикнул|произн[её]с|произнесла)(а)?\s+([а-яё]{4,})(?=[\s,.!?:;…»]|$)""")
+
+    /** Words after a speech verb that are not who speaks. */
+    private val NOT_NOUNS = setOf("вдруг", "наконец", "вслух", "снова", "опять", "сразу", "тоже", "также", "потом", "затем",
+        "уже", "ещё", "еще", "лишь", "только", "почти", "даже", "вновь", "сейчас", "теперь", "тогда", "этот", "свой", "своим",
+        "сама", "один", "одна", "каждый", "никто", "кто-то", "голос", "мне", "нам", "вам", "ему", "тихо", "громко",
+        "себе", "сквозь", "через", "после", "перед", "между", "всем", "всех", "всего", "чуть", "едва", "негромко",
+        "вполголоса", "шёпотом", "шепотом", "мрачно", "весело", "грустно", "задумчиво", "спокойно", "строго", "резко",
+        "медленно", "быстро", "уверенно", "серьёзно", "серьезно", "нехотя", "немного", "очень", "слегка", "довольно")
+
+    /**
+     * The book's own speaker nouns (not in [BASE_NOUNS]): a lowercase word standing as the subject
+     * after a speech verb three times or more, and a noun — the text has its case forms too
+     * («корнола», «корнолу»; «оборотня»). Its sex: the verb's ("ответил" / "ответила").
+     */
+    private fun bookNouns(text: String): Map<String, G> {
+        val seen = HashMap<String, IntArray>()
+        for (m in NOUN_AFTER_VERB.findAll(text)) {
+            val w = m.groupValues[3]
+            if (w in BASE_NOUNS || w in NOT_NOUNS || w in SMALL_WORDS || w in SOMEONE) continue
+            // adjectives, adverbs, infinitives, reflexives, gerunds: not who speaks
+            if (listOf("ый", "ий", "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ых", "их", "ть", "ся", "сь",
+                    "ти", "ло", "ли", "но", "ко", "го", "ши", "ву", "ую", "юю", "ым", "им").any { w.endsWith(it) }) continue
+            val c = seen.getOrPut(w) { IntArray(2) }
+            if (m.groupValues[2].isEmpty() && !m.groupValues[1].endsWith("ась") && !m.groupValues[1].endsWith("ла")) c[0]++ else c[1]++
+        }
+        val out = HashMap<String, G>()
+        for ((w, c) in seen) {
+            if (c[0] + c[1] < 3) continue
+            // a noun: its case forms are in the text ("наконец", "вдруг" have none)
+            val ends = when {
+                w.endsWith("а") -> listOf("ы", "и", "е", "у", "ой")
+                w.endsWith("я") -> listOf("и", "е", "ю", "ей")
+                w.endsWith("ь") || w.endsWith("й") -> listOf("я", "ю", "ем", "е", "и", "ей")
+                else -> listOf("а", "у", "ом", "е", "ы", "ов")
+            }
+            val forms = Regex("(?<![а-яё])(?:" + stemsOf(w).joinToString("|") { Regex.escape(it) } + ")(" + ends.joinToString("|") + ")(?![а-яё])", RegexOption.IGNORE_CASE)
+                .findAll(text).take(3).count()
+            if (forms < 2) continue
+            out[w] = if (c[1] > c[0]) G.F else G.M
+        }
+        return out
     }
 
     private fun analyzeImpl(text: String, prior: Prior?): Result {
@@ -1038,6 +1117,58 @@ object DialogueAnalyzer2 {
                 val to = names.singleOrNull() ?: continue
                 if (to !in lineCount || (genderOf(t) != null && genderOf(to) != null && genderOf(t) != genderOf(to))) continue
                 merge[t] = to; local += t
+            }
+            // a kind of creature and its name: «корнол» is Лениавес («Город древних», tolyos). Only the
+            // book's own nouns (not «девушка», «старик»: other people in other chapters), and only one
+            // name: the text says it («к корнолу, назвавшемуся Лениавесом»), or it is nearly always
+            // that name around the noun — of the same sex, and never «корнол и Эрея» (those are two)
+            val ownNouns = ownNounsTL.get() ?: emptySet()
+            val nounSpeakers = lineCount.keys.filter { it in ownNouns && it !in merge }
+            if (nounSpeakers.isNotEmpty()) {
+                val nameWord = "([А-ЯЁ][а-яё]+)"
+                // the names in each paragraph
+                val paraNames = paragraphs.map { (ps, pe) ->
+                    Regex("[А-ЯЁ][а-яё]+").findAll(text.substring(ps, pe)).mapNotNull { canon(it.value) }
+                        .filter { it != HERO && it != SYSTEM && it in lineCount }.toHashSet()
+                }
+                for (d in nounSpeakers) {
+                    val dg = speakerNouns[d]
+                    fun sex(n: String) = dg == null || genderOf(n) == null || genderOf(n) == dg
+                    val dForm = "(?<![А-Яа-яЁё])(?:" + stemsOf(d).joinToString("|") { st ->
+                        "[" + st[0].uppercaseChar() + st[0] + "]" + Regex.escape(st.drop(1)) } + ")[а-яё]{0,3}(?![А-Яа-яЁё])"
+                    // the same word as a title: «повелитель» and «Повелитель»
+                    val titled = d.replaceFirstChar { it.uppercaseChar() }.takeIf { it in lineCount }
+                    val told = Regex(dForm + ",?\\s+(?:назвавш|представивш)[а-яё]*ся\\s+" + nameWord + "|" + dForm + "\\s+по\\s+имени\\s+" + nameWord)
+                    val toldName = told.findAll(text).mapNotNull { m -> canon(m.groupValues[1].ifEmpty { m.groupValues[2] }) }
+                        .filter { it != HERO && it in lineCount && sex(it) }
+                        .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+                    val to = titled ?: toldName ?: run {
+                        val dRe = Regex(dForm)
+                        val twoA = Regex(dForm + "\\s+и\\s+" + nameWord)
+                        val twoB = Regex(nameWord + "\\s+и\\s+" + dForm)
+                        val near = HashMap<String, Int>()
+                        val apart = HashSet<String>()
+                        var windows = 0
+                        for ((i, pr) in paragraphs.withIndex()) {
+                            val pt = text.substring(pr.first, pr.second)
+                            if (!dRe.containsMatchIn(pt)) continue
+                            windows++
+                            val around = HashSet<String>()
+                            for (j in maxOf(0, i - 2)..minOf(paragraphs.lastIndex, i + 2)) around.addAll(paraNames[j])
+                            for (n in around) near[n] = (near[n] ?: 0) + 1
+                            for (m in twoA.findAll(pt)) canon(m.groupValues[1])?.let { apart += it }
+                            for (m in twoB.findAll(pt)) canon(m.groupValues[1])?.let { apart += it }
+                        }
+                        val ranked = near.entries.filter { it.key !in apart && it.key.first().isUpperCase() && sex(it.key) }
+                            .sortedByDescending { it.value }
+                        val best = ranked.firstOrNull() ?: return@run null
+                        val second = ranked.getOrNull(1)?.value ?: 0
+                        if (best.value >= 10 && best.value >= 3 * second && best.value * 10 >= windows * 3) best.key else null
+                    } ?: continue
+                    // the title takes the noun's sex («Повелитель» spoke twice, nobody said how)
+                    if (to == titled && nameGender[to] == null) dg?.let { nameGender[to] = it }
+                    merge[d] = to
+                }
             }
             val people = lineCount.keys.filter { it != HERO && it != SYSTEM && it.first().isUpperCase() && it.length >= 3 && it !in merge }
             for (a in people) for (b in people) {

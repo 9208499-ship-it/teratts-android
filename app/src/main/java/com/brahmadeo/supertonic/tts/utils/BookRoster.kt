@@ -26,7 +26,8 @@ object BookRoster {
 
     /** Bumped when the analysis changes: an older roster is built again (1.6.7: one name per person). */
     // 3 (1.6.15): the hero's own name and first name + surname are one person
-    private const val VERSION = 5   // 1.27: a name told by its owner («Зовут меня Лениавес»), "Ленивца" = Ленивец
+    private const val VERSION = 6   // 1.27: a name told by its owner («Зовут меня Лениавес»), "Ленивца" = Ленивец;
+                                    // 1.37: the book's own speaker nouns («ответил корнол») and their names (корнол = Лениавес)
 
     /**
      * The roster of the book, built now if there is none (or waited for if it is being built):
