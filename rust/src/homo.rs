@@ -485,3 +485,111 @@ mod tests {
         assert_eq!((bad_mark, bad_ids), (0, 0));
     }
 }
+
+// ---- the case of a feminine noun in -ы/-и, by its neighbours (rules, no network) ----
+//
+// "сестры": сестры́ (of the sister, one) or сёстры (sisters)? The network chose the plural nearly
+// always ("Красота сестры…" was read "сёстры": tolyos). What stands right before the word
+// decides it in most sentences: a preposition of the genitive ("у сестры"), "нет", a feminine
+// adjective in -ой/-ей ("младшей сестры"), a noun ("красота сестры") — one sister; a plural
+// word ("мои", "младшие") — sisters. Where none of this is clear, the network decides as before.
+
+/// Feminine nouns whose one-sister form (genitive) is stressed on the ending, the plural on the stem.
+const GEN_OR_PLURAL: &[&str] = &[
+    "беды", "блохи", "бороды", "борозды", "вдовы", "величины", "версты", "весны", "воды", "войны", "волны",
+    "высоты", "глубины", "головы", "горы", "грозы", "губы", "десны", "длины", "доски", "дуги", "души", "дыры",
+    "жены", "звезды", "земли", "зимы", "змеи", "иглы", "игры", "козы", "копны", "косы", "красоты", "лисы",
+    "лозы", "луны", "метлы", "ноги", "норы", "нужды", "овцы", "орды", "осы", "пилы", "плиты", "полосы", "пчелы",
+    "реки", "росы", "руки", "свечи", "свиньи", "семьи", "сестры", "скалы", "слезы", "смолы", "совы", "сосны",
+    "спины", "среды", "стены", "стороны", "страны", "стрелы", "стрельбы", "строки", "строфы", "струны",
+    "судьбы", "судьи", "травы", "трубы", "тюрьмы", "цены", "щеки",
+];
+
+const GEN_PREPS: &[&str] = &[
+    "у", "для", "без", "от", "до", "из", "из-за", "из-под", "около", "возле", "после", "кроме", "вместо",
+    "среди", "против", "напротив", "вокруг", "мимо", "вдоль", "ради", "позади", "впереди", "внутри", "вне",
+    "сверх", "подле", "близ", "вроде", "насчёт", "насчет", "посреди", "накануне", "с", "со", "со стороны",
+];
+const PLURAL_WORDS: &[&str] = &[
+    "мои", "твои", "свои", "наши", "ваши", "эти", "те", "все", "такие", "какие", "другие", "иные", "многие",
+    "некоторые", "чьи", "сами",
+];
+/// Words in -ой/-ей that are not a feminine adjective before the noun.
+const NOT_FEM_ADJ: &[&str] = &[
+    "мой", "твой", "свой", "ей", "домой", "порой", "зимой", "весной", "тобой", "собой", "мной", "мною",
+    "какой", "такой", "никакой", "другой", "иной", "простой", "постой", "стой", "налей", "пожалей", "сей",
+];
+/// Words after which the case cannot be told (the network decides).
+const UNCLEAR: &[&str] = &[
+    "и", "а", "но", "или", "да", "не", "ни", "же", "ли", "бы", "как", "что", "чтобы", "где", "когда", "тоже",
+    "также", "уже", "ещё", "еще", "очень", "только", "даже", "вот", "это", "этот", "там", "тут", "здесь",
+    "теперь", "потом", "сейчас", "тогда", "всегда", "никогда", "иногда", "снова", "опять", "вдруг", "сразу",
+    "вскоре", "утром", "вечером", "днём", "днем", "ночью", "летом", "осенью", "потому", "поэтому", "хотя",
+    "если", "пока", "чем", "он", "она", "оно", "они", "мы", "вы", "я", "ты", "мне", "тебе", "ему", "им", "нам",
+    "вам", "себе", "кто", "есть", "будто", "словно", "точно", "лишь", "либо", "почти", "совсем", "затем",
+    "два", "две", "три", "четыре", "оба", "обе", "полторы", "полтора", "где-то", "куда", "откуда", "зато",
+    "сначала", "наконец", "всё", "все-таки", "всё-таки", "так", "там-то", "тут-то", "никак", "уж", "ведь",
+    "разве", "неужели", "ещё", "тоже", "просто", "именно", "вообще",
+    // prepositions of other cases: "под ноги", "на руки", "за руки", "в воды"
+    "в", "во", "на", "под", "подо", "за", "про", "через", "сквозь", "о", "об", "обо", "по", "к", "ко", "над",
+    "надо", "перед", "передо", "при", "между", "меж", "сквозь",
+];
+
+fn is_word_char(c: char) -> bool { is_cyr_letter(c) || c == '-' }
+
+/// The words right before byte [at] of [text], nearest first, while only spaces stand between
+/// (a comma, a dash or a full stop ends them).
+fn words_before(text: &str, at: usize, n: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut s = &text[..at];
+    for _ in 0..n {
+        let t = s.trim_end_matches(|c: char| c == ' ' || c == '\u{a0}' || c == '+' || c == '\u{301}');
+        if t.len() == s.len() && !out.is_empty() { break }
+        if t.is_empty() { break }
+        let last = t.chars().last().unwrap();
+        if !is_cyr_letter(last) { break }
+        let start = t.char_indices().rev().take_while(|&(_, c)| is_word_char(c) || c == '+' || c == '\u{301}').last().map(|(i, _)| i).unwrap_or(0);
+        out.push(lower(&t[start..]).replace(['+', '\u{301}'], ""));
+        s = &t[..start];
+    }
+    out
+}
+
+fn ends_any(w: &str, ends: &[&str]) -> bool { ends.iter().any(|e| w.ends_with(e)) }
+
+/// The variant chosen by the neighbours (or None: the network decides).
+pub fn case_rule(text: &str, c: &Candidate, vars: &[String]) -> Option<String> {
+    if vars.len() != 2 || !GEN_OR_PLURAL.contains(&c.word_lower.as_str()) { return None }
+    let gen = vars.iter().find(|v| v.ends_with("+ы") || v.ends_with("+и"))?.clone();
+    let plural = vars.iter().find(|v| **v != gen)?.clone();
+    // "…сестры не было дома", "сестры нет" — of the one (missing) sister, whatever stands before
+    let after: Vec<String> = text[c.end..].trim_start_matches(|ch: char| ch == ' ' || ch == '\u{a0}')
+        .split(|ch: char| !is_word_char(ch) && ch != '+' && ch != '\u{301}').take(2).map(|x| lower(x).replace(['+', '\u{301}'], "")).collect();
+    let a0 = after.first().map(String::as_str).unwrap_or("");
+    let a1 = after.get(1).map(String::as_str).unwrap_or("");
+    if a0 == "нет" || (a0 == "не" && ["было", "будет", "стало", "оказалось"].contains(&a1)) { return Some(gen) }
+    let w = words_before(text, c.start, 2);
+    // "какие-то волны": the word without -то, -либо, -нибудь
+    let bare = |x: &str| x.trim_end_matches("-то").trim_end_matches("-либо").trim_end_matches("-нибудь").to_string();
+    let p0 = bare(w.first()?);
+    let p = p0.as_str();
+    let pp0 = w.get(1).map(|x| bare(x)).unwrap_or_default();
+    let pp = pp0.as_str();
+    let is = |list: &[&str], x: &str| list.contains(&x);
+    if is(GEN_PREPS, p) { return Some(gen) }
+    if p == "нет" || (pp == "не" && is(&["было", "будет", "стало", "осталось", "оказалось"], p)) { return Some(gen) }
+    if is(&["его", "её", "ее", "их"], p) { return if is(GEN_PREPS, pp) { Some(gen) } else { None } }
+    if is(PLURAL_WORDS, p) || p.ends_with("ые") || ends_any(p, &["кие", "гие", "хие", "шие", "жие", "чие", "щие"]) {
+        return Some(plural)
+    }
+    if p.chars().count() >= 3 && (p.ends_with("ой") || p.ends_with("ей")) && !is(NOT_FEM_ADJ, p) { return Some(gen) }
+    if is(UNCLEAR, p) || p.chars().count() < 3 { return None }
+    // a verb, an adjective of another case or gender: the network
+    if ends_any(p, &["ть", "ться", "ти", "чь", "л", "ла", "ло", "ли", "лся", "лась", "лось", "лись", "ет", "ёт",
+        "ит", "ют", "ут", "ат", "ят", "ем", "ём", "им", "ешь", "ёшь", "ишь", "ете", "ите", "ся", "сь",
+        "ый", "ий", "ая", "яя", "ое", "ее", "ую", "юю", "ом", "ым", "ою", "ею",
+        // a gerund ("потерев руки"), an adverb ("эмпатически волны")
+        "в", "вши", "вшись", "ски", "цки"]) { return None }
+    // a noun before it: "красота сестры", "руки сестры" — of the one sister
+    Some(gen)
+}

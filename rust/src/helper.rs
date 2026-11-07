@@ -606,7 +606,9 @@ impl HomoRuntime {
             if text[c.start..c.end].contains('+') || crate::tera::is_pinned(&c.word_lower) {
                 continue;
             }
-            let variant = match c.phrase_choice.clone() {
+            // the neighbours first (a feminine noun's case: "у сестры" / "мои сёстры"), then the network
+            let by_case = self.data.variants(&c.word_lower).and_then(|vars| crate::homo::case_rule(text, &c, vars));
+            let variant = match c.phrase_choice.clone().or(by_case) {
                 Some(v) => v,
                 None => {
                     let Some(vars) = self.data.variants(&c.word_lower).cloned() else { continue };
