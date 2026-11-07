@@ -319,7 +319,10 @@ class TextNormalizer {
     // links and e-mail addresses: read letter by letter they only get in the way
     private val urlOrMail = Regex("""(?i)\b(?:https?://|ftp://|www\.)[^\s<>«»"]+[^\s<>«»".,;:!?)\]]|\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b""")
 
-    private val invisibleChars = Regex("[\u00AD\u200B\u2060\uFEFF]")
+    private val invisibleChars = Regex("[\u00AD\u200B\u200C\u200D\u200E\u200F\u2060\u2061\u2062\u2063\u2064\u034F\uFEFF]")
+    // a hyphen of any kind between two letters is a hyphen: «какие‑то», «какие–то» (books and readers
+    // send non-breaking, typographic hyphens and dashes) — so a rule for «какие-то» finds them (z--v, 4PDA)
+    private val oddHyphen = Regex("(?<=\\p{L})[\u2010\u2011\u2012\u2013\u2212\uFE63\uFF0D](?=\\p{L})")
 
     fun stripFootnoteMarks(text: String): String {
         var t = footnoteBracket.replace(text, "")
@@ -347,7 +350,7 @@ class TextNormalizer {
         //      двадцать четыре" -> "две ты́сячи два́дцать четы́ре").
         // invisible characters inside words (soft hyphens from books) would keep
         // lexicon rules from matching
-        inputText = inputText.replace(invisibleChars, "")
+        inputText = inputText.replace(invisibleChars, "").replace(oddHyphen, "-")
         var processedText = if (lowerLang != "ko") {
             var t = LexiconManager.apply(inputText)
             if (lowerLang.startsWith("ru")) {

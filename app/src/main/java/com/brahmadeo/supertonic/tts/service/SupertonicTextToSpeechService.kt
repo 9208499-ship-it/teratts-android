@@ -529,6 +529,22 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
         var success = true
         try {
             val units = paragraphUnits(rawText, requestedLang)
+            // what came from the reader app, for the log: how many phrases the user's rules change, and
+            // the unusual characters inside words (a rule did not work from Moon+ — z--v, 4PDA)
+            try {
+                val rules = com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
+                val changed = units.count { (u, _) ->
+                    val n = u.replace(Regex("[\u00AD\u200B-\u200F\u2060-\u2064]"), "")
+                        .replace(Regex("(?<=\\p{L})[\u2010\u2011\u2012\u2013\u2212\uFE63\uFF0D](?=\\p{L})"), "-")
+                    u != SCENE_BREAK && com.brahmadeo.supertonic.tts.utils.LexiconManager.apply(n) != n
+                }
+                val odd = Regex("(?<=\\p{L})[^\\p{L}\\s.,;:!?…«»\"'()\\[\\]0-9]+(?=\\p{L})").findAll(rawText)
+                    .flatMap { m -> m.value.asSequence() }.filter { it.code > 127 }
+                    .map { "U+%04X".format(it.code) }.distinct().take(8).toList()
+                android.util.Log.i("TeraLexicon", "from ${try { packageManager.getNameForUid(request.callerUid) } catch (_: Exception) { "?" }} (${rawText.length} chars, ${units.size} phrases, lang ${requestedLang}): " +
+                    "rules ${rules.size}, on ${com.brahmadeo.supertonic.tts.utils.LexiconManager.isEnabled()}, phrases changed $changed" +
+                    (if (odd.isNotEmpty()) ", odd characters in words: ${odd.joinToString(" ")}" else ""))
+            } catch (_: Exception) { }
             for ((index, unit) in units.withIndex()) {
                 val (sentence, paragraphEnd) = unit
                 if (SupertonicTTS.isCancelled()) { success = false; break }
