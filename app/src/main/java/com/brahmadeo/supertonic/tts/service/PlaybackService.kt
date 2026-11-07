@@ -1499,7 +1499,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notif_preparing))
             .setContentText(text)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_tera)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -1528,9 +1528,22 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val steps = prefs.getInt("last_steps", 5)
         // the voice the book is read in (as the player has it): the reading finds the chapter by it
         val stylePath = prep.voicePath(this)
-        val current = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this)
-        val chapters = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this).filter { it.index >= current }
         val scope = File(book).name
+        val all = com.brahmadeo.supertonic.tts.utils.BookSession.chaptersWithTitles(this)
+        val saved = com.brahmadeo.supertonic.tts.utils.BookPositions.get(this, scope)
+        val current = com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(this).takeIf { it >= 0 } ?: saved?.chapter ?: -1
+        // what is ahead of the place the book is read at: the chapters after it; the chapter being
+        // read first only if hardly begun — read further, it goes last (its read part would be voiced
+        // for nothing, its rest is read live anyway). Chapters before it are not prepared at all.
+        val here = all.firstOrNull { it.index == current }
+        val ahead = all.filter { it.index > current }
+        val begun = (saved?.takeIf { it.chapter == current }?.progression ?: 0f) >= 0.3f
+        val chapters = when {
+            here == null -> ahead
+            begun -> ahead + listOfNotNull(here)
+            else -> listOfNotNull(here) + ahead
+        }
+        Log.i(TAG, "Prepare: from chapter ${current + 1} (${if (begun) "read further than a third: it goes last" else "from its start"}), ${chapters.size} of ${all.size}")
         var k = 0
         while (k < chapters.size) {
             val c = chapters[k]
@@ -1542,12 +1555,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val effectiveLang = autoDetectRussian(text, lang)
             val sentences = textNormalizer.splitIntoSentences(text, effectiveLang)
             if (sentences.isEmpty() || prep.find(this, book, text, sentences.size, stylePath) != null) { k++; continue }
-            showPrepProgress(getString(R.string.prep_progress, k + 1, chapters.size, 0), 0)
-            Log.i(TAG, "Prepare: chapter ${k + 1} of ${chapters.size} (${sentences.size} phrases)")
-            val n = k
+            // the chapter's number in the book (not in the list of the ones left: «1 of 10» read as the
+            // book's first chapter — tolyos, 4PDA)
+            val n = all.indexOf(c) + 1
+            showPrepProgress(getString(R.string.prep_progress, n, all.size, 0), 0)
+            Log.i(TAG, "Prepare: chapter $n of ${all.size} (${sentences.size} phrases), ${k + 1} of ${chapters.size} to do")
             val end = prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps) { done ->
                 val pc = done * 100 / sentences.size
-                showPrepProgress(getString(R.string.prep_progress, n + 1, chapters.size, pc), pc)
+                showPrepProgress(getString(R.string.prep_progress, n, all.size, pc), pc)
             }
             currentCoroutineContext().ensureActive()
             when (end) {
@@ -2359,7 +2374,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // from the prepared file, or voiced now (and why)
                 if (showControls) com.brahmadeo.supertonic.tts.utils.BookPrep.source.value else null
             ).joinToString("  ·  ").ifEmpty { null })
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_tera)
             .setLargeIcon(appIcon())
             .setContentIntent(pendingIntent)
             .setOnlyAlertOnce(true)

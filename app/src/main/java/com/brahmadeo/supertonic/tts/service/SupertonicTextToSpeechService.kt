@@ -350,7 +350,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
             android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
         )
         return androidx.core.app.NotificationCompat.Builder(this, FG_CHANNEL)
-            .setSmallIcon(com.brahmadeo.supertonic.tts.R.mipmap.ic_launcher)
+            .setSmallIcon(com.brahmadeo.supertonic.tts.R.drawable.ic_stat_tera)
             .setContentTitle("TeraTTS")
             .setContentText(text)
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))

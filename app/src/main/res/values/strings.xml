@@ -468,7 +468,7 @@
     <string name="settings_prep">Audio beforehand</string>
     <string name="settings_prep_desc">Voice the open book beforehand while charging — then it plays like an ordinary player</string>
     <string name="prep_title">Prepare the open book\'s audio beforehand</string>
-    <string name="prep_desc">Chapters from the current one on are voiced in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses. Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
+    <string name="prep_desc">What is ahead of your place is voiced: the next chapters, and the one being read — first if less than a third is read, otherwise last. Chapters already read are not voiced. All in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses. Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
     <string name="prep_mode_charging">Only while charging</string>
     <string name="prep_mode_half">While charging or with at least half the battery</string>
     <string name="prep_status">Chapters of the open book ready: %1$d · all prepared audio takes %2$d MB</string>

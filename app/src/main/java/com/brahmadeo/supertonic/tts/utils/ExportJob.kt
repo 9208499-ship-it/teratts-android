@@ -137,7 +137,7 @@ object ExportJob {
             if (!NotificationManagerCompat.from(c).areNotificationsEnabled()) return
             channel(c)
             val n = NotificationCompat.Builder(c, CHANNEL)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_tera)
                 .setContentTitle(c.getString(R.string.export_job_title))
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))

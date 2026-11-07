@@ -154,7 +154,11 @@ object LexiconManager {
         }
         val regex = if (item.isRegex) item.term
                     // a phrase matches with any spaces between its words (a line break, a non-breaking space)
-                    else "(?<![\\p{L}\\p{N}_])" + item.term.trim().split(Regex("\\s+")).joinToString("[\\s\\u00A0]+") { Pattern.quote(it) } + "(?![\\p{L}\\p{N}_])"
+                    // and a hyphen in it matches any hyphen of the text: readers and books may send
+                    // "кто‑то" with a non-breaking (U+2011) or typographic (U+2010) one
+                    else "(?<![\\p{L}\\p{N}_])" + item.term.trim().split(Regex("\\s+")).joinToString("[\\s\\u00A0]+") { w ->
+                        w.split('-').joinToString("[-\\u2010\\u2011\\u2012]") { if (it.isEmpty()) "" else Pattern.quote(it) }
+                    } + "(?![\\p{L}\\p{N}_])"
         val replacement = Matcher.quoteReplacement(item.replacement)
         for (extra in intArrayOf(Pattern.UNICODE_CHARACTER_CLASS, 0)) {
             try {

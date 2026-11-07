@@ -254,6 +254,9 @@ object AccentDictionaryManager {
         // versions put wrong stresses ("х+олста" for "холст+а") and one stress for both meanings
         // of homographs; the offer to switch was shown once, and "later" kept it for good. It is
         // left unused (not deleted) until Silero is downloaded in its place.
+        // read before anything else: with a dictionary that is not used (not Silero) the setting was
+        // never read, and after a restart the switch showed "off" (z--v, 4PDA)
+        syncLoadEnabled = context.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE).getBoolean(SYNC_LOAD_PREFS_KEY, false)
         if (isInstalled(context) && !isSilero(context)) {
             synchronized(loadLock) {
                 ++loadGeneration
