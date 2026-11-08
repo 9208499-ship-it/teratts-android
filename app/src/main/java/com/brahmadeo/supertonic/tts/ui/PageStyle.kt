@@ -182,6 +182,8 @@ internal object BookFont {
     const val DEFAULT = 19f
     val size = androidx.compose.runtime.mutableFloatStateOf(DEFAULT)
     val family = androidx.compose.runtime.mutableStateOf(SERIF)
+    /** Set like a book: words hyphenated, both edges even (HariHari, 4PDA). */
+    val typeset = androidx.compose.runtime.mutableStateOf(true)
     @Volatile private var loaded = false
 
     private fun prefs(c: Context) = c.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)
@@ -191,6 +193,38 @@ internal object BookFont {
         loaded = true
         size.floatValue = prefs(c).getFloat("book_font_size", DEFAULT).coerceIn(MIN, MAX)
         family.value = prefs(c).getString("book_font_family", SERIF)?.takeIf { it == SANS } ?: SERIF
+        typeset.value = prefs(c).getBoolean("book_typeset", true)
+    }
+
+    fun setTypeset(c: Context, v: Boolean) {
+        typeset.value = v
+        prefs(c).edit().putBoolean("book_typeset", v).apply()
+    }
+
+    /**
+     * The book's text style: the type chosen (size, kind) and, set like a book, hyphens by the
+     * language's own rules (Android has them for Russian and English) and both edges even.
+     */
+    fun style(base: androidx.compose.ui.text.TextStyle, cyrillic: Boolean): androidx.compose.ui.text.TextStyle {
+        val s = base.copy(fontFamily = fontFamily(), fontSize = androidx.compose.ui.unit.TextUnit(size.floatValue, androidx.compose.ui.unit.TextUnitType.Sp),
+            lineHeight = androidx.compose.ui.unit.TextUnit(1.45f, androidx.compose.ui.unit.TextUnitType.Em))
+        if (!typeset.value) return s
+        return s.copy(
+            textAlign = androidx.compose.ui.text.style.TextAlign.Justify,
+            hyphens = androidx.compose.ui.text.style.Hyphens.Auto,
+            lineBreak = androidx.compose.ui.text.style.LineBreak.Paragraph,
+            localeList = androidx.compose.ui.text.intl.LocaleList(if (cyrillic) "ru" else "en")
+        )
+    }
+
+    /** Is the text Russian (Cyrillic letters prevail in its beginning)? For the hyphenation rules. */
+    fun isCyrillic(text: String): Boolean {
+        var cyr = 0; var lat = 0
+        for (ch in text.take(4000)) when (ch) {
+            in 'а'..'я', in 'А'..'Я', 'ё', 'Ё' -> cyr++
+            in 'a'..'z', in 'A'..'Z' -> lat++
+        }
+        return cyr >= lat
     }
 
     fun setSize(c: Context, v: Float) {

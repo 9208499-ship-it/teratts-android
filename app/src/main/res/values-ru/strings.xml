@@ -656,4 +656,6 @@
     <string name="voice_rating_title">Голоса для персонажей</string>
     <string name="voice_rating_desc">★ — любимые: их первыми получают персонажи с наибольшим числом реплик. • — обычные. ⛔ — не давать персонажам автоматически (рассказчиком и вручную — можно). Голоса Шторма, записанные TeraTTS, по умолчанию ⛔.</string>
     <string name="voice_rating_done">Готово</string>
+    <string name="typeset_title">Книжная вёрстка</string>
+    <string name="typeset_desc">Переносы слов и выравнивание по ширине</string>
 </resources>

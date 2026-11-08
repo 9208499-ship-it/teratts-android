@@ -455,7 +455,8 @@ fun PlaybackScreen(
             fontFamily = BookFont.family.value, onFontFamily = { f -> BookFont.setFamily(pageCtx, f) },
             paged = pageMode, onPaged = { v -> pageMode = v; PageMode.setPaged(pageCtx, v) },
             pageAnim = pageAnim, onPageAnim = { a -> pageAnim = a; PageMode.setAnim(pageCtx, a) },
-            pageSound = pageSound, onPageSound = { v -> pageSound = v; PageMode.setSound(pageCtx, v) }
+            pageSound = pageSound, onPageSound = { v -> pageSound = v; PageMode.setSound(pageCtx, v) },
+            typeset = BookFont.typeset.value, onTypeset = { v -> BookFont.setTypeset(pageCtx, v) }
         )
     }
 
@@ -896,7 +897,8 @@ private fun PagedBookView(
     val dens = LocalDensity.current
     val measurer = rememberTextMeasurer(cacheSize = 0)
     // the type chosen in the reading sheet (size, with serifs or without)
-    val style = MaterialTheme.typography.bodyLarge.copy(fontFamily = BookFont.fontFamily(), fontSize = BookFont.size.floatValue.sp, lineHeight = 1.45.em)
+    val cyrillic = remember(book) { BookFont.isCyrillic(book.text) }
+    val style = BookFont.style(MaterialTheme.typography.bodyLarge, cyrillic)
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val bg = MaterialTheme.colorScheme.background
     Column(modifier = modifier.background(bg).pageTexture(pageStyle).windowInsetsPadding(WindowInsets.statusBars)) {
@@ -1187,11 +1189,7 @@ private fun BookParagraph(
     val word by rememberUpdatedState(onWord)
     Text(
         ann,
-        style = MaterialTheme.typography.bodyLarge.copy(
-            fontFamily = BookFont.fontFamily(),
-            fontSize = BookFont.size.floatValue.sp,
-            lineHeight = 1.45.em
-        ),
+        style = BookFont.style(MaterialTheme.typography.bodyLarge, remember(book) { BookFont.isCyrillic(book.text) }),
         color = MaterialTheme.colorScheme.onSurface,
         onTextLayout = { layout = it; onLayout(it) },
         modifier = Modifier

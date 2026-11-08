@@ -656,4 +656,6 @@
     <string name="voice_rating_title">Voices for characters</string>
     <string name="voice_rating_desc">★ favourite: the characters with the most lines get them first. • normal. ⛔ never given to characters automatically (as the narrator or by hand it can be). Shtorm’s voices recorded by TeraTTS are ⛔ by default.</string>
     <string name="voice_rating_done">Done</string>
+    <string name="typeset_title">Book-like layout</string>
+    <string name="typeset_desc">Hyphenation and justified text</string>
 </resources>

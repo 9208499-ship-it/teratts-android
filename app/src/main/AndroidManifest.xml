@@ -70,6 +70,14 @@
                 <data android:mimeType="application/x-fb3" />
                 <data android:mimeType="application/pdf" />
                 <data android:mimeType="text/plain" />
+                <!-- how files really come: fb2.zip as a zip, fb2 as xml or "binary" (browsers, Telegram) —
+                     the content decides what it is (a.boyev, 4PDA) -->
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -82,6 +90,12 @@
                 <data android:mimeType="application/x-zip-compressed-fb2" />
                 <data android:mimeType="application/x-fb3" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
             <!-- Install TTS data intent -->
             <intent-filter>

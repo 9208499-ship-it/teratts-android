@@ -315,6 +315,10 @@ class TextNormalizer {
     private val footnoteBracket = Regex("\\s?[\\[{]\\s*\\d{1,4}(?:\\s*[,–-]\\s*\\d{1,4})*\\s*[\\]}]")
     private val footnoteSuperscript = Regex("(?<![мМ])[⁰¹²³⁴⁵⁶⁷⁸⁹]+")
     private val footnoteAsterisk = Regex("(?<=[\\p{L}.,!?»\")])\\*{1,3}(?![\\p{L}*])")
+    // a footnote number stuck to a word: EPUB books give "слово<sup>1</sup>" as "слово1" — read as
+    // "слово один". Only after a Russian word (two letters or more, not a unit: "км2", "см3") and
+    // before a space or punctuation.
+    private val footnoteGlued = Regex("(?<=[а-яёА-ЯЁ]{2})(?<!(?:км|см|мм|дм|кв))\\d{1,3}(?=[\\s.,;:!?…»”)\\]]|$)")
 
     // links and e-mail addresses: read letter by letter they only get in the way
     private val urlOrMail = Regex("""(?i)\b(?:https?://|ftp://|www\.)[^\s<>«»"]+[^\s<>«»".,;:!?)\]]|\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b""")
@@ -328,6 +332,7 @@ class TextNormalizer {
         var t = footnoteBracket.replace(text, "")
         t = footnoteSuperscript.replace(t, "")
         t = footnoteAsterisk.replace(t, "")
+        t = footnoteGlued.replace(t, "")
         t = urlOrMail.replace(t, "")
         return t
     }

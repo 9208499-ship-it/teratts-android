@@ -87,6 +87,8 @@ internal fun ReadingSheet(
     onPageAnim: (String) -> Unit = {},
     pageSound: Boolean = true,
     onPageSound: (Boolean) -> Unit = {},
+    typeset: Boolean = true,
+    onTypeset: (Boolean) -> Unit = {},
     // the voice is reading (its settings) or not (the book's look)
     speaking: Boolean = true,
     hasCustomPage: Boolean = false,
@@ -162,6 +164,15 @@ internal fun ReadingSheet(
                     label = { Text(stringResource(AppR.string.font_serif), fontFamily = androidx.compose.ui.text.font.FontFamily.Serif) })
                 FilterChip(selected = fontFamily == BookFont.SANS, onClick = { onFontFamily(BookFont.SANS) },
                     label = { Text(stringResource(AppR.string.font_sans), fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif) })
+            }
+            // set like a book: hyphens and both edges even
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(AppR.string.typeset_title), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(AppR.string.typeset_desc), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = typeset, onCheckedChange = onTypeset)
             }
             // ---- the text: a ribbon to scroll or pages to turn (how they turn, with a rustle or not) ----
             Spacer(modifier = Modifier.padding(top = 6.dp))
