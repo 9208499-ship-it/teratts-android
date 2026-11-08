@@ -28,7 +28,17 @@ object LexiconManager {
     // them once in load/save and reuse for the lifetime of the rule set.
     // null entries correspond to rules that failed to compile (malformed
     // regex from the user); apply() skips those.
-    private var compiledRules: List<Pair<java.util.regex.Pattern, String>?> = emptyList()
+    private var compiledRules: List<Rule?> = emptyList()
+
+    /**
+     * A rule ready to apply: a regular expression ([pattern]) as the user wrote it, or a plain word /
+     * phrase ([words]) found by hand — letter by letter, whole words only, any spaces between the
+     * words of a phrase. Plain rules used to be regular expressions too, and on Android those with a
+     * hyphen («кто-то», «какие-то») never matched (z--v, 4PDA); found by hand, nothing depends on the
+     * phone's regex engine.
+     */
+    private class Rule(val pattern: Pattern?, val words: List<String>, val ignoreCase: Boolean,
+                       val quoted: String, val replacement: String)
     @Volatile private var isLoaded = false
     // Master switch: when false, apply() is a no-op even if rules exist.
     // Default ON so existing users keep their behavior; persisted per-device.
@@ -115,15 +125,49 @@ object LexiconManager {
         if (compiledRules.isEmpty()) return text
 
         var processed = text
-        for (compiled in compiledRules) {
-            val (pattern, replacement) = compiled ?: continue
+        for (rule in compiledRules) {
+            if (rule == null) continue
             try {
-                processed = pattern.matcher(processed).replaceAll(replacement)
+                processed = if (rule.pattern != null) rule.pattern.matcher(processed).replaceAll(rule.quoted)
+                else replacePlain(processed, rule.words, rule.ignoreCase, rule.replacement)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
         return processed
+    }
+
+    private fun wordChar(c: Char) = c.isLetterOrDigit() || c == '_' || c == '\u0301' || c == '+'
+
+    /** Every whole [words] (a word, or a phrase with any spaces between its words) in [text] → [with]. */
+    private fun replacePlain(text: String, words: List<String>, ignoreCase: Boolean, with: String): String {
+        if (words.isEmpty() || words[0].isEmpty()) return text
+        val first = words[0]
+        var from = 0
+        var last = 0
+        var out: StringBuilder? = null
+        while (true) {
+            val at = text.indexOf(first, from, ignoreCase)
+            if (at < 0) break
+            var end = at + first.length
+            var ok = at == 0 || !wordChar(text[at - 1])
+            var k = 1
+            while (ok && k < words.size) {
+                var j = end
+                while (j < text.length && (text[j].isWhitespace() || text[j] == '\u00A0')) j++
+                if (j == end || !text.regionMatches(j, words[k], 0, words[k].length, ignoreCase)) ok = false
+                else { end = j + words[k].length; k++ }
+            }
+            if (ok && end < text.length && wordChar(text[end])) ok = false
+            if (ok) {
+                val sb = out ?: StringBuilder(text.length + 16).also { out = it }
+                sb.append(text, last, at).append(with)
+                last = end
+                from = end
+            } else from = at + 1
+        }
+        val sb = out ?: return text
+        return sb.append(text, last, text.length).toString()
     }
 
     /**
@@ -154,46 +198,55 @@ object LexiconManager {
         term.replace(Regex("[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF\u034F]"), "")
             .replace(Regex("(?<=\\p{L})\\s*[-\u2010\u2011\u2012\u2013\u2014\u2212\uFE63\uFF0D]\\s*(?=\\p{L})"), "-")
             .trim()
-            .let { t ->
-                // a Russian word with Latin look-alikes in it (a copied or a switched keyboard: "кaкиe")
-                if (t.none { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }) t
-                else Regex("[\\p{L}-]+").replace(t) { m ->
-                    val w = m.value
-                    if (w.none { it in 'а'..'я' || it in 'А'..'Я' }) w
-                    else w.map { LOOKALIKE[it] ?: it }.joinToString("")
-                }
-            }
+            .let { fixLookalikes(it) }
+
+    private val mixedWord = Regex("[\\p{L}]+")
+    private fun cyr(c: Char) = c in 'а'..'я' || c in 'А'..'Я' || c == 'ё' || c == 'Ё'
+    private fun lat(c: Char) = c in 'a'..'z' || c in 'A'..'Z'
+
+    /**
+     * Russian words with Latin look-alike letters in them ("кaкие" with a Latin "a": books made by
+     * recognising scans, a switched keyboard) written all in Russian letters — so rules find them and
+     * the voice reads them as Russian. Words of Latin letters only are left as they are.
+     */
+    fun fixLookalikes(text: String): String {
+        if (text.none { cyr(it) } || text.none { lat(it) }) return text
+        return mixedWord.replace(text) { m ->
+            val w = m.value
+            if (w.any { cyr(it) } && w.any { lat(it) }) w.map { LOOKALIKE[it] ?: it }.joinToString("") else w
+        }
+    }
+
+    /** How many words of [text] mix Russian and Latin letters (for the log). */
+    fun mixedWords(text: String): Int =
+        if (text.none { cyr(it) } || text.none { lat(it) }) 0
+        else mixedWord.findAll(text).count { m -> m.value.any { cyr(it) } && m.value.any { lat(it) } }
 
     private val LOOKALIKE = mapOf('a' to 'а', 'e' to 'е', 'o' to 'о', 'p' to 'р', 'c' to 'с', 'x' to 'х', 'y' to 'у',
         'A' to 'А', 'E' to 'Е', 'O' to 'О', 'P' to 'Р', 'C' to 'С', 'X' to 'Х', 'H' to 'Н', 'K' to 'К', 'M' to 'М',
         'T' to 'Т', 'B' to 'В')
 
-    private fun compileRule(item: LexiconItem): Pair<java.util.regex.Pattern, String>? {
+    private fun compileRule(item: LexiconItem): Rule? {
         if (item.term.isBlank()) return null
-        var flags = 0
-        if (item.ignoreCase) {
-            flags = flags or Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
-        }
-        val regex = if (item.isRegex) item.term
-                    // a phrase matches with any spaces between its words (a line break, a non-breaking space)
-                    // and a hyphen in it matches any hyphen of the text: readers and books may send
-                    // "кто‑то" with a non-breaking (U+2011) or typographic (U+2010) one
-                    else "(?<![\\p{L}\\p{N}_])" + plainTerm(item.term).split(Regex("\\s+")).joinToString("[\\s\\u00A0]+") { w ->
-                        w.split('-').joinToString("[-\\u2010\\u2011\\u2012\\u2013\\u2212]") { if (it.isEmpty()) "" else Pattern.quote(it) }
-                    } + "(?![\\p{L}\\p{N}_])"
         // what the rule looks for, character by character, for the log (a rule that never matched from
-        // Moon+: its word may hold a dash or an invisible character typed on the keyboard — z--v, 4PDA)
+        // Moon+ — z--v, 4PDA)
         if (!item.isRegex) {
             val russian = item.term.any { it in 'а'..'я' || it in 'А'..'Я' }
             val odd = item.term.filter { (it.code > 127 && !it.isLetter()) || (russian && (it in 'a'..'z' || it in 'A'..'Z')) }
                 .map { "U+%04X".format(it.code) }.distinct()
             android.util.Log.i("TeraLexicon", "rule «${item.term}» → «${item.replacement}»" +
                 (if (odd.isNotEmpty()) " (characters: ${odd.joinToString(" ")})" else "") + (if (item.ignoreCase) "" else ", case as written"))
+            // a plain word or phrase: found by hand (the text it meets is cleaned the same way:
+            // TextNormalizer makes every dash between letters a hyphen, Russian letters Russian)
+            val words = plainTerm(item.term).split(Regex("\\s+")).filter { it.isNotEmpty() }
+            return if (words.isEmpty()) null else Rule(null, words, item.ignoreCase, "", item.replacement)
         }
-        val replacement = Matcher.quoteReplacement(item.replacement)
+        var flags = 0
+        if (item.ignoreCase) flags = flags or Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE
+        val quoted = Matcher.quoteReplacement(item.replacement)
         for (extra in intArrayOf(Pattern.UNICODE_CHARACTER_CLASS, 0)) {
             try {
-                return Pattern.compile(regex, flags or extra) to replacement
+                return Rule(Pattern.compile(item.term, flags or extra), emptyList(), item.ignoreCase, quoted, item.replacement)
             } catch (e: Exception) {
                 if (extra == 0) android.util.Log.w("TeraLexicon", "rule not compiled: ${item.term}: ${e.message}")
             }

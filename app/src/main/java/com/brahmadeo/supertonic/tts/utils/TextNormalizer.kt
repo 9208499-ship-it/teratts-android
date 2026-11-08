@@ -356,6 +356,8 @@ class TextNormalizer {
         // invisible characters inside words (soft hyphens from books) would keep
         // lexicon rules from matching
         inputText = inputText.replace(invisibleChars, "").replace(oddHyphen, "-")
+        // Russian words with Latin look-alike letters ("кaкие" from a scanned book): all Russian
+        inputText = LexiconManager.fixLookalikes(inputText)
         var processedText = if (lowerLang != "ko") {
             var t = LexiconManager.apply(inputText)
             if (lowerLang.startsWith("ru")) {

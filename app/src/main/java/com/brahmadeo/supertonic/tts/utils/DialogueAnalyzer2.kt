@@ -1939,7 +1939,11 @@ object DialogueAnalyzer2 {
             val a = dashAt + 1 + m.range.first
             val b = dashAt + 1 + m.range.last + 1
             val last = text.substring(pos, a).trimEnd().lastOrNull()
-            val toggle = if (speech) last != null && last in ",.!?…:;" else last != null && last in ",.:"
+            var toggle = if (speech) last != null && last in ",.!?…:;" else last != null && last in ",.:"
+            // a dash inside the speech, after a comma: «…что можно было сделать, столкнувшись с ними, –
+            // это убежать. Они не могут…» — not the author's words; taken for them, every later part
+            // of the line went to the other voice (tolyos, 4PDA)
+            if (toggle && speech && last == ',' && !authorAhead(text, b, end)) toggle = false
             if (toggle) {
                 pieces.add(Triple(pos, a, speech))
                 pieces.add(Triple(a, b, false))
@@ -1949,6 +1953,18 @@ object DialogueAnalyzer2 {
         }
         pieces.add(Triple(pos, end, speech))
         return Parsed(pStart, end, pieces)
+    }
+
+    /**
+     * Do the words from [from] look like the author's? Not when they go on the speaker's sentence the
+     * way a dash in speech does — «Единственное, что можно было сделать, – это убежать», «Всё, что ты
+     * видишь, – это…», «…хочу добавить, – что он…»: after a comma-dash the author's words never begin
+     * with «это», «то», «что» (unless a verb of saying follows at once: «– это сказал он»).
+     */
+    private fun authorAhead(text: String, from: Int, end: Int): Boolean {
+        val words = Regex("[А-Яа-яЁё]+").findAll(text.substring(from, minOf(end, from + 120))).map { it.value.lowercase() }.take(3).toList()
+        if (words.isEmpty() || words[0] !in setOf("это", "то", "что")) return true
+        return words.drop(1).any { w -> w.length >= 4 && listOf("л", "ла", "ли", "ло", "лся", "лась", "лись", "лось").any { w.endsWith(it) } }
     }
 
     /** Opening quote → its closing pair: «ёлочки», „лапки“, “English”, "straight". */
@@ -1966,7 +1982,8 @@ object DialogueAnalyzer2 {
             val x = a + m.range.first
             val y = a + m.range.last + 1
             val last = text.substring(pos, x).trimEnd().lastOrNull()
-            val toggle = if (speech) last != null && last in ",.!?…:;" else last != null && last in ",.:"
+            var toggle = if (speech) last != null && last in ",.!?…:;" else last != null && last in ",.:"
+            if (toggle && speech && last == ',' && !authorAhead(text, y, b)) toggle = false   // «…, – это…» inside the speech
             if (toggle) { out.add(Triple(pos, x, speech)); out.add(Triple(x, y, false)); pos = y; speech = !speech }
         }
         if (out.isEmpty()) return listOf(Triple(a, b, true))

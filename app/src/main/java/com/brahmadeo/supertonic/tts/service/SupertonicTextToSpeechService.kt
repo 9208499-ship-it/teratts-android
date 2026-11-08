@@ -536,6 +536,7 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                 val changed = units.count { (u, _) ->
                     val n = u.replace(Regex("[\u00AD\u200B-\u200F\u2060-\u2064]"), "")
                         .replace(Regex("(?<=\\p{L})[\u2010\u2011\u2012\u2013\u2212\uFE63\uFF0D](?=\\p{L})"), "-")
+                        .let { com.brahmadeo.supertonic.tts.utils.LexiconManager.fixLookalikes(it) }
                     u != SCENE_BREAK && com.brahmadeo.supertonic.tts.utils.LexiconManager.apply(n) != n
                 }
                 val odd = Regex("(?<=\\p{L})[^\\p{L}\\s.,;:!?…«»\"'()\\[\\]0-9]+(?=\\p{L})").findAll(rawText)
@@ -543,7 +544,8 @@ class SupertonicTextToSpeechService : TextToSpeechService() {
                     .map { "U+%04X".format(it.code) }.distinct().take(8).toList()
                 android.util.Log.i("TeraLexicon", "from ${try { packageManager.getNameForUid(request.callerUid) } catch (_: Exception) { "?" }} (${rawText.length} chars, ${units.size} phrases, lang ${requestedLang}): " +
                     "rules ${rules.size}, on ${com.brahmadeo.supertonic.tts.utils.LexiconManager.isEnabled()}, phrases changed $changed" +
-                    (if (odd.isNotEmpty()) ", odd characters in words: ${odd.joinToString(" ")}" else ""))
+                    (if (odd.isNotEmpty()) ", odd characters in words: ${odd.joinToString(" ")}" else "") +
+                    com.brahmadeo.supertonic.tts.utils.LexiconManager.mixedWords(rawText).let { if (it > 0) ", words with Latin letters in Russian: $it" else "" })
             } catch (_: Exception) { }
             for ((index, unit) in units.withIndex()) {
                 val (sentence, paragraphEnd) = unit
