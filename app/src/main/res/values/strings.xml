@@ -470,7 +470,7 @@
     <string name="prep_title">Prepare the open book\'s audio beforehand</string>
     <string name="prep_desc">What is ahead of your place is voiced: the next chapters, and the one being read — first if less than a third is read, otherwise last. Chapters already read are not voiced. All in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses. Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
     <string name="prep_mode_charging">Only while charging</string>
-    <string name="prep_mode_half">While charging or with at least half the battery</string>
+    <string name="prep_mode_half">While charging, or on the battery when charged enough</string>
     <string name="prep_status">Chapters of the open book ready: %1$d · all prepared audio takes %2$d MB</string>
     <string name="prep_no_book">Open a book — it will be prepared</string>
     <string name="prep_now">Start now</string>
@@ -571,7 +571,7 @@
     <string name="shtorm_denoise_always">Always</string>
     <string name="prep_why_off">preparing is off</string>
     <string name="prep_why_unplugged">the phone is not on the charger</string>
-    <string name="prep_why_low">the battery is below half</string>
+    <string name="prep_why_low">the battery is below %1$d per cent</string>
     <string name="prep_why_saver">power saving is on</string>
     <string name="prep_note_stopped">Stopped: %1$s.</string>
     <string name="prep_note_done">Done: the book is voiced from the current chapter to the end.</string>
@@ -658,4 +658,6 @@
     <string name="voice_rating_done">Done</string>
     <string name="typeset_title">Book-like layout</string>
     <string name="typeset_desc">Hyphenation and justified text</string>
+    <string name="prep_min_level">On the battery — when at least %1$d per cent charged</string>
+    <string name="prep_speed_note">On the charger the book is voiced at full speed. On the battery — slowly, in the background, so the phone is neither slowed down nor heated.</string>
 </resources>

@@ -26,6 +26,7 @@ object BookPrep {
     private const val PREFS = "BookPrep"
     private const val KEY_ON = "on"
     private const val KEY_MODE = "mode"
+    private const val KEY_MIN_LEVEL = "min_level"
     const val MODE_CHARGING = "charging"
     const val MODE_HALF = "charging_or_half"
     const val ACTION_PREPARE = "PREPARE_BOOK"
@@ -105,6 +106,19 @@ object BookPrep {
     }
     fun mode(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MODE, MODE_CHARGING) ?: MODE_CHARGING
 
+    /**
+     * On the charger preparing goes at full speed (the phone's normal priority): the battery is not
+     * spent, a long book is voiced in one night. On the battery — slowly, below everything else, so the
+     * phone is neither slowed down nor heated (tolyos, 4PDA).
+     */
+    fun fastNow(context: Context): Boolean = plugged(context)
+
+    /** Off the charger (if chosen): preparing while the battery is at least this full, in per cent. */
+    fun minLevel(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MIN_LEVEL, 50).coerceIn(20, 95)
+
+    fun setMinLevel(context: Context, v: Int) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_MIN_LEVEL, v.coerceIn(20, 95)).apply()
+
     fun setEnabled(context: Context, on: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()
         schedule(context)
@@ -145,7 +159,7 @@ object BookPrep {
         if (mode(context) != MODE_HALF) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_unplugged)
         val bm = context.getSystemService(android.os.BatteryManager::class.java)
         val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 0
-        if (level < 50) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_low)
+        if (level < minLevel(context)) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_low, minLevel(context))
         val saver = (context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isPowerSaveMode == true
         if (saver) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_saver)
         return null

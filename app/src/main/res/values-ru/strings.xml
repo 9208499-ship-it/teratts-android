@@ -470,7 +470,7 @@
     <string name="prep_title">Готовить аудио открытой книги заранее</string>
     <string name="prep_desc">Озвучивается то, что впереди места чтения: следующие главы, а начатая — сначала, если прочитано меньше трети, иначе в конце. Прочитанные главы не озвучиваются. Всё — в фоне тем же голосом и с теми же ролями, что при чтении. Готовая глава играет из файла: батарея почти не тратится, пауз не бывает. Сменили голос, модель, роли или словарь — глава читается вживую и готовится заново.</string>
     <string name="prep_mode_charging">Только на зарядке</string>
-    <string name="prep_mode_half">На зарядке или если заряд не меньше половины</string>
+    <string name="prep_mode_half">На зарядке или от батареи, если заряд не ниже заданного</string>
     <string name="prep_status">Готово глав открытой книги: %1$d · всё подготовленное занимает %2$d МБ</string>
     <string name="prep_no_book">Откройте книгу — готовиться будет она</string>
     <string name="prep_now">Начать сейчас</string>
@@ -571,7 +571,7 @@
     <string name="shtorm_denoise_always">Всегда</string>
     <string name="prep_why_off">подготовка выключена</string>
     <string name="prep_why_unplugged">телефон не на зарядке</string>
-    <string name="prep_why_low">заряд ниже половины</string>
+    <string name="prep_why_low">заряд ниже %1$d процентов</string>
     <string name="prep_why_saver">включено энергосбережение</string>
     <string name="prep_note_stopped">Остановлено: %1$s.</string>
     <string name="prep_note_done">Готово: книга озвучена от текущей главы до конца.</string>
@@ -658,4 +658,6 @@
     <string name="voice_rating_done">Готово</string>
     <string name="typeset_title">Книжная вёрстка</string>
     <string name="typeset_desc">Переносы слов и выравнивание по ширине</string>
+    <string name="prep_min_level">От батареи — при заряде не ниже %1$d процентов</string>
+    <string name="prep_speed_note">На зарядке книга озвучивается в полную силу. От батареи — медленно, в фоне, чтобы телефон не тормозил и не грелся.</string>
 </resources>

@@ -129,7 +129,7 @@ object SupertonicTTS {
         if (nativePtr != 0L) openHint((taskIds() - before + tid).toIntArray())
         // ONNX Runtime's workers (made just now, at the audio priority): lowered while a book is prepared
         workerTids = (taskIds() - before).toIntArray()
-        calm = null
+        level = null
         val success = nativePtr != 0L
         if (success) {
             cachedSampleRate = getSampleRate(nativePtr)
@@ -258,8 +258,15 @@ object SupertonicTTS {
             // engine works below everything else on the phone (it took the audio priority there too, the
             // phone slowed down and heated: dullish, 4PDA); while reading — the audio priority again
             val calmNow = com.brahmadeo.supertonic.tts.utils.BookPrep.making || com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere
-            setCalm(calmNow)
-            try { android.os.Process.setThreadPriority(if (calmNow) CALM_PRIORITY else android.os.Process.THREAD_PRIORITY_AUDIO) } catch (e: Exception) { }
+            // on the charger: at the phone's normal priority, at full speed — the book is ready by the
+            // morning; on the battery: below everything else
+            val level = when {
+                !calmNow -> android.os.Process.THREAD_PRIORITY_AUDIO
+                appContext?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.fastNow(it) } == true -> android.os.Process.THREAD_PRIORITY_DEFAULT
+                else -> CALM_PRIORITY
+            }
+            setLevel(level)
+            try { android.os.Process.setThreadPriority(level) } catch (e: Exception) { }
             if (!calmNow) hintAddThread(me)
             val t0 = System.nanoTime()
             val data = try {
@@ -365,8 +372,8 @@ object SupertonicTTS {
 
     /** ONNX Runtime's worker threads (made at the engine's start). */
     @Volatile private var workerTids = IntArray(0)
-    /** Are they lowered now (null: as made, at the audio priority)? */
-    @Volatile private var calm: Boolean? = null
+    /** Their priority now (null: as made, at the audio priority). */
+    @Volatile private var level: Int? = null
     /**
      * Below the phone's own work (0) and above the background group (10, which would put them on the
      * slow cores only): with nothing else to do the phone gives them all it has, yet anything else —
@@ -374,13 +381,19 @@ object SupertonicTTS {
      */
     private const val CALM_PRIORITY = 5
 
-    /** The workers lowered (preparing) or back at the audio priority (reading). */
-    private fun setCalm(on: Boolean) {
-        if (calm == on) return
-        calm = on
-        val p = if (on) CALM_PRIORITY else android.os.Process.THREAD_PRIORITY_AUDIO
+    /**
+     * The workers' priority: lowered (preparing on the battery), the phone's normal one (preparing on
+     * the charger) or the audio one (reading).
+     */
+    private fun setLevel(p: Int) {
+        if (level == p) return
+        level = p
         for (t in workerTids) try { android.os.Process.setThreadPriority(t, p) } catch (_: Exception) { }
-        Log.i("SupertonicTTS", "engine threads (${workerTids.size}): " + if (on) "calm ($p) — preparing" else "audio priority — reading")
+        Log.i("SupertonicTTS", "engine threads (${workerTids.size}): " + when (p) {
+            CALM_PRIORITY -> "calm ($p) — preparing"
+            android.os.Process.THREAD_PRIORITY_DEFAULT -> "normal ($p) — preparing on the charger"
+            else -> "audio priority — reading"
+        })
     }
 
     private fun taskIds(): Set<Int> =

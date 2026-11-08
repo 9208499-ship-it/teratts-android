@@ -329,6 +329,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
          * (SupertonicTTS.requestEngine). It used to be 5 s — any longer pause replayed the phrase.
          */
         const val PAUSE_HOLD_MS = 30 * 60_000L
+        /** A reading paused this long lets the engine go to preparing the book (if preparing may run). */
+        const val PAUSE_PREP_MS = 10 * 60_000L
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -1407,7 +1409,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         synthesisJob = serviceScope.launch(Dispatchers.IO) {
             try {
                 // (this pool thread may have been given the audio priority by an earlier reading)
-                try { android.os.Process.setThreadPriority(5) } catch (_: Throwable) { }
+                try { android.os.Process.setThreadPriority(if (com.brahmadeo.supertonic.tts.utils.BookPrep.fastNow(this@PlaybackService)) 0 else 5) } catch (_: Throwable) { }
+                // the engine sees the charger itself (started by the system's job, no screen was opened)
+                SupertonicTTS.appContext = applicationContext
                 engineReady?.join()
                 prepareBook()
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1894,6 +1898,30 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             serviceScope.launch {
                 delay(PAUSE_HOLD_MS)
                 letGo("${PAUSE_HOLD_MS / 60000} min")
+            }
+            // a book left on pause (not stopped) is prepared too: after a while the paused reading lets
+            // the engine go and preparing starts ("play" goes on from the phrase being heard). The CPU
+            // is kept awake for that while only if preparing may run now (tolyos, 4PDA)
+            val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+            if (prep.enabled(this) && prep.conditionsOk(this)) {
+                val keep = try {
+                    (getSystemService(POWER_SERVICE) as android.os.PowerManager)
+                        .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "TeraTTS:pausePrep")
+                        .apply { setReferenceCounted(false); acquire(PAUSE_PREP_MS + 60_000L) }
+                } catch (_: Exception) { null }
+                serviceScope.launch {
+                    try {
+                        delay(PAUSE_PREP_MS)
+                        if (tok != pauseSeq || isPlaying || preparing || starting) return@launch
+                        if (!prep.enabled(this@PlaybackService) || !prep.conditionsOk(this@PlaybackService)) return@launch
+                        Log.i(TAG, "Prepare: paused for ${PAUSE_PREP_MS / 60000} min — preparing the book")
+                        letGo("preparing")?.join()
+                        delay(2000)
+                        if (!isPlaying && !preparing && !starting) prep.kick(this@PlaybackService)
+                    } finally {
+                        try { if (keep?.isHeld == true) keep.release() } catch (_: Exception) { }
+                    }
+                }
             }
         }
     }

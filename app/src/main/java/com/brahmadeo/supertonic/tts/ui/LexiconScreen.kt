@@ -455,6 +455,7 @@ private fun PrepSection() {
     val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
     var on by remember { mutableStateOf(prep.enabled(context)) }
     var mode by remember { mutableStateOf(prep.mode(context)) }
+    var minLevel by remember { mutableFloatStateOf(prep.minLevel(context).toFloat()) }
     var tick by remember { mutableIntStateOf(0) }
     val book = remember { com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(context) }
     // how much is ready: counted in the background, again every few seconds while it is being made
@@ -496,6 +497,21 @@ private fun PrepSection() {
                         Text(label, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                // off the charger: from how full a battery
+                if (mode == prep.MODE_HALF) {
+                    Text(stringResource(AppR.string.prep_min_level, minLevel.toInt()), style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 12.dp, top = 2.dp))
+                    Slider(
+                        value = minLevel,
+                        onValueChange = { minLevel = (Math.round(it / 5f) * 5).toFloat() },
+                        onValueChangeFinished = { prep.setMinLevel(context, minLevel.toInt()) },
+                        valueRange = 20f..95f,
+                        steps = 14,
+                        modifier = Modifier.padding(start = 12.dp)
+                    )
+                }
+                Text(stringResource(AppR.string.prep_speed_note), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                 Text(
                     if (book == null) stringResource(AppR.string.prep_no_book)
                     else stringResource(AppR.string.prep_status, status.first, (status.second / (1024 * 1024)).toInt()),
