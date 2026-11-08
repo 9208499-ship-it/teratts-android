@@ -1553,11 +1553,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val c = chapters[k]
             currentCoroutineContext().ensureActive()
             prep.why(this)?.let { stopWhy(it); return }
-            // the same text the player gets (MainActivity.prepareTextForTts)
-            val t = c.text.trim()
-            val text = if (lang.lowercase().startsWith("ko") || t.endsWith(" .")) t else "$t ."
-            val effectiveLang = autoDetectRussian(text, lang)
-            val sentences = textNormalizer.splitIntoSentences(text, effectiveLang)
+            val (text, effectiveLang, sentences) = chapterForSpeech(c.text, lang)
             if (sentences.isEmpty() || prep.find(this, book, text, sentences.size, stylePath) != null) { k++; continue }
             // the chapter's number in the book (not in the list of the ones left: «1 of 10» read as the
             // book's first chapter — tolyos, 4PDA)
@@ -1590,6 +1586,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         prep.setNote(this, getString(R.string.prep_note_done))
     }
 
+    /** A chapter's text as the player gets it (MainActivity.prepareTextForTts), its language and phrases. */
+    private fun chapterForSpeech(raw: String, lang: String): Triple<String, String, List<String>> {
+        val t = raw.trim()
+        val text = if (lang.lowercase().startsWith("ko") || t.endsWith(" .")) t else "$t ."
+        val effectiveLang = autoDetectRussian(text, lang)
+        return Triple(text, effectiveLang, textNormalizer.splitIntoSentences(text, effectiveLang))
+    }
+
     private fun stopWhy(why: String) {
         Log.i(TAG, "Prepare: stopped — $why")
         com.brahmadeo.supertonic.tts.utils.BookPrep.setNote(this, getString(R.string.prep_note_stopped, why))
@@ -1599,7 +1603,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     /** One chapter into its file, phrase by phrase, with the index BookPrep plays it by. */
     private suspend fun prepareChapter(book: String, scope: String, text: String, sentences: List<String>,
-                                       lang: String, stylePath: String, steps: Int, progress: (Int) -> Unit): PrepEnd {
+                                       lang: String, stylePath: String, steps: Int, forExport: Boolean = false,
+                                       progress: suspend (Int) -> Unit): PrepEnd {
         val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
         val isAdvancedEnabled = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getBoolean("is_advanced_normalization", false)
         // the settings the chapter is made with, taken before it is begun (saved with it at the end)
@@ -1617,7 +1622,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             for ((index, chunkText) in sentences.withIndex()) {
                 if (!currentCoroutineContext().isActive) return PrepEnd.INTERRUPTED
                 if (SupertonicTTS.isCancelled()) return PrepEnd.INTERRUPTED
-                if (!prep.conditionsOk(this)) return PrepEnd.CONDITIONS
+                // (saving a book into files asked for by hand: not bound to the charger)
+                if (!forExport && !prep.conditionsOk(this)) return PrepEnd.CONDITIONS
                 // the CPU kept awake phrase by phrase (a stop elsewhere may have let the lock go)
                 try { wakeLock?.acquire(10 * 60 * 1000L) } catch (_: Exception) { }
                 starts.add(samples)
@@ -2168,6 +2174,86 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
+    /**
+     * A chapter of the book into a file — one system with the audio made beforehand (tolyos, 4PDA):
+     * a chapter prepared already is taken as it is (the voices and roles of the reading; seconds, not
+     * hours); one not prepared yet is prepared first (and stays prepared — the reading plays it from
+     * its file too), then saved. The reading's pace is put in when saved (prepared audio is at 1×).
+     */
+    private suspend fun exportChapter(raw: String, lang: String, stylePath: String, speed: Float, steps: Int,
+                                      relDir: String, baseName: String,
+                                      tags: com.brahmadeo.supertonic.tts.utils.Mp4Tags.Tags? = null,
+                                      hidden: Boolean = false,
+                                      progress: suspend (Int, Int) -> Unit): String? {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        val book = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this)
+            ?: return exportText(raw, lang, stylePath, speed, steps, relDir, baseName, tags, hidden, progress)
+        val scope = File(book).name
+        val (text, effectiveLang, sentences) = chapterForSpeech(raw, lang)
+        if (sentences.isEmpty()) return null
+        var index = prep.find(this, book, text, sentences.size, stylePath)
+        if (index == null) {
+            Log.i(TAG, "Export: voicing the chapter as the reading does (${sentences.size} phrases), it stays prepared")
+            val end = prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps, forExport = true) { done ->
+                progress(done, sentences.size)
+            }
+            if (end != PrepEnd.DONE) return null
+            index = prep.find(this, book, text, sentences.size, stylePath) ?: return null
+        } else Log.i(TAG, "Export: the chapter is prepared already — saved from its file")
+        return savePrepared(index, sentences.size, speed, relDir, baseName, tags, hidden, progress)
+    }
+
+    /** A prepared chapter into Music (or the user's folder): copied as it is, or at the reading's pace / with music. */
+    private suspend fun savePrepared(index: com.brahmadeo.supertonic.tts.utils.BookPrep.Index, phrases: Int, speed: Float,
+                                     relDir: String, baseName: String,
+                                     tags: com.brahmadeo.supertonic.tts.utils.Mp4Tags.Tags?, hidden: Boolean,
+                                     progress: suspend (Int, Int) -> Unit): String? {
+        val tmpDir = File(cacheDir, "export").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+        val music = if (com.brahmadeo.supertonic.tts.utils.BackgroundMusic.ready(this) && com.brahmadeo.supertonic.tts.utils.BackgroundMusic.exportChoice(this))
+            com.brahmadeo.supertonic.tts.utils.MusicStream.open(this, index.rate) else null
+        val asIs = kotlin.math.abs(speed - 1f) < 0.01f
+        if (asIs && music == null) {
+            // nothing to change: the file itself (with the chapter's title, the book and the cover)
+            val made = File(tmpDir, "chapter." + index.file.extension)
+            index.file.copyTo(made, overwrite = true)
+            progress(phrases, phrases)
+            try {
+                if (tags != null && made.extension == "m4a") com.brahmadeo.supertonic.tts.utils.Mp4Tags.write(made, tags)
+                return saveOut(made, relDir, baseName + "." + made.extension, hidden)
+            } finally { made.delete() }
+        }
+        val (writer, made) = com.brahmadeo.supertonic.tts.utils.AudioFileWriter.open(File(tmpDir, "chapter.m4a"), index.rate)
+        val reader = com.brahmadeo.supertonic.tts.utils.BookPrep.Reader(index)
+        var complete = false
+        try {
+            var i = 0
+            while (i < phrases) {
+                if (!currentCoroutineContext().isActive || SupertonicTTS.isCancelled()) break
+                val parts = reader.phrase(i) ?: break
+                for ((_, pcm) in parts) {
+                    val audio = if (asIs) pcm else SupertonicTTS.stretch(pcm, speed)
+                    music?.mixInto(audio)
+                    writer.write(audio)
+                }
+                i++
+                if (i % 20 == 0 || i == phrases) progress(i, phrases)
+            }
+            complete = i == phrases && currentCoroutineContext().isActive && !SupertonicTTS.isCancelled()
+        } finally {
+            reader.close()
+            music?.close()
+            if (!complete) { writer.abort(); made.delete() }
+        }
+        if (!complete) return null
+        try {
+            if (!writer.finish()) return null
+            if (tags != null && made.extension == "m4a") com.brahmadeo.supertonic.tts.utils.Mp4Tags.write(made, tags)
+            return saveOut(made, relDir, baseName + "." + made.extension, hidden)
+        } finally {
+            made.delete()
+        }
+    }
+
     // ---- where saved audio goes: the user's own folder (AudioFolder), else Music/Supertonic Audio ----
     private fun ownFolder() = com.brahmadeo.supertonic.tts.utils.AudioFolder.tree(this) != null
 
@@ -2315,7 +2401,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 deleteSaved(relDir, "$name.m4a")
                 deleteSaved(relDir, "$name.wav")
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
-                val shown = exportText(chapters[k].text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
+                val shown = exportChapter(chapters[k].text, lang, stylePath, speed, steps, relDir, name, tagsFor(k)) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(s, n) }
                 }
                 return@runExport (shown != null) to (shown ?: shownDir)
@@ -2331,7 +2417,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
                 wakeLock?.acquire(3 * 60 * 60 * 1000L)
                 // (in the user's folder: into the book's hidden folder until the whole book is there)
-                val shown = exportText(c.text, lang, stylePath, speed, steps, relDir, name, tagsFor(k), hidden = true) { s, n ->
+                val shown = exportChapter(c.text, lang, stylePath, speed, steps, relDir, name, tagsFor(k), hidden = true) { s, n ->
                     withContext(Dispatchers.Main) { notifyListenerProgress(k * 1000 + s * 1000 / maxOf(n, 1), chapters.size * 1000) }
                 }
                 if (shown != null) { saved++; job.chapterDone(this@PlaybackService, saved) }
