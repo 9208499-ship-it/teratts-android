@@ -152,9 +152,18 @@ object BookPrep {
         context.getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
     }
 
+    /** A phone call (or a messenger's) is on: the phone's audio mode says so, no permission needed. */
+    fun inCall(context: Context): Boolean = try {
+        val m = (context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).mode
+        m == android.media.AudioManager.MODE_IN_CALL || m == android.media.AudioManager.MODE_IN_COMMUNICATION ||
+            m == android.media.AudioManager.MODE_RINGTONE ||
+            (android.os.Build.VERSION.SDK_INT >= 30 && m == android.media.AudioManager.MODE_CALL_SCREENING)
+    } catch (_: Exception) { false }
+
     /** Why the phone may not make audio now (for the settings), or null if it may. */
     fun why(context: Context): String? {
         if (!enabled(context)) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_off)
+        if (inCall(context)) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_call)
         if (plugged(context)) return null
         if (mode(context) != MODE_HALF) return context.getString(com.brahmadeo.supertonic.tts.R.string.prep_why_unplugged)
         val bm = context.getSystemService(android.os.BatteryManager::class.java)

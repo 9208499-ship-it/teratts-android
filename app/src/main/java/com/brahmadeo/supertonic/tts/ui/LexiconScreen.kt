@@ -242,6 +242,7 @@ fun LexiconScreen(
             item { FastCoresRow() }
             item { SpeedTestRow() }
             item { RoleModelBenchRow() }
+            item { RoleModelRow() }
           }
           "about" -> {
             item { AboutRow() }
@@ -882,6 +883,61 @@ private fun SpeedTestRow() {
             }
         )
     }
+}
+
+/** The role model (опыт): download, use or not, delete. */
+@Composable
+private fun RoleModelRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val rm = com.brahmadeo.supertonic.tts.utils.RoleModel
+    val scope = rememberCoroutineScope()
+    var installed by remember { mutableStateOf(rm.installed(context)) }
+    var on by remember { mutableStateOf(rm.wanted(context)) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var askDelete by remember { mutableStateOf(false) }
+    val prog = rm.progress.value
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = stringResource(AppR.string.role_model_title), style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = when {
+                            prog != null -> stringResource(AppR.string.role_model_loading, (prog * 100).toInt())
+                            installed -> stringResource(AppR.string.role_model_installed, (rm.size(context) / 1_000_000L).toInt())
+                            else -> stringResource(AppR.string.role_model_desc)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (installed) Switch(checked = on, onCheckedChange = { on = it; rm.setWanted(context, it) })
+            }
+            if (prog != null) LinearProgressIndicator(progress = { prog }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            Row {
+                if (!installed && prog == null) TextButton(onClick = {
+                    error = null
+                    scope.launch {
+                        try { rm.download(context) } catch (e: Throwable) { error = e.message ?: e.javaClass.simpleName }
+                        installed = rm.installed(context)
+                    }
+                }) { Text(stringResource(AppR.string.role_model_download)) }
+                if (installed) TextButton(onClick = { askDelete = true }) { Text(stringResource(AppR.string.role_model_delete)) }
+            }
+            error?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        }
+    }
+    if (askDelete) AlertDialog(
+        onDismissRequest = { askDelete = false },
+        title = { Text(stringResource(AppR.string.role_model_title)) },
+        text = { Text(stringResource(AppR.string.role_model_delete_ask)) },
+        confirmButton = { TextButton(onClick = { askDelete = false; rm.delete(context); installed = false }) { Text(stringResource(AppR.string.role_model_delete)) } },
+        dismissButton = { TextButton(onClick = { askDelete = false }) { Text(stringResource(android.R.string.cancel)) } }
+    )
 }
 
 /** "Скорость модели ролей" (опыт): times one 2048-token window of each ONNX model put in the app's folder

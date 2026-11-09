@@ -660,6 +660,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             isSynthesizing = true
             isPlaying = true
             SupertonicTTS.setCancelled(false)
+            watchCalls()
 
             updatePlaybackState(PlaybackStateCompat.STATE_BUFFERING)
             startForegroundService(getString(R.string.notif_synthesizing), false)
@@ -1176,7 +1177,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         if (aheadEpoch != epoch) return
         val a = Ahead(text, stylePath, com.brahmadeo.supertonic.tts.utils.BookPrep.fingerprint(this, stylePath))
         ahead = a
-        a.plan = voicePlan(text, sentences, stylePath, File(path).name)
+        // the role model works the next chapter out now (three cores, the reading keeps the rest)
+        a.plan = voicePlan(text, sentences, stylePath, File(path).name, 3) { aheadEpoch != epoch }
         val plan = a.plan ?: return
         var seconds = 0f
         var first = true
@@ -1211,7 +1213,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     )
 
     /** [charScope]: the book whose character settings apply ("" — none). */
-    private suspend fun voicePlan(text: String, sentences: List<String>, stylePath: String, charScope: String): VoicePlan {
+    /** [modelThreads] > 0: the role model works the chapter out now if it has not (see RoleModel); [modelStop] stops it. */
+    private suspend fun voicePlan(text: String, sentences: List<String>, stylePath: String, charScope: String,
+                                  modelThreads: Int = 0, modelStop: () -> Boolean = { false }): VoicePlan {
         // Reading by roles: who says what, worked out once for the whole text
         val rolesOn = com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this@PlaybackService)
         // the whole book's characters (built once in the background) and the user's corrections
@@ -1226,8 +1230,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             roster?.aliases ?: emptyMap())
         val roleResult = if (rolesOn) {
             try {
-                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text, rolePrior),
-                    (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope))
+                val roleAliases = (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope)
+                val (r0, probes) = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyzeLines(text, rolePrior)
+                val r1 = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(r0, roleAliases)
+                // the role model's sure guesses (if it is on and has this chapter worked out)
+                com.brahmadeo.supertonic.tts.utils.RoleModelGlue.improve(this@PlaybackService, charScope, text, r1, probes, roster,
+                    roleAliases, modelThreads, modelStop)
             } catch (e: Throwable) {
                 Log.e(TAG, "Role analysis failed, reading without roles", e); null
             }
@@ -1391,6 +1399,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         prepWaiter?.cancel()
         prep.now.value = getString(R.string.prep_starting)
         preparing = true
+        watchCalls()
         prep.making = true
         SupertonicTTS.setCancelled(false)
         prepByHandStop = false
@@ -1609,7 +1618,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val isAdvancedEnabled = getSharedPreferences("SupertonicPrefs", MODE_PRIVATE).getBoolean("is_advanced_normalization", false)
         // the settings the chapter is made with, taken before it is begun (saved with it at the end)
         val madeWith = prep.settings(this, stylePath)
-        val plan = voicePlan(text, sentences, stylePath, scope)
+        val plan = voicePlan(text, sentences, stylePath, scope, 4)
         val rate = SupertonicTTS.getAudioSampleRate()
         val dir = prep.bookDir(this, book).apply { mkdirs() }
         val key = prep.textKey(text)
@@ -1847,6 +1856,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         if (!isPlaying) {
             if (requestAudioFocus()) {
                 isPlaying = true
+                watchCalls()
                 try { wakeLock?.acquire(10 * 60 * 1000L) } catch (_: Exception) { }
                 try {
                     if (audioTrack?.state == AudioTrack.STATE_INITIALIZED) {
@@ -2090,6 +2100,58 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
     }
 
+    // ---- phone calls ----
+    // A call answered in a Bluetooth headset while the book was read: the callers hardly heard the
+    // user until the book was stopped (tolyos). Whatever the audio focus says, during a call (the
+    // phone's or a messenger's) nothing is read and nothing is made: the reading waits and goes on
+    // after the call, preparing the book stops and starts again later.
+    @Volatile private var pausedByCall = false
+    @Volatile private var prepStoppedByCall = false
+    private var callWatch: Job? = null
+
+    private fun pauseForCall() {
+        if (!isPlaying) return
+        Log.i(TAG, "call: the reading waits")
+        pausedByCall = true
+        resumeOnFocusGain = true
+        isPlaying = false
+        try {
+            if (audioTrack?.state == AudioTrack.STATE_INITIALIZED) audioTrack?.pause()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pausing for a call", e)
+        }
+        notifyListenerState(false)
+        updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
+        updateNotification(getString(R.string.notif_paused))
+    }
+
+    /** Looks at the phone's audio mode while something is read or made (a call needs no permission to be seen there). */
+    private fun watchCalls() {
+        if (callWatch?.isActive == true) return
+        callWatch = serviceScope.launch {
+            var calm = 0
+            while (isActive) {
+                delay(700)
+                if (com.brahmadeo.supertonic.tts.utils.BookPrep.inCall(this@PlaybackService)) {
+                    calm = 0
+                    if (isPlaying) pauseForCall()
+                    if (preparing) { Log.i(TAG, "call: preparing stops"); prepStoppedByCall = true; stopPrepare() }
+                    continue
+                }
+                if (pausedByCall || prepStoppedByCall) {
+                    // the call is over for two seconds: go on (unless the user paused or stopped meanwhile)
+                    if (++calm < 3) continue
+                    if (pausedByCall) {
+                        pausedByCall = false
+                        if (resumeOnFocusGain && !isPlaying && isSynthesizing) { Log.i(TAG, "call over: reading on"); play() }
+                    }
+                    if (prepStoppedByCall) { prepStoppedByCall = false; prepareLater() }
+                }
+                if (!isPlaying && !isSynthesizing && !preparing && !starting) break
+            }
+        }
+    }
+
     override fun onAudioFocusChange(focusChange: Int) {
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> stopServicePlayback()
@@ -2107,11 +2169,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     notifyListenerState(false)
                     updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
                 }
+                watchCalls()
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                try {
+                // a phone call that only asks to be quieter (some phones, a Bluetooth headset): reading
+                // on under it — the engine taking every core — left the caller hardly hearing the user
+                if (com.brahmadeo.supertonic.tts.utils.BookPrep.inCall(this)) pauseForCall()
+                else try {
                     audioTrack?.setVolume(0.2f)
                 } catch (_: Exception) {}
+                watchCalls()
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 try {

@@ -31,6 +31,18 @@ object DialogueAnalyzer2 {
     /** [aliases]: names found to be one person ("Сноук" → "Лорк", the hero's own name → [HERO]). */
     class Result(val spans: List<Span>, val characters: List<Character>, val aliases: Map<String, String> = emptyMap())
 
+    /** A line as the rules saw it (for the role model): its paragraph, speech and author words; [kind] 0 — no
+     *  author words that name anyone, 1 a pronoun («ответил он»), 2 «я», 3 a role noun, 4 a name, 5 an introduction. */
+    class Probe(val ps: Int, val pe: Int, val speech: List<IntArray>, val authors: List<IntArray>, val kind: Int, val quoted: Boolean, val speaker: String?)
+    private val probeTL = ThreadLocal<MutableList<Probe>?>()
+
+    /** [analyze] and the lines it saw (the role model reads them). */
+    fun analyzeLines(text: String, prior: Prior? = null): Pair<Result, List<Probe>> {
+        val l = ArrayList<Probe>()
+        probeTL.set(l)
+        try { return analyze(text, prior) to l } finally { probeTL.remove() }
+    }
+
     /**
      * What is known beyond this text: genders of characters learned from the whole
      * book, and the user's corrections — speechKey(line) → speaker name, or
@@ -307,6 +319,25 @@ object DialogueAnalyzer2 {
      */
     private val speakerNouns: Map<String, G> get() = nounsTL.get() ?: BASE_NOUNS
     private val nounsTL = ThreadLocal<Map<String, G>>()
+
+    /** Honorifics of translated novels: «сказал мистер Беннет» names Беннет, not «мистер». */
+    private val HONOR_M = setOf("мистер", "сэр", "лорд", "мсье", "месье", "герр", "пан", "синьор", "сеньор", "милорд")
+    private val HONOR_F = setOf("миссис", "мисс", "леди", "мадам", "мадемуазель", "фрау", "пани", "синьора", "сеньора", "синьорина", "миледи")
+    private val HONOR = HONOR_M + HONOR_F
+    private val HONOR_NAME = Regex("""(?<![А-Яа-яЁё])((?iu:""" + HONOR.joinToString("|") + """))\s+([А-ЯЁ][а-яё]+)(?![А-Яа-яЁё])""")
+    /** Surnames a family shares («мистер Беннет», «миссис Беннет», «мисс Беннет»): there the title is part of the name. */
+    private val familyTL = ThreadLocal<Set<String>>()
+    /** A book told in the third person: nobody there is «я» (a letter or a story inside it made 80 lines the hero's). */
+    private val thirdTL = ThreadLocal<Boolean>()
+    private val NARR_I = Regex("""(?iu)(^|[^а-яё])(я|мне|меня|мной)([^а-яё]|$)""")
+
+    /** The name at [k] with its honorific: «Беннет», or «Миссис Беннет» when the surname is a family's. */
+    private fun honored(head: List<String>, k: Int): String? {
+        val t = head.getOrNull(k - 1)?.lowercase() ?: return null
+        if (t !in HONOR) return null
+        val w = head.getOrNull(k) ?: return null
+        return if (w in (familyTL.get() ?: emptySet<String>())) t.replaceFirstChar { it.uppercase() } + " " + w else w
+    }
     /** The book's own speaker nouns of this analysis (not [BASE_NOUNS]). */
     private val ownNounsTL = ThreadLocal<Set<String>>()
 
@@ -369,7 +400,24 @@ object DialogueAnalyzer2 {
         }
         nounsTL.set(if (own.isEmpty()) BASE_NOUNS else BASE_NOUNS + own)
         ownNounsTL.set(own.keys)
-        try { return analyzeImpl(text, prior) } finally { properTL.remove(); stemTL.remove(); nounsTL.remove(); ownNounsTL.remove() }
+        // a surname under two or more honorifics (each seen twice) is a family's: «мистер Беннет» and «миссис Беннет» are two people
+        val titlesOf = HashMap<String, HashMap<String, Int>>()
+        for (m in HONOR_NAME.findAll(text)) titlesOf.getOrPut(m.groupValues[2]) { HashMap() }.merge(m.groupValues[1].lowercase(), 1, Int::plus)
+        val fam = titlesOf.filter { (_, t) -> t.count { it.value >= 2 } >= 2 }.keys.toHashSet()
+        prior?.genders?.keys?.forEach { n -> val p = n.split(' '); if (p.size == 2 && p[0].lowercase() in HONOR) fam += p[1] }
+        familyTL.set(fam)
+        // the share of narration paragraphs with «я/мне/меня»: a first-person book has 0.4–0.9, a third-person one
+        // 0.00–0.07 (letters, a told story — «Пять поросят» 0.2); a chapter with little narration takes the whole book's word
+        val narr = text.split('\n').filter { it.isNotBlank() && it.trimStart().firstOrNull()?.let { c -> c in dashes || c == '«' || c == '"' || c == '„' } != true }
+            .map { it.replace(Regex("""«[^»]*»|"[^"]*"|„[^“]*“"""), " ") }
+        val narrI = narr.count { NARR_I.containsMatchIn(it) }
+        thirdTL.set(when {
+            prior?.genders?.containsKey(HERO) == true -> false
+            narr.size >= 15 -> narrI * 100 < narr.size * 12
+            prior != null -> prior.genders.isNotEmpty()
+            else -> false
+        })
+        try { return analyzeImpl(text, prior) } finally { properTL.remove(); stemTL.remove(); nounsTL.remove(); ownNounsTL.remove(); familyTL.remove(); thirdTL.remove() }
     }
 
     /** The stems a noun's case forms are built on: "корнол", "оборотен" and "оборотн" (оборотня), "старец"/"старц". */
@@ -408,7 +456,7 @@ object DialogueAnalyzer2 {
         val seen = HashMap<String, IntArray>()
         for (m in NOUN_AFTER_VERB.findAll(text)) {
             val w = m.groupValues[3]
-            if (w in BASE_NOUNS || w in NOT_NOUNS || w in SMALL_WORDS || w in SOMEONE) continue
+            if (w in BASE_NOUNS || w in NOT_NOUNS || w in SMALL_WORDS || w in SOMEONE || w in HONOR) continue
             // adjectives, adverbs, infinitives, reflexives, gerunds: not who speaks
             if (listOf("ый", "ий", "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ых", "их", "ть", "ся", "сь",
                     "ти", "ло", "ли", "но", "ко", "го", "ши", "ву", "ую", "юю", "ым", "им").any { w.endsWith(it) }) continue
@@ -434,6 +482,7 @@ object DialogueAnalyzer2 {
     }
 
     private fun analyzeImpl(text: String, prior: Prior?): Result {
+        val third = thirdTL.get() == true
         val paragraphs = paragraphRanges(text)
         val parsed = paragraphs.map { (s, e) -> parseParagraph(text, s, e) }
 
@@ -473,6 +522,10 @@ object DialogueAnalyzer2 {
         val nameGender = HashMap<String, G>()
         for ((n, c) in nameVotes) {
             if (c[0] > c[1] * 2) nameGender[n] = G.M else if (c[1] > c[0] * 2) nameGender[n] = G.F
+            // «Миссис Беннет»: the title tells
+            n.split(' ').takeIf { it.size == 2 }?.get(0)?.lowercase()?.let { t ->
+                if (t in HONOR_M) nameGender[n] = G.M else if (t in HONOR_F) nameGender[n] = G.F
+            }
         }
         // the whole book's genders win over this chapter's: one chapter may have a single
         // "сказала" by mistake, the book has all of them (a man must not turn into a woman for a chapter)
@@ -748,8 +801,8 @@ object DialogueAnalyzer2 {
                         // introduced right before ("я задал вопрос:", "В голове прозвучало:")
                         pendingFromIntro && pendingQuoteSpeaker != null -> pendingQuoteSpeaker
                         // «Сеть, Магик, озвучьте…» is said TO them: in a first-person book, by the hero
-                        addresseeIn(body, emptyList()) != null -> HERO
-                        firstPersonSingular.containsMatchIn(body) -> HERO     // the hero thinking: narrator's voice
+                        !third && addresseeIn(body, emptyList()) != null -> HERO
+                        !third && firstPersonSingular.containsMatchIn(body) -> HERO     // the hero thinking: narrator's voice
                         // «Да». «Да». — both voices answered the same
                         pendingQuoteSpeaker != null && body.trim() == lastQuoteBody -> pendingQuoteSpeaker
                         // the hero asked the voice in his head: this is its answer
@@ -763,7 +816,7 @@ object DialogueAnalyzer2 {
                             WORD.findAll(body).count() <= 3 && heroAttributed > 0 -> HERO
                         pendingQuoteSpeaker != null -> pendingQuoteSpeaker     // a run of messages
                         systemContent.containsMatchIn(body) -> SYSTEM
-                        firstPersonThought.containsMatchIn(body) -> HERO
+                        !third && firstPersonThought.containsMatchIn(body) -> HERO
                         else -> null
                     }
                 }
@@ -797,7 +850,7 @@ object DialogueAnalyzer2 {
                 pendingFromIntro = false
             } else if (h != null) {
                 when {
-                    h.hero -> { speaker = HERO; gender = h.verbGender; heroAttributed++ }
+                    h.hero && !third -> { speaker = HERO; gender = h.verbGender; heroAttributed++ }
                     h.name != null -> {
                         speaker = canon(h.name) ?: h.name
                         gender = h.verbGender ?: nameGender[speaker]
@@ -994,6 +1047,10 @@ object DialogueAnalyzer2 {
                     }
                 }
             }
+            probeTL.get()?.add(Probe(p.start, p.end, p.speech.map { intArrayOf(it.first, it.second) }, authors.map { intArrayOf(it.first, it.second) },
+                when { ownHint == null -> if (authors.isEmpty() && introBefore != null) 5 else 0
+                       ownHint.name != null -> 4; ownHint.noun != null -> 3; ownHint.hero -> 2; ownHint.pronoun != null -> 1; else -> 0 },
+                p.quoted, speaker))
             out.addAll(spans)
             // "— Задачу принял, — уведомил Декстер. А вслед за ним отчитался и Ньютон:" — the next line is Ньютон's
             if (!p.quoted && authors.isNotEmpty() && text.substring(p.start, p.end).trimEnd().endsWith(":"))
@@ -1179,11 +1236,49 @@ object DialogueAnalyzer2 {
                 }
             }
             val people = lineCount.keys.filter { it != HERO && it != SYSTEM && it.first().isUpperCase() && it.length >= 3 && it !in merge }
+            fun pairRe(a: String, b: String) = Regex("""(?<![А-Яа-яЁё])""" + Regex.escape(a) + """\s+(?:[А-ЯЁ][а-яё]+(?:ович|евич|ич|овна|евна|ична|инична)\s+)?""" +
+                Regex.escape(b) + """(?![А-Яа-яЁё])""")
+            // every "Имя Фамилия" (and "Имя Отчество Фамилия") of the text in one pass: a regex per pair of
+            // people was hundreds of thousands of passes over a whole book
+            val cyr = Regex("[А-Яа-яЁё]+")
+            val patron = Regex("[А-ЯЁ][а-яё]+(?:ович|евич|ич|овна|евна|ична|инична)")
+            val seenPairs = HashMap<String, Int>()
+            run {
+                val toks = cyr.findAll(text).toList()
+                fun ws(x: MatchResult, y: MatchResult): Boolean {
+                    val g0 = x.range.last + 1; val g1 = y.range.first
+                    if (g1 <= g0) return false
+                    for (k in g0 until g1) if (!text[k].isWhitespace()) return false
+                    return true
+                }
+                for (k in 0 until toks.size - 1) {
+                    val x = toks[k]; val y = toks[k + 1]
+                    if (!ws(x, y)) continue
+                    seenPairs.merge(x.value + "\u0000" + y.value, 1, Int::plus)
+                    val z = toks.getOrNull(k + 2) ?: continue
+                    if (patron.matches(y.value) && ws(y, z)) seenPairs.merge(x.value + "\u0000" + z.value, 1, Int::plus)
+                }
+            }
+            fun cyrOnly(w: String) = w.isNotEmpty() && w.all { it in 'А'..'я' || it == 'Ё' || it == 'ё' }
+            fun hasPair(a: String, b: String) =
+                if (cyrOnly(a) && cyrOnly(b)) (a + "\u0000" + b) in seenPairs else pairRe(a, b).containsMatchIn(text)
+            fun pairCount(a: String, b: String) =
+                if (cyrOnly(a) && cyrOnly(b)) seenPairs[a + "\u0000" + b] ?: 0 else pairRe(a, b).findAll(text).count()
+            // a family's surname («Элизабет Беннет», «Джейн Беннет», «миссис Беннет»; «Алексей Турбин», «Николка
+            // Турбин»): it is not one person's other name — merged, a whole family spoke in one voice
+            val family = HashSet(familyTL.get() ?: emptySet<String>())
+            // (first names only: «Профессор Лэнгдон», «Капитан …» are titles of the one man)
+            // a common noun too («Посол Нагель» — «посол» stands in the text in small letters): no first name
+            val lowerWords = HashMap<String, Int>()
+            for (m in cyr.findAll(text)) if (m.value[0].isLowerCase()) lowerWords.merge(m.value, 1, Int::plus)
+            fun titleWord(w: String) = w.lowercase().let { it in speakerNouns || it in maleTitles || it in femaleTitles || it in TITLES || it in HONOR ||
+                (lowerWords[it] ?: 0) >= 2 }
+            // two first names, each seen twice with the surname («Соломон Лэнгдон» once is no family)
+            for (b in people) if (b !in family && people.count { a -> a != b && !titleWord(a) && pairCount(a, b) >= 2 } >= 2) family += b
             for (a in people) for (b in people) {
                 if (a == b || a in merge || b in merge) continue
                 // "Лорк Сноук", "Лев Николаевич Мышкин" (a patronymic between the name and the surname)
-                val pair = Regex("""(?<![А-Яа-яЁё])""" + Regex.escape(a) + """\s+(?:[А-ЯЁ][а-яё]+(?:ович|евич|ич|овна|евна|ична|инична)\s+)?""" +
-                    Regex.escape(b) + """(?![А-Яа-яЁё])""").containsMatchIn(text)
+                val pair = b !in family && hasPair(a, b)
                 val short = b.startsWith(a) && b.length >= a.length + 4 && genderOf(a) == genderOf(b)
                 // "Саша" and "Александр" (when the text does not say they are of different sex)
                 val sameName = sameFirstName(a, b) &&
@@ -1768,7 +1863,7 @@ object DialogueAnalyzer2 {
     private fun isNameWord(w: String) =
         // two letters only for acronyms ("ИИ"): "На", "По", "Ну" open sentences, they are not names
         (w.length >= 3 || w.all { it.isUpperCase() }) && w.length >= 2 &&
-            (w[0].isUpperCase() || w[0].isDigit()) && w !in notNames && w != "Я"
+            (w[0].isUpperCase() || w[0].isDigit()) && w !in notNames && w != "Я" && w.lowercase() !in HONOR
 
     /**
      * Who the author words point at. Russian puts the speaker next to the speech
@@ -1817,11 +1912,14 @@ object DialogueAnalyzer2 {
                 // (an adjective may stand between) it is not who speaks
                 if (afterPreposition(head, n)) continue
                 when {
+                    // «ответил мистер Беннет»: the name after the honorific
+                    lw in HONOR && head.getOrNull(n + 1)?.let { isNameWord(it) && fits(it, g) } == true && n >= i ->
+                        return Hint(honored(head, n + 1), null, null, g)
                     lw == "я" -> return Hint(null, null, null, g, hero = true)
                     lw in speakerNouns && (speakerNouns[lw] == null || speakerNouns[lw] == g) -> return Hint(null, lw, null, g)
                     lw == "он" -> return Hint(null, null, G.M, g)
                     lw == "она" -> return Hint(null, null, G.F, g)
-                    isNameWord(w) && isProper(w) && pastGender(w, false) == null && fits(w, g) -> return Hint(w, null, null, g)
+                    isNameWord(w) && isProper(w) && pastGender(w, false) == null && fits(w, g) -> return Hint(honored(head, n) ?: w, null, null, g)
                 }
             }
         }
@@ -1839,7 +1937,7 @@ object DialogueAnalyzer2 {
                     // not a gerund ("Решив", "Обернувшись")
                     listOf("ив", "ав", "ыв", "ув", "вши", "вшись").none { e -> w.lowercase().endsWith(e) } &&
                     (1..5).any { d -> head.getOrNull(d)?.let { pastGender(it, false) } != null }))
-        }?.let { return Hint(it.value, null, null, tagG) }
+        }?.let { return Hint(honored(head, it.index) ?: it.value, null, null, tagG) }
         head.withIndex().lastOrNull { (k, w) -> w.lowercase() in speakerNouns && !afterPreposition(head, k) &&
                 (tagG == null || speakerNouns[w.lowercase()] == null || speakerNouns[w.lowercase()] == tagG) }
             ?.let { return Hint(null, it.value.lowercase(), null, tagG) }
