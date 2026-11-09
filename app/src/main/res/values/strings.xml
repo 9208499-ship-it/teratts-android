@@ -661,6 +661,7 @@
     <string name="prep_min_level">On the battery — when at least %1$d per cent charged</string>
     <string name="prep_speed_note">On the charger the book is voiced at full speed. On the battery — slowly, in the background, so the phone is neither slowed down nor heated.</string>
     <string name="role_bench_title">Role model speed (experiment)</string>
-    <string name="role_bench_desc">Pick a role model file (.onnx): the app times one window of text (2048 tokens) with 2, 4 and all cores. Reading is not changed.</string>
+    <string name="role_bench_desc">Models (.onnx) go into the app folder with adb push. The app times one window of text (2048 tokens) with 2, 4 and all cores. Reading is not changed.</string>
     <string name="role_bench_starting">Starting…</string>
+    <string name="role_bench_none">There are no model files (.onnx) in the app folder. Put them there from a computer with adb push:</string>
 </resources>

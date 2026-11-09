@@ -884,7 +884,9 @@ private fun SpeedTestRow() {
     }
 }
 
-/** "Замер скорости модели ролей" (опыт): times one 2048-token window of a chosen ONNX model; reading is not touched. */
+/** "Скорость модели ролей" (опыт): times one 2048-token window of each ONNX model put in the app's folder
+ *  (adb push … /sdcard/Android/data/<package>/files/); reading is not touched. No file picker: while it is open
+ *  the system may unload the app. */
 @Composable
 private fun RoleModelBenchRow() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -892,17 +894,6 @@ private fun RoleModelBenchRow() {
     var dialog by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
     val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        running = true
-        dialog = context.getString(AppR.string.role_bench_starting)
-        Thread {
-            val text = bench.run(context, uri) { msg -> main.post { dialog = msg } }
-            main.post { running = false; dialog = text }
-        }.start()
-    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
@@ -913,7 +904,17 @@ private fun RoleModelBenchRow() {
                     android.widget.Toast.makeText(context, AppR.string.speed_test_busy, android.widget.Toast.LENGTH_LONG).show()
                     return@clickable
                 }
-                pick.launch(arrayOf("*/*"))
+                if (bench.models(context).isEmpty()) {
+                    dialog = context.getString(AppR.string.role_bench_none) + "\n\n" + (bench.folder(context)?.absolutePath ?: "?")
+                    return@clickable
+                }
+                running = true
+                dialog = context.getString(AppR.string.role_bench_starting)
+                Thread {
+                    val text = bench.run(context) { msg -> main.post { dialog = msg } }
+                    android.util.Log.i("RoleModelBench", text)
+                    main.post { running = false; dialog = text }
+                }.start()
             },
         shape = MaterialTheme.shapes.small
     ) {
