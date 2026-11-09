@@ -660,4 +660,7 @@
     <string name="typeset_desc">Переносы слов и выравнивание по ширине</string>
     <string name="prep_min_level">От батареи — при заряде не ниже %1$d процентов</string>
     <string name="prep_speed_note">На зарядке книга озвучивается в полную силу. От батареи — медленно, в фоне, чтобы телефон не тормозил и не грелся.</string>
+    <string name="role_bench_title">Скорость модели ролей (опыт)</string>
+    <string name="role_bench_desc">Выберите файл модели ролей (.onnx): программа замерит одно окно текста (2048 токенов) на 2, 4 и всех ядрах. Чтение не меняется.</string>
+    <string name="role_bench_starting">Начинаю…</string>
 </resources>

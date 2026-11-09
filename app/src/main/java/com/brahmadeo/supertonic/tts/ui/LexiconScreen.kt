@@ -241,6 +241,7 @@ fun LexiconScreen(
             item { KeepReadyRow() }
             item { FastCoresRow() }
             item { SpeedTestRow() }
+            item { RoleModelBenchRow() }
           }
           "about" -> {
             item { AboutRow() }
@@ -870,6 +871,62 @@ private fun SpeedTestRow() {
         AlertDialog(
             onDismissRequest = { if (!running) dialog = null },
             title = { Text(stringResource(AppR.string.speed_test_title)) },
+            text = {
+                Column {
+                    if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))
+                    Text(text)
+                }
+            },
+            confirmButton = {
+                if (!running) TextButton(onClick = { dialog = null }) { Text(stringResource(android.R.string.ok)) }
+            }
+        )
+    }
+}
+
+/** "Замер скорости модели ролей" (опыт): times one 2048-token window of a chosen ONNX model; reading is not touched. */
+@Composable
+private fun RoleModelBenchRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bench = com.brahmadeo.supertonic.tts.utils.RoleModelBench
+    var dialog by remember { mutableStateOf<String?>(null) }
+    var running by remember { mutableStateOf(false) }
+    val main = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        running = true
+        dialog = context.getString(AppR.string.role_bench_starting)
+        Thread {
+            val text = bench.run(context, uri) { msg -> main.post { dialog = msg } }
+            main.post { running = false; dialog = text }
+        }.start()
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .clickable(enabled = !running) {
+                if (com.brahmadeo.supertonic.tts.service.PlaybackService.busy() || bench.running) {
+                    android.widget.Toast.makeText(context, AppR.string.speed_test_busy, android.widget.Toast.LENGTH_LONG).show()
+                    return@clickable
+                }
+                pick.launch(arrayOf("*/*"))
+            },
+        shape = MaterialTheme.shapes.small
+    ) {
+        Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(text = stringResource(AppR.string.role_bench_title), style = MaterialTheme.typography.titleSmall)
+            Text(text = stringResource(AppR.string.role_bench_desc), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    dialog?.let { text ->
+        AlertDialog(
+            onDismissRequest = { if (!running) dialog = null },
+            title = { Text(stringResource(AppR.string.role_bench_title)) },
             text = {
                 Column {
                     if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp))

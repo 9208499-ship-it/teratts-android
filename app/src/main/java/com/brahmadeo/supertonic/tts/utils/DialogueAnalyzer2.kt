@@ -223,7 +223,8 @@ object DialogueAnalyzer2 {
     /** Titles that stand before a name ("начальник Рафт"): such a speaker is that person in the chapter. */
     private val TITLES = setOf("начальник", "командир", "капитан", "ректор", "маг", "страж", "стражник", "лейтенант", "генерал",
         "сержант", "офицер", "профессор", "доктор", "учитель", "мастер", "старейшина", "вождь", "король", "королева", "князь",
-        "княгиня", "граф", "графиня", "барон", "баронесса", "лорд", "леди", "господин", "госпожа", "майор", "полковник", "адмирал")
+        "княгиня", "граф", "графиня", "барон", "баронесса", "лорд", "леди", "господин", "госпожа", "майор", "полковник", "адмирал",
+        "мистер", "миссис", "мисс", "сэр", "мсье", "месье", "мадам", "мадемуазель", "фрау", "герр", "пан", "пани", "синьор", "синьора")
     /** A speaker telling his name: «Зовут меня Лениавес», «меня зовут Глен», «моё имя — Рох». */
     private val SELF_NAME = Regex("""(?iu:меня\s+зовут|зовут\s+меня|мо[её]\s+имя|имя\s+мо[её])\s*[-–—:,]?\s*([А-ЯЁ][а-яё]+)""")
     /** «Я — Глен» at the start of a line (only a name already known counts). */
@@ -617,18 +618,25 @@ object DialogueAnalyzer2 {
             if (heroTags >= 3) {
                 val toHero = HashMap<String, Int>()
                 val toSelf = HashMap<String, Int>()
+                val notHero = HashMap<String, Int>()            // the hero himself calls him so
                 for ((i, q) in parsed.withIndex()) {
                     if (q.speech.isEmpty() || q.quoted) continue
                     val body = q.speech.joinToString(" ") { (a, b, _) -> text.substring(a, b) }
                     val addr = addresseeIn(body, emptyList()) ?: continue
                     if (!addr.first().isUpperCase() || addr == SYSTEM) continue
+                    // "— Скажите, мистер Астлей, … — сказал я": the hero speaks to him — he is not the hero
+                    // («Игрок»: Астлей was taken for the hero's own name and spoke in the narrator's voice)
+                    val own = explicitAt(i)
+                    // (but "— Андрей, — представился я": a name alone is the hero telling his own name)
+                    if (own == HERO) { if (WORD.findAll(body).count() > 2) notHero[addr] = (notHero[addr] ?: 0) + 1; continue }
+                    if (own == addr) continue
                     val next = ((i + 1)..minOf(i + 2, parsed.size - 1)).firstOrNull { parsed[it].speech.isNotEmpty() } ?: continue
                     when (explicitAt(next)) {
                         HERO -> toHero[addr] = (toHero[addr] ?: 0) + 1
                         addr -> toSelf[addr] = (toSelf[addr] ?: 0) + 1
                     }
                 }
-                for ((n, c) in toHero) if (c >= 2 && c >= 2 * (toSelf[n] ?: 0) + 1) heroNames.add(n)
+                for ((n, c) in toHero) if (c >= 2 && c >= 2 * (toSelf[n] ?: 0) + 1 && !((notHero[n] ?: 0) >= 2 && (notHero[n] ?: 0) * 2 >= c)) heroNames.add(n)
             }
             prior?.aliases?.forEach { (from, to) -> if (to == HERO) heroNames.add(from) }
             // his surname too: "Алексей Скарф" — "господин Скарф" is the hero as well
@@ -1183,6 +1191,18 @@ object DialogueAnalyzer2 {
                 if (!pair && !short && !sameName) continue
                 val (from, to) = if ((lineCount[a] ?: 0) >= (lineCount[b] ?: 0)) b to a else a to b
                 if (genderOf(from) != null && genderOf(to) != null && genderOf(from) != genderOf(to)) continue
+                merge[from] = to
+            }
+            // one word written two ways: «король» (сказал король) and «Король» (as a title, at the start of a
+            // sentence) — one person; as two they got two voices, and «Король» even had no sex («Алиса»)
+            for (k in lineCount.keys.toList()) {
+                if (k == HERO || k == SYSTEM || k in merge || !k.first().isLowerCase()) continue
+                val cap = k.replaceFirstChar { it.uppercaseChar() }
+                if (cap !in lineCount || cap in merge || cap in merge.values || k in merge.values) continue
+                if (prior?.aliases?.let { al -> al[cap] != null || al[k] != null || cap in al.values || k in al.values } == true) continue
+                if (genderOf(k) != null && genderOf(cap) != null && genderOf(k) != genderOf(cap)) continue
+                val (from, to) = if ((lineCount[k] ?: 0) >= (lineCount[cap] ?: 0)) cap to k else k to cap
+                if (nameGender[to] == null) genderOf(from)?.let { nameGender[to] = it }
                 merge[from] = to
             }
             if (merge.isEmpty()) return@run
