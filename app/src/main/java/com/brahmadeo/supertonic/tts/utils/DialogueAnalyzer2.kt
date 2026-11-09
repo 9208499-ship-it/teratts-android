@@ -1243,20 +1243,27 @@ object DialogueAnalyzer2 {
             val cyr = Regex("[А-Яа-яЁё]+")
             val patron = Regex("[А-ЯЁ][а-яё]+(?:ович|евич|ич|овна|евна|ична|инична)")
             val seenPairs = HashMap<String, Int>()
+            // (one matcher for the whole book, nothing kept but the last two words: on Android every match of
+            // findAll() is a matcher with its own copy of the text — kept in a list for a whole book they took
+            // 6 GB of memory and the system closed the app, 1.50)
             run {
-                val toks = cyr.findAll(text).toList()
-                fun ws(x: MatchResult, y: MatchResult): Boolean {
-                    val g0 = x.range.last + 1; val g1 = y.range.first
-                    if (g1 <= g0) return false
-                    for (k in g0 until g1) if (!text[k].isWhitespace()) return false
+                val m = cyr.toPattern().matcher(text)
+                var w1: String? = null; var e1 = 0          // the word before
+                var w2: String? = null; var e2 = 0; var gap21 = false   // the one before it, and whether only spaces part them
+                fun ws(a: Int, b: Int): Boolean {
+                    if (b <= a) return false
+                    for (k in a until b) if (!text[k].isWhitespace()) return false
                     return true
                 }
-                for (k in 0 until toks.size - 1) {
-                    val x = toks[k]; val y = toks[k + 1]
-                    if (!ws(x, y)) continue
-                    seenPairs.merge(x.value + "\u0000" + y.value, 1, Int::plus)
-                    val z = toks.getOrNull(k + 2) ?: continue
-                    if (patron.matches(y.value) && ws(y, z)) seenPairs.merge(x.value + "\u0000" + z.value, 1, Int::plus)
+                while (m.find()) {
+                    val v = m.group(); val s0 = m.start(); val e0 = m.end()
+                    val gap10 = w1 != null && ws(e1, s0)
+                    if (gap10 && v[0].isUpperCase() && w1!![0].isUpperCase()) {
+                        seenPairs.merge(w1 + "\u0000" + v, 1, Int::plus)
+                        if (w2 != null && gap21 && w2!![0].isUpperCase() && patron.matches(w1!!)) seenPairs.merge(w2 + "\u0000" + v, 1, Int::plus)
+                    }
+                    w2 = w1; e2 = e1; gap21 = gap10
+                    w1 = v; e1 = e0
                 }
             }
             fun cyrOnly(w: String) = w.isNotEmpty() && w.all { it in 'А'..'я' || it == 'Ё' || it == 'ё' }
@@ -1270,7 +1277,8 @@ object DialogueAnalyzer2 {
             // (first names only: «Профессор Лэнгдон», «Капитан …» are titles of the one man)
             // a common noun too («Посол Нагель» — «посол» stands in the text in small letters): no first name
             val lowerWords = HashMap<String, Int>()
-            for (m in cyr.findAll(text)) if (m.value[0].isLowerCase()) lowerWords.merge(m.value, 1, Int::plus)
+            val wanted = people.map { it.lowercase() }.toHashSet()
+            run { val m = cyr.toPattern().matcher(text); while (m.find()) { val v = m.group(); if (v[0].isLowerCase() && v in wanted) lowerWords.merge(v, 1, Int::plus) } }
             fun titleWord(w: String) = w.lowercase().let { it in speakerNouns || it in maleTitles || it in femaleTitles || it in TITLES || it in HONOR ||
                 (lowerWords[it] ?: 0) >= 2 }
             // two first names, each seen twice with the surname («Соломон Лэнгдон» once is no family)

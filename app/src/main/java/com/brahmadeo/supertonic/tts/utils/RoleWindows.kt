@@ -88,15 +88,22 @@ object RoleWindows {
             val ments = ArrayList<Mention>()
             val taken = ArrayList<IntArray>()
             fun overl(a: Int, b: Int) = taken.any { a < it[1] && it[0] < b }
-            for ((ent, rx) in pats) for (m in rx.findAll(w)) {
-                val a = m.range.first; val b = m.range.last + 1
-                if (overl(a, b)) continue
-                taken += intArrayOf(a, b); ments += Mention(ent, a, b, 0)
+            // (one matcher each: on Android every findAll() match is a new matcher with its own copy of the text)
+            for ((ent, rx) in pats) {
+                val m = rx.toPattern().matcher(w)
+                while (m.find()) {
+                    val a = m.start(); val b = m.end()
+                    if (overl(a, b)) continue
+                    taken += intArrayOf(a, b); ments += Mention(ent, a, b, 0)
+                }
             }
-            if (heroBook) for (m in HERO_PRON.findAll(w)) {
-                val a = m.range.first; val b = m.range.last + 1
-                if (speechAll.any { it[0] <= a && b <= it[1] } || overl(a, b)) continue
-                taken += intArrayOf(a, b); ments += Mention(HERO, a, b, 1)
+            if (heroBook) {
+                val m = HERO_PRON.toPattern().matcher(w)
+                while (m.find()) {
+                    val a = m.start(); val b = m.end()
+                    if (speechAll.any { it[0] <= a && b <= it[1] } || overl(a, b)) continue
+                    taken += intArrayOf(a, b); ments += Mention(HERO, a, b, 1)
+                }
             }
             for (i in lo..hi) {
                 val l = byPi[i] ?: continue

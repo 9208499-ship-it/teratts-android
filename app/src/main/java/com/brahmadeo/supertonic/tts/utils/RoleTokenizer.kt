@@ -68,9 +68,11 @@ class RoleTokenizer(
 
     private fun words(s: String, a: Int, b: Int, map: IntArray, ids: MutableList<Int>, st: MutableList<Int>, en: MutableList<Int>) {
         val seg = s.substring(a, b)
-        for (m in SPLIT.findAll(seg)) {
-            val w = m.value
-            val w0 = a + m.range.first
+        // one matcher (on Android every findAll() match is a new matcher with its own copy of the text)
+        val mt = SPLIT.toPattern().matcher(seg)
+        while (mt.find()) {
+            val w = mt.group()
+            val w0 = a + mt.start()
             // bytes of the piece, and the char each byte belongs to
             val bytes = w.toByteArray(Charsets.UTF_8)
             val charOf = IntArray(bytes.size)
