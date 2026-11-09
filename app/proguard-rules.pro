@@ -18,3 +18,6 @@
 
 # Fix: Missing classes detected while running R8 (Missing JP2Decoder from Readium/PDFium)
 -dontwarn com.gemalto.jp2.JP2Decoder
+
+# ONNX Runtime (Java API): its JNI code looks classes up by name (ai/onnxruntime/TensorInfo …) — R8 must not rename or drop them
+-keep class ai.onnxruntime.** { *; }
