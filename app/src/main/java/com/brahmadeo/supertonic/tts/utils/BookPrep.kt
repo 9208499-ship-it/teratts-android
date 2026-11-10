@@ -301,6 +301,8 @@ object BookPrep {
         // 1.34: the main hero's / heroine's voices (only when set: chapters made before stay good)
         r.heroVoice(context, false).takeIf { it.isNotEmpty() }?.let { list.add("голос главного героя" to it) }
         r.heroVoice(context, true).takeIf { it.isNotEmpty() }?.let { list.add("голос главной героини" to it) }
+        // 1.52: a first-person book's narration in the teller's voice (only when off: chapters made before stay good)
+        if (!r.tellerVoice(context)) list.add("повествование от первого лица" to "голосом рассказчика")
         if (p.shtormDenoise != p.DENOISE_OFF) list.add("очистка звука" to true)
         return list.map { (k, v) -> k to v.toString() }
     }

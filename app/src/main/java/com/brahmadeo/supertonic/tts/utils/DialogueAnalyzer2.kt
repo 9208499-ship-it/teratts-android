@@ -331,6 +331,61 @@ object DialogueAnalyzer2 {
     private val thirdTL = ThreadLocal<Boolean>()
     private val NARR_I = Regex("""(?iu)(^|[^а-яё])(я|мне|меня|мной)([^а-яё]|$)""")
 
+    /**
+     * Who tells the text. [THIRD]: told in the third person; [UNKNOWN]: in the first, but its sex is not
+     * clear; [MALE] / [FEMALE]: the teller's sex («я пошла», «сказала я», «я уверена» in the narration);
+     * [MIXED]: told by several people (letters, chapters by different tellers).
+     */
+    enum class Teller { THIRD, UNKNOWN, MALE, FEMALE, MIXED }
+
+    private const val TL = "а-яё"
+    private val I_THEN = Regex("(?iu)(?<![$TL])я\\s+(?:(?:не|ни|тоже|уже|уж|ещё|еще|же|ведь|вдруг|только|даже|сразу|так|всё|все|и|лишь|наконец|снова|опять|" +
+        "просто|почти|давно|долго|сначала|потом|никогда|всегда|часто|быстро|молча|тихо|бы|было|невольно)\\s+){0,2}([$TL]+)(?![$TL])")
+    private val THEN_I = Regex("(?iu)(?<![$TL])([$TL]{3,})\\s+я(?![$TL])")
+    private val I_F = setOf("сама", "рада", "должна", "готова", "уверена", "согласна", "одна", "виновата", "знакома", "больна", "счастлива",
+        "вынуждена", "обязана", "довольна", "способна", "намерена", "поражена", "удивлена", "испугана", "влюблена", "благодарна")
+    private val I_M = setOf("сам", "рад", "должен", "готов", "уверен", "согласен", "один", "виноват", "знаком", "болен", "счастлив",
+        "вынужден", "обязан", "доволен", "способен", "намерен", "поражён", "поражен", "удивлён", "удивлен", "испуган", "влюблён", "влюблен", "благодарен",
+        "мог", "смог", "помог", "лёг", "лег", "шёл", "пошёл", "вошёл", "ушёл", "пришёл", "нашёл", "подошёл", "нёс", "вёз", "рос", "вырос",
+        "умер", "замер", "запер", "привык", "достиг", "проник", "исчез", "погиб", "замёрз", "промок")
+    private val I_NOT = setOf("пол", "стол", "зал", "бал", "вол", "осел", "посол", "угол", "орёл", "котёл", "мол", "ил", "дол", "тыл", "пыл",
+        "сила", "мила", "игла", "пчела", "скала", "мгла", "стрела", "смола", "метла", "зола", "дела", "тела", "села", "крыла", "зла")
+
+    /** «я» + [w]: 1 a woman, -1 a man, 0 not told; [after]: [w] stands after «я» (past tense or a short adjective), else before it (past tense only). */
+    private fun iSex(w0: String, after: Boolean): Int {
+        val w = w0.lowercase()
+        if (w in I_NOT) return 0
+        if (after && w in I_F) return 1
+        if (after && w in I_M) return -1
+        if (w.endsWith("лась") || (w.endsWith("ла") && w.length > 3)) return 1
+        if (w.endsWith("лся") || (w.endsWith("л") && w.length > 2)) return -1
+        return 0
+    }
+
+    /**
+     * Who tells [text]: the narration (not the speech) of a first-person book (≥ 12% of its paragraphs with
+     * «я/мне/меня») and the sex «я» has there — a man's or a woman's in three of four signs or more.
+     */
+    fun teller(text: String): Teller {
+        val narr = text.split('\n').filter { it.isNotBlank() && it.trimStart().firstOrNull()?.let { c -> c in dashes || c == '«' || c == '"' || c == '„' } != true }
+            .map { it.replace(Regex("""«[^»]*»|"[^"]*"|„[^“]*“"""), " ") }
+        if (narr.size < 15 || narr.count { NARR_I.containsMatchIn(it) } * 100 < narr.size * 12) return Teller.THIRD
+        var f = 0; var m = 0
+        for (p in narr) {
+            // (one matcher each: on Android every findAll() match is a new matcher with its own copy of the text)
+            val a = I_THEN.toPattern().matcher(p)
+            while (a.find()) when (iSex(a.group(1), true)) { 1 -> f++; -1 -> m++ }
+            val b = THEN_I.toPattern().matcher(p)
+            while (b.find()) when (iSex(b.group(1), false)) { 1 -> f++; -1 -> m++ }
+        }
+        return when {
+            f + m < 4 -> Teller.UNKNOWN
+            f >= 3 * m -> Teller.FEMALE
+            m >= 3 * f -> Teller.MALE
+            else -> Teller.MIXED
+        }
+    }
+
     /** The name at [k] with its honorific: «Беннет», or «Миссис Беннет» when the surname is a family's. */
     private fun honored(head: List<String>, k: Int): String? {
         val t = head.getOrNull(k - 1)?.lowercase() ?: return null

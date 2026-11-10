@@ -113,7 +113,7 @@ private fun CharactersScreen(text: String, onBack: () -> Unit) {
         val r = result ?: return@LaunchedEffect
         withContext(Dispatchers.Default) {
             val book = RoleCast.book(roster, r, aliases)
-            val cm = RoleCast.common(context)
+            val cm = RoleCast.common(context, scope)
             val c = RoleCast.cast(context, scope, book.order, book.genders, cm)
             val own = r.characters.associateBy { it.name }
             val list = book.order.map { n ->

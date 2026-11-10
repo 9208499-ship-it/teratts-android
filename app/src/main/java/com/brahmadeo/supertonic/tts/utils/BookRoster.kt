@@ -17,7 +17,9 @@ object BookRoster {
     class Roster(val genders: Map<String, DialogueAnalyzer2.Role>, val ranking: List<String>,
                  val aliases: Map<String, String> = emptyMap(),
                  /** lines of each character in the whole book (rosters built before 1.34 have none) */
-                 val lines: Map<String, Int> = emptyMap())
+                 val lines: Map<String, Int> = emptyMap(),
+                 /** who tells the book (1.52): the narration of a first-person book is the teller's (RoleCast.teller) */
+                 val teller: DialogueAnalyzer2.Teller = DialogueAnalyzer2.Teller.THIRD)
 
     private fun file(context: Context, scope: String) =
         File(context.filesDir, "rosters/" + Integer.toHexString(scope.hashCode()) + ".json")
@@ -26,9 +28,10 @@ object BookRoster {
 
     /** Bumped when the analysis changes: an older roster is built again (1.6.7: one name per person). */
     // 3 (1.6.15): the hero's own name and first name + surname are one person
-    private const val VERSION = 7   // 1.27: a name told by its owner («Зовут меня Лениавес»), "Ленивца" = Ленивец;
+    private const val VERSION = 8   // 1.27: a name told by its owner («Зовут меня Лениавес»), "Ленивца" = Ленивец;
                                     // 1.37: the book's own speaker nouns («ответил корнол») and their names (корнол = Лениавес)
                                     // 1.49: «мистер Беннет» is Беннет (not «мистер»), a family's surname joins nobody, no «я» in a third-person book
+                                    // 1.52 (8): who tells the book — a first-person book's narration is said in the teller's voice
 
     /**
      * The roster of the book, built now if there is none (or waited for if it is being built):
@@ -70,7 +73,8 @@ object BookRoster {
             val ln = o.optJSONObject("lines")
             val lines = HashMap<String, Int>()
             if (ln != null) for (k in ln.keys()) lines[k] = ln.optInt(k, 0)
-            Roster(genders, (0 until r.length()).map { r.getString(it) }, aliases, lines)
+            val teller = DialogueAnalyzer2.Teller.values().firstOrNull { it.name == o.optString("teller") } ?: DialogueAnalyzer2.Teller.THIRD
+            Roster(genders, (0 until r.length()).map { r.getString(it) }, aliases, lines, teller)
         } catch (e: Exception) {
             null
         }
@@ -86,7 +90,9 @@ object BookRoster {
             val publication = parser.openPublication(File(path)).getOrNull() ?: return
             val texts = publication.readingOrder.mapNotNull { parser.extractText(publication, it).getOrNull() }
             BookSession.log(context, "roster: analysing ${texts.size} chapters, ${texts.sumOf { it.length }} chars")
-            val result = DialogueAnalyzer2.analyze(texts.joinToString("\n"))
+            val whole = texts.joinToString("\n")
+            val result = DialogueAnalyzer2.analyze(whole)
+            val teller = DialogueAnalyzer2.teller(whole)
             val genders = JSONObject()
             for (c in result.characters) when (c.role) {
                 DialogueAnalyzer2.Role.MALE -> genders.put(c.name, "M")
@@ -101,9 +107,9 @@ object BookRoster {
             result.aliases.forEach { (k, v) -> aliases.put(k, v) }
             val f = file(context, scope)
             f.parentFile?.mkdirs()
-            f.writeText(JSONObject().put("v", VERSION).put("genders", genders).put("ranking", ranking).put("aliases", aliases).put("lines", lines).toString())
+            f.writeText(JSONObject().put("v", VERSION).put("genders", genders).put("ranking", ranking).put("aliases", aliases).put("lines", lines).put("teller", teller.name).toString())
             BookSession.log(context, "roster: ${result.characters.size} characters: " +
-                result.characters.take(8).joinToString { "${it.name}(${it.lines})" } + "; одно лицо: " + result.aliases)
+                result.characters.take(8).joinToString { "${it.name}(${it.lines})" } + "; одно лицо: " + result.aliases + "; рассказчик: " + teller)
         } catch (e: Exception) {
             BookSession.log(context, "roster failed: ${e.message}")
         } finally {

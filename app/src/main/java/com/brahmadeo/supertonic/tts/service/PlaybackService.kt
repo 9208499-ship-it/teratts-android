@@ -1250,11 +1250,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val femaleStyle0 = com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService,
             com.brahmadeo.supertonic.tts.utils.RolePrefs.forRole(this@PlaybackService, com.brahmadeo.supertonic.tts.utils.RolePrefs.femaleVoice(this@PlaybackService))) ?: stylePath
         // narrator: its own voice if chosen, otherwise the main voice
-        val narratorStyle = if (rolesOn) {
+        val narratorStyle0 = if (rolesOn) {
             com.brahmadeo.supertonic.tts.utils.RolePrefs.narratorVoice(this@PlaybackService)
                 .takeIf { it.isNotEmpty() }
                 ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: stylePath
         } else stylePath
+        // a book told in the first person: the narration is the teller's own — in his or her voice and sex
+        // («я умудрилась» was said in the man's narrator voice), see RoleCast.teller
+        val narratorStyle = (if (rolesOn) com.brahmadeo.supertonic.tts.utils.RoleCast.teller(this@PlaybackService, charScope, roster,
+            java.io.File(narratorStyle0).name) else null)
+            ?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) } ?: narratorStyle0
         // a line whose speaker is unknown is still a line: never the narrator's voice
         // The narrator's voice (by default the main voice — often the same as the male
         // lines' one, ru_m5) belongs to the narrator and the hero. Other characters
@@ -1302,15 +1307,30 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val mainRole = main?.let { m -> roster?.genders?.get(m) ?: roleResult?.characters?.firstOrNull { it.name == m }?.role }
             if (mainRole == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE) femaleStyle else unknownStyle
         }
+        // a book told by several people (letters, chapters by different tellers): a chapter plainly told
+        // by a woman (a man) is narrated in a voice of her (his) sex, if the narrator's is the other one
+        val chapterStyle = if (rolesOn && roster?.teller == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Teller.MIXED &&
+            com.brahmadeo.supertonic.tts.utils.RolePrefs.tellerVoice(this@PlaybackService)) {
+            when (com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.teller(text)) {
+                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Teller.FEMALE ->
+                    femaleStyle.takeIf { com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(narratorFile) }
+                com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Teller.MALE ->
+                    maleStyle.takeIf { com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(narratorFile) }
+                else -> null
+            } ?: narratorStyle
+        } else narratorStyle
+        if (narratorStyle != narratorStyle0 || chapterStyle != narratorStyle)
+            Log.i(TAG, "roles: told in the first person — narration in ${java.io.File(chapterStyle).name} (narrator ${java.io.File(narratorStyle0).name})")
         // The hero speaks in the narrator's voice — unless the line is plainly the other sex's: a
         // book told by several people ("Неучтённый‑3": a chapter told by a grandmother) read
         // her lines in the man's narrator voice
-        val narratorMale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(narratorFile)
-        val narratorFemale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(narratorFile)
+        val chapterFile = java.io.File(chapterStyle).name
+        val narratorMale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(chapterFile)
+        val narratorFemale = com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(chapterFile)
         fun heroStyle(role: com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role): String = when {
             role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE && narratorMale -> femaleStyle
             role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE && narratorFemale -> maleStyle
-            else -> narratorStyle
+            else -> chapterStyle
         }
         return VoicePlan(
             pieces = { index ->
@@ -1335,7 +1355,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE -> maleStyle
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE -> femaleStyle
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> speechStyle
-                    else -> narratorStyle
+                    else -> chapterStyle
                 }
             },
             // character's own pace × how this line is said (выпалил / протянул)

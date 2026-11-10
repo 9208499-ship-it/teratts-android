@@ -39,11 +39,12 @@ object RoleCast {
         val all get() = setOf(male, female, unknown)
     }
 
-    /** The common voices as reading picks them (the main voice = the one on the main screen). */
-    fun common(context: Context): Common {
+    /** The common voices as reading picks them (the main voice = the one on the main screen) for the book [scope]. */
+    fun common(context: Context, scope: String = ""): Common {
         val prefs = context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE)
         val main = RolePrefs.forEngine(context, prefs.getString("selected_voice", "ru_f1.json") ?: "ru_f1.json")
-        val narrator = RolePrefs.narratorVoice(context).takeIf { it.isNotEmpty() }?.let { RolePrefs.forEngine(context, it) } ?: main
+        val narrator0 = RolePrefs.narratorVoice(context).takeIf { it.isNotEmpty() }?.let { RolePrefs.forEngine(context, it) } ?: main
+        val narrator = teller(context, scope, BookRoster.cached(context, scope), narrator0) ?: narrator0
         // nobody but the narrator and the hero speaks in the narrator's voice
         fun notNarrator(v: String, female: Boolean) = if (v != narrator) v else CharacterVoices.alternative(context, narrator, female) ?: v
         val male = notNarrator(RolePrefs.forRole(context, RolePrefs.maleVoice(context)), false)
@@ -51,6 +52,34 @@ object RoleCast {
         val unknown = RolePrefs.unknownVoice(context).takeIf { it.isNotEmpty() }
             ?.let { RolePrefs.forRole(context, it) }?.let { notNarrator(it, CharacterVoices.isFemaleVoice(it)) } ?: male
         return Common(narrator, male, female, unknown)
+    }
+
+    /**
+     * A book told in the first person is the teller's own story («я умудрилась»): its narration is said in
+     * the teller's voice and sex, not in the narrator's (Lecron, 4PDA). The voice set for «Я» by hand; or the
+     * main hero's / heroine's from the settings when «Я» is the main one of that sex; or — when the
+     * narrator's voice is of the other sex — the common voice of the teller's sex (the others of that sex
+     * then get another one). Null: the narrator's voice as it is (a third-person book, one told by several
+     * people, the teller's sex not clear, the setting off).
+     */
+    fun teller(context: Context, scope: String, roster: BookRoster.Roster?, narrator: String): String? {
+        if (scope.isEmpty() || roster == null || !RolePrefs.enabled(context) || !RolePrefs.tellerVoice(context)) return null
+        val female = when (roster.teller) {
+            DialogueAnalyzer2.Teller.FEMALE -> true
+            DialogueAnalyzer2.Teller.MALE -> false
+            else -> return null
+        }
+        val hero = DialogueAnalyzer2.HERO
+        if (RolePrefs.charactersEnabled(context)) {
+            if (CharacterVoices.isManual(context, hero, scope))
+                CharacterVoices.explicit(context, hero, scope)?.let { return RolePrefs.forEngine(context, it) }
+            val sex = if (female) DialogueAnalyzer2.Role.FEMALE else DialogueAnalyzer2.Role.MALE
+            val main = roster.ranking.firstOrNull { it != DialogueAnalyzer2.SYSTEM && roster.genders[it] == sex }
+            if (main == hero) RolePrefs.heroVoice(context, female).takeIf { it.isNotEmpty() }
+                ?.let { RolePrefs.forEngine(context, it) }?.takeIf { it in RolePrefs.availableVoices(context) }?.let { return it }
+        }
+        if (if (female) CharacterVoices.isFemaleVoice(narrator) else CharacterVoices.isMaleVoice(narrator)) return null
+        return RolePrefs.forRole(context, if (female) RolePrefs.femaleVoice(context) else RolePrefs.maleVoice(context)).takeIf { it.isNotEmpty() }
     }
 
     /** [lines]: in the whole book (empty for a roster built before 1.34). */

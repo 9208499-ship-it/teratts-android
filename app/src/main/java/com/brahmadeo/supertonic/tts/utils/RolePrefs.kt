@@ -16,6 +16,7 @@ object RolePrefs {
     private const val KEY_HIDDEN = "hidden_voices"
     private const val KEY_HERO_M = "roles_hero_voice"
     private const val KEY_HERO_F = "roles_heroine_voice"
+    private const val KEY_TELLER = "roles_teller_voice"
     private const val RATING_PREFS = "TeraVoiceRating"
 
     /**
@@ -45,6 +46,13 @@ object RolePrefs {
 
     fun setCharactersEnabled(context: Context, on: Boolean) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CHARACTERS, on).apply()
+
+    /** A book told in the first person: its narration in the teller's voice and sex (default on), see RoleCast.teller. */
+    fun tellerVoice(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_TELLER, true)
+
+    fun setTellerVoice(context: Context, on: Boolean) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_TELLER, on).apply()
 
     /**
      * The voice for the main hero / heroine (the man / the woman with the most lines in the book;

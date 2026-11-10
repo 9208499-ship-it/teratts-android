@@ -1739,6 +1739,7 @@ private fun RolesSection() {
     var rating by remember { mutableStateOf(false) }
     var mainCount by remember { mutableStateOf(prefs.mainCount(context).toFloat()) }
     var perCharacter by remember { mutableStateOf(prefs.charactersEnabled(context)) }
+    var teller by remember { mutableStateOf(prefs.tellerVoice(context)) }
     var evenLoudness by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceLoudness.enabled(context)) }
     var evenTempo by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.VoiceTempo.enabled(context)) }
     val voices = remember { prefs.availableVoices(context) }
@@ -1755,6 +1756,12 @@ private fun RolesSection() {
                 description = stringResource(AppR.string.roles_characters_desc),
                 checked = perCharacter,
                 onToggle = { perCharacter = it; prefs.setCharactersEnabled(context, it) }
+            )
+            PunctuationToggleRow(
+                title = stringResource(AppR.string.roles_teller_title),
+                description = stringResource(AppR.string.roles_teller_desc),
+                checked = teller,
+                onToggle = { teller = it; prefs.setTellerVoice(context, it) }
             )
             PunctuationToggleRow(
                 title = stringResource(AppR.string.roles_loudness_title),
