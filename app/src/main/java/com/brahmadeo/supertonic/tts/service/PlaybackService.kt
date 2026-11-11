@@ -46,6 +46,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.async
 import java.io.ByteArrayOutputStream
 import java.io.File
 
@@ -1223,8 +1225,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     // It needs 6–13 seconds for a window of text (some four pages) and a minute or two for a chapter. Until
     // 1.54 it began the next chapter when this one's last phrase was voiced — five seconds before its end:
     // never in time, the next chapter always began by the rules alone, and the model went on under the reading.
-    // Now: the chapter started is not read until the model has read its beginning (two windows, ~15 s, all
-    // cores — nothing is voiced yet); the rest of it is read by the model in the background ahead of the
+    // Now: the first start of a chapter is not read until the model has read its beginning (one window, ~10 s;
+    // never again for that chapter — a pause and "play", a phrase tapped, a phrase back go on at once, 1.55); the rest of it is read by the model in the background ahead of the
     // listener, who gets its lines from the next phrase on; then the next chapter, so it starts ready.
 
     /** The role model's work that goes with the chapter being read: another start — it stops (what it has read is kept). */
@@ -1248,26 +1250,46 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             threads, from, limit, patience, stop, onStart, onWindow)
     }
 
+    /** The chapter (its key) whose first start has had its wait for the role model: no other start of it waits. */
+    @Volatile private var roleFirstTried: String? = null
+
     /**
-     * Before a chapter is read: the role model reads its beginning — the two windows from the place the
-     * reading starts at (some eight pages, minutes of listening) — unless it has them. All cores: nothing
-     * is voiced yet. No more than ~15 s; a tap on pause or another chapter stops it.
+     * The first start of a chapter: the role model reads its beginning — the window at the place the reading
+     * starts at (some four pages, minutes of listening) — unless it has it. Two cores (on tolyos's phone as fast
+     * as eight, and loaded in 0.7 s, not 2.7). At most 20 s.
+     *
+     * 1.54 waited at EVERY start: a pause and "play" that started the reading again, a phrase tapped, a phrase
+     * back — for the window the model was reading in the background (it holds the model), then for a window of
+     * its own on all eight cores (9–15 s, more with the voice engine beside it); a start in the middle of that
+     * waited for the last one's window to end (a window cannot be stopped midway). About a minute (tolyos).
+     * Now: only the first start of a chapter waits; the model busy — no wait; the wait is cut off by a new
+     * start at once (the window goes on by itself and is kept).
      */
     private suspend fun roleModelFirst(text: String, scope: String, from: Int, stop: () -> Boolean) {
         val rm = com.brahmadeo.supertonic.tts.utils.RoleModel
         if (scope.isEmpty() || !rm.enabled(this) || !com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this) ||
             rm.ready(this, scope, text)) return
-        var t0 = 0L
+        val key = com.brahmadeo.supertonic.tts.utils.BookPrep.textKey(text)
+        if (roleFirstTried == key) return
+        roleFirstTried = key
+        // a book just opened: its characters are being found (voicePlan waits for them) — the model does not add to that
+        if (com.brahmadeo.supertonic.tts.utils.BookRoster.cached(this, scope) == null) return
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        var began = false
+        val work = serviceScope.async(Dispatchers.IO) {
+            roleModelRead(text, scope, 2, from, 1, 0L, stop, onStart = {
+                began = true
+                val note = getString(R.string.role_model_wait)
+                com.brahmadeo.supertonic.tts.utils.BookPrep.source.value = note
+                try { updateNotification(note) } catch (_: Exception) { }
+            })
+        }
         try {
-            roleModelRead(text, scope, com.brahmadeo.supertonic.tts.utils.CpuCores.total(), from, 2, 15_000L,
-                stop = { stop() || (t0 > 0 && android.os.SystemClock.elapsedRealtime() - t0 > 15_000) },
-                onStart = {
-                    t0 = android.os.SystemClock.elapsedRealtime()
-                    val note = getString(R.string.role_model_wait)
-                    com.brahmadeo.supertonic.tts.utils.BookPrep.source.value = note
-                    try { updateNotification(note) } catch (_: Exception) { }
-                })
-            if (t0 > 0) Log.i(TAG, "role model: the chapter's beginning read in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
+            val done = withTimeoutOrNull(20_000L) { work.await() }
+            if (began) Log.i(TAG, "role model: the chapter's beginning ${if (done == null) "not read in time" else "read"} in " +
+                "${android.os.SystemClock.elapsedRealtime() - t0} ms")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "role model first: ${e.message}")
         }
@@ -1275,7 +1297,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     /**
      * While a chapter is read (two cores; the reading keeps the rest): the role model reads the rest of
-     * this chapter ([own]; from the place it is read at — the reading takes its lines every three windows),
+     * this chapter ([own]; from the place it is read at — the reading takes its lines after every window),
      * then the next chapter, so that it starts ready.
      */
     private fun roleModelAhead(cur: String, sentences: List<String>, lang: String, stylePath: String, from: Int, own: Boolean) {
@@ -1297,7 +1319,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         if (!stop()) roleFresh = RoleFresh(cur, p)
                     }
                     roleModelRead(cur, scope, 2, from, Int.MAX_VALUE, Long.MAX_VALUE, stop,
-                        onWindow = { done, total -> if (done < total && done % 3 == 0 && !stop()) runBlocking { renew() } })
+                        onWindow = { done, total -> if (done < total && !stop()) runBlocking { renew() } })
                     if (stop()) return@launch
                     if (rm.ready(this@PlaybackService, scope, cur)) renew()
                 }
