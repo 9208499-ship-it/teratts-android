@@ -765,8 +765,18 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     it.fp == com.brahmadeo.supertonic.tts.utils.BookPrep.fingerprint(this@PlaybackService, stylePath) }
                 if (early == null) { ahead?.stop = true; ahead = null; aheadEpoch++ }
                 // who says each phrase, in which voice, at which pace and loudness (shared with BookPrep)
-                val plan = early?.plan ?: voicePlan(text, sentences, stylePath,
+                // the role model (if it is on) reads the beginning of this chapter before it is read, the rest of
+                // it and the next chapter — while it is read (1.54; see roleModelFirst, roleModelAhead). A chapter
+                // made beforehand into a file has its roles in the file.
+                roleAheadMark = null
+                val roleFrom = chunkRanges.getOrNull(validStartIndex)?.first ?: 0
+                val roleLive = bookScope.isEmpty() || com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService)
+                    ?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, it, text, totalSentences, stylePath) } == null
+                if (early?.plan == null && roleLive) roleModelFirst(text, bookScope, roleFrom) { gen != playGen.get() || !isActive }
+                var plan = early?.plan ?: voicePlan(text, sentences, stylePath,
                     com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(this@PlaybackService, text))
+                roleFresh = null
+                roleModelAhead(text, sentences, lang, stylePath, roleFrom, roleLive)
                 // a chapter made beforehand (BookPrep): played from its file — no neural network, no stalls
                 val prepBook = com.brahmadeo.supertonic.tts.utils.BookSession.currentPath(this@PlaybackService)
                     ?.takeIf { bookScope.isNotEmpty() }
@@ -953,6 +963,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
                         // A sentence may hold a line and the author words ("— Привет, — сказала она"):
                         // with roles on it is voiced piece by piece, each with its own voice.
+                        // (the role model has read more of this chapter meanwhile: the lines not voiced yet go by its word)
+                        roleFresh?.let { f ->
+                            if (f.text == text) { plan = f.plan; roleFresh = null; Log.i(TAG, "roles: the role model's lines taken from phrase $index") }
+                        }
                         val pieces = plan.pieces(index)
                         var result: ByteArray? = null
                         val sentenceStarted = System.nanoTime()
@@ -1177,8 +1191,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         if (aheadEpoch != epoch) return
         val a = Ahead(text, stylePath, com.brahmadeo.supertonic.tts.utils.BookPrep.fingerprint(this, stylePath))
         ahead = a
-        // the role model works the next chapter out now (three cores, the reading keeps the rest)
-        a.plan = voicePlan(text, sentences, stylePath, File(path).name, 3) { aheadEpoch != epoch }
+        // (the role model has read this chapter while the last one was read — roleModelAhead; begun here,
+        // five seconds before the chapter starts, it was never in time and only held this work up, 1.50–1.53)
+        a.plan = voicePlan(text, sentences, stylePath, File(path).name)
         val plan = a.plan ?: return
         var seconds = 0f
         var first = true
@@ -1200,6 +1215,103 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     r?.let { seconds += it.size / 2f / SupertonicTTS.getAudioSampleRate().coerceAtLeast(1) }
                     if (seconds >= 20f) return
                 }
+            }
+        }
+    }
+
+    // ---- the role model while a book is read (1.54) ----
+    // It needs 6–13 seconds for a window of text (some four pages) and a minute or two for a chapter. Until
+    // 1.54 it began the next chapter when this one's last phrase was voiced — five seconds before its end:
+    // never in time, the next chapter always began by the rules alone, and the model went on under the reading.
+    // Now: the chapter started is not read until the model has read its beginning (two windows, ~15 s, all
+    // cores — nothing is voiced yet); the rest of it is read by the model in the background ahead of the
+    // listener, who gets its lines from the next phrase on; then the next chapter, so it starts ready.
+
+    /** The role model's work that goes with the chapter being read: another start — it stops (what it has read is kept). */
+    @Volatile private var roleAheadMark: Any? = null
+    /** A plan made anew after the role model read more of the chapter being read: taken at the next phrase. */
+    private class RoleFresh(val text: String, val plan: VoicePlan)
+    @Volatile private var roleFresh: RoleFresh? = null
+
+    /** The role model reads [text] (a chapter) — from the same lines of the rules as voicePlan makes of it. */
+    private suspend fun roleModelRead(text: String, charScope: String, threads: Int, from: Int, limit: Int, patience: Long,
+                                      stop: () -> Boolean, onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }) {
+        val roster = com.brahmadeo.supertonic.tts.utils.BookRoster.await(this@PlaybackService, charScope, 30_000L)
+        val prior = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(
+            roster?.genders ?: emptyMap(),
+            com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(this@PlaybackService, charScope),
+            roster?.aliases ?: emptyMap())
+        val aliases = (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(this@PlaybackService, charScope)
+        val (r0, probes) = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyzeLines(text, prior)
+        val r1 = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(r0, aliases)
+        com.brahmadeo.supertonic.tts.utils.RoleModelGlue.read(this@PlaybackService, charScope, text, r1, probes, roster, aliases,
+            threads, from, limit, patience, stop, onStart, onWindow)
+    }
+
+    /**
+     * Before a chapter is read: the role model reads its beginning — the two windows from the place the
+     * reading starts at (some eight pages, minutes of listening) — unless it has them. All cores: nothing
+     * is voiced yet. No more than ~15 s; a tap on pause or another chapter stops it.
+     */
+    private suspend fun roleModelFirst(text: String, scope: String, from: Int, stop: () -> Boolean) {
+        val rm = com.brahmadeo.supertonic.tts.utils.RoleModel
+        if (scope.isEmpty() || !rm.enabled(this) || !com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this) ||
+            rm.ready(this, scope, text)) return
+        var t0 = 0L
+        try {
+            roleModelRead(text, scope, com.brahmadeo.supertonic.tts.utils.CpuCores.total(), from, 2, 15_000L,
+                stop = { stop() || (t0 > 0 && android.os.SystemClock.elapsedRealtime() - t0 > 15_000) },
+                onStart = {
+                    t0 = android.os.SystemClock.elapsedRealtime()
+                    val note = getString(R.string.role_model_wait)
+                    com.brahmadeo.supertonic.tts.utils.BookPrep.source.value = note
+                    try { updateNotification(note) } catch (_: Exception) { }
+                })
+            if (t0 > 0) Log.i(TAG, "role model: the chapter's beginning read in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
+        } catch (e: Exception) {
+            Log.w(TAG, "role model first: ${e.message}")
+        }
+    }
+
+    /**
+     * While a chapter is read (two cores; the reading keeps the rest): the role model reads the rest of
+     * this chapter ([own]; from the place it is read at — the reading takes its lines every three windows),
+     * then the next chapter, so that it starts ready.
+     */
+    private fun roleModelAhead(cur: String, sentences: List<String>, lang: String, stylePath: String, from: Int, own: Boolean) {
+        val rm = com.brahmadeo.supertonic.tts.utils.RoleModel
+        if (!rm.enabled(this) || !com.brahmadeo.supertonic.tts.utils.RolePrefs.enabled(this)) return
+        val mark = Any()
+        roleAheadMark = mark
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val bs = com.brahmadeo.supertonic.tts.utils.BookSession
+                val stop = { roleAheadMark !== mark || !isActive }
+                delay(15_000)                              // this chapter's own beginning is voiced first
+                if (stop() || !bs.isCurrent(this@PlaybackService, cur)) return@launch
+                val path = bs.currentPath(this@PlaybackService) ?: return@launch
+                val scope = File(path).name
+                if (own && !rm.ready(this@PlaybackService, scope, cur)) {
+                    suspend fun renew() {
+                        val p = voicePlan(cur, sentences, stylePath, scope)
+                        if (!stop()) roleFresh = RoleFresh(cur, p)
+                    }
+                    roleModelRead(cur, scope, 2, from, Int.MAX_VALUE, Long.MAX_VALUE, stop,
+                        onWindow = { done, total -> if (done < total && done % 3 == 0 && !stop()) runBlocking { renew() } })
+                    if (stop()) return@launch
+                    if (rm.ready(this@PlaybackService, scope, cur)) renew()
+                }
+                val next = bs.peekNextChapter(this@PlaybackService) ?: return@launch
+                // the same text the next chapter will be read as (continueWithNextChapter)
+                val text = if (lang.lowercase().startsWith("ko") || next.endsWith(" .")) next else "$next ."
+                if (stop() || rm.ready(this@PlaybackService, scope, text)) return@launch
+                val nextSentences = textNormalizer.splitIntoSentences(text, autoDetectRussian(text, lang))
+                // made beforehand into a file: its roles were worked out then
+                if (nextSentences.isEmpty() ||
+                    com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, path, text, nextSentences.size, stylePath) != null) return@launch
+                roleModelRead(text, scope, 2, 0, Int.MAX_VALUE, Long.MAX_VALUE, stop)
+            } catch (e: Exception) {
+                Log.w(TAG, "role model ahead: ${e.message}")
             }
         }
     }

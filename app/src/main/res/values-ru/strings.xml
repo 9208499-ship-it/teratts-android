@@ -141,6 +141,7 @@
 
     <!-- Notifications -->
     <string name="notif_synthesizing">Синтез…</string>
+    <string name="role_model_wait">Модель ролей разбирает начало главы…</string>
     <string name="notif_playing">Воспроизведение</string>
     <string name="notif_paused">Пауза</string>
     <string name="notif_exporting">Экспорт аудио…</string>

@@ -19,6 +19,8 @@ import java.nio.LongBuffer
  * It reads the chapter in windows (RoleWindows) — about 6 s a window on a phone — so it never runs
  * while a chapter is started: it works out the NEXT chapter while this one is read, and the book's
  * chapters when the book is prepared (BookPrep). What it found is kept per chapter (a small file).
+ * A chapter is read window by window, each kept: one left half read (a call, the reading gone elsewhere)
+ * is gone on with, and what it has is used meanwhile.
  */
 object RoleModel {
     private const val TAG = "RoleModel"
@@ -37,8 +39,17 @@ object RoleModel {
     private const val EXPL_OVER = 0.9f
     private const val FILL = 0.5f
 
+    /** The files of the release as they must be: a file cut short or damaged is not a model (1.54). */
+    private val SIZE = mapOf("roles_enc_int8.onnx" to 208313718L, "roles_head.onnx" to 4014896L,
+        "tokenizer.json" to 4753266L, "roles_meta.json" to 234L)
+    private val SHA256 = mapOf(
+        "roles_enc_int8.onnx" to "8b3d836771fb64594d4e3b3469afd8c3c998317d533b69de3f61918d27c5fcf3",
+        "roles_head.onnx" to "3106a1ffcadd44592d3ec150fb96c4174f601a002982cd5edfdcd9a2092bc8af",
+        "tokenizer.json" to "c166ae391d765915521dce27bf940cc9c7bff5050260f652f9327a7df1b9cd56",
+        "roles_meta.json" to "1d177d0b6ea006b19eea669caac0d485fa9ad606fc88da6ae0120906417a10f2")
+
     fun dir(c: Context) = File(c.filesDir, "role_model")
-    fun installed(c: Context) = FILES.all { File(dir(c), it).length() > 0 }
+    fun installed(c: Context) = FILES.all { File(dir(c), it).length() == SIZE[it] }
     fun size(c: Context): Long = FILES.sumOf { File(dir(c), it).length() }
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun wanted(c: Context) = p(c).getBoolean("on", true)
@@ -48,44 +59,89 @@ object RoleModel {
     /** Download progress 0…1, or null when no download is going on. */
     val progress = androidx.compose.runtime.mutableStateOf<Float?>(null)
 
-    /** All the files from the release, one after another (.part until whole). Throws on failure. */
+    /**
+     * All the files from the release, one after another (.part until whole and checked). A download broken
+     * off (the network gone, GitHub's 502, the app closed) goes on from where it stopped — 208 MB are not
+     * begun again; each file is checked by its size and SHA-256 before it is taken. Throws on failure.
+     */
     suspend fun download(c: Context) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val d = dir(c).apply { mkdirs() }
-        // the weights are nearly all of it: their share of the bar
-        val share = mapOf("roles_enc_int8.onnx" to 0.97f, "roles_head.onnx" to 0.02f, "tokenizer.json" to 0.009f, "roles_meta.json" to 0.001f)
-        var before = 0f
+        val all = SIZE.values.sum().toFloat()
+        var before = 0L
         progress.value = 0f
         try {
             for (name in FILES) {
                 val f = File(d, name)
-                val w = share[name] ?: 0f
-                if (f.length() > 0) { before += w; progress.value = before; continue }
-                val part = File(d, "$name.part")
-                val con = URL(BASE + name).openConnection() as HttpURLConnection
-                con.setRequestProperty("User-Agent", "TeraTTS")
-                con.connectTimeout = 20000; con.readTimeout = 30000
-                con.instanceFollowRedirects = true
-                if (con.responseCode != 200) throw IllegalStateException("$name: HTTP ${con.responseCode}")
-                val total = con.contentLengthLong
-                con.inputStream.use { input ->
-                    part.outputStream().use { out ->
-                        val buf = ByteArray(64 * 1024)
-                        var done = 0L
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n); done += n
-                            if (total > 0) progress.value = before + w * done / total
+                val size = SIZE.getValue(name)
+                if (f.length() != size) {
+                    f.delete()
+                    val part = File(d, "$name.part")
+                    var tries = 0
+                    while (true) {
+                        try {
+                            fetch(name, part, size) { done -> progress.value = (before + done) / all }
+                            break
+                        } catch (e: java.io.IOException) {
+                            if (++tries >= 5) throw e
+                            Log.i(TAG, "download: $name — ${e.message}; again ($tries)")
+                            kotlinx.coroutines.delay(2000L * tries)
                         }
                     }
+                    if (sha256(part) != SHA256[name]) { part.delete(); throw IllegalStateException("$name: файл повреждён при загрузке — скачайте ещё раз") }
+                    if (!part.renameTo(f)) throw IllegalStateException("$name: не удалось сохранить")
                 }
-                if (total > 0 && part.length() != total) throw IllegalStateException("$name: скачался не целиком")
-                if (!part.renameTo(f)) throw IllegalStateException("$name: не удалось сохранить")
-                before += w
+                before += size
+                progress.value = before / all
             }
         } finally {
             progress.value = null
         }
+    }
+
+    /** One file into [part], after what [part] already has. IOException: worth another try. */
+    private fun fetch(name: String, part: File, size: Long, onProgress: (Long) -> Unit) {
+        var have = part.length()
+        if (have > size) { part.delete(); have = 0 }
+        if (have == size) return
+        val con = URL(BASE + name).openConnection() as HttpURLConnection
+        try {
+            con.setRequestProperty("User-Agent", "TeraTTS")
+            con.setRequestProperty("Accept-Encoding", "identity")
+            if (have > 0) con.setRequestProperty("Range", "bytes=$have-")
+            con.connectTimeout = 20000; con.readTimeout = 30000
+            con.instanceFollowRedirects = true
+            val code = con.responseCode
+            when {
+                code == 206 && have > 0 -> { }
+                code == 200 -> have = 0                     // the whole file again
+                code == 416 -> { part.delete(); throw java.io.IOException("$name: HTTP 416") }
+                code in 400..499 && code != 408 && code != 429 -> throw IllegalStateException("$name: HTTP $code")
+                else -> throw java.io.IOException("$name: HTTP $code")
+            }
+            con.inputStream.use { input ->
+                java.io.FileOutputStream(part, have > 0).use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n); have += n
+                        onProgress(have)
+                    }
+                }
+            }
+        } finally {
+            con.disconnect()
+        }
+        if (have != size) throw java.io.IOException("$name: скачался не целиком ($have из $size)")
+    }
+
+    private fun sha256(f: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(256 * 1024)
+            while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     fun delete(c: Context) {
@@ -122,6 +178,7 @@ object RoleModel {
             true
         } catch (t: Throwable) {
             Log.w(TAG, "load failed: ${t.message}")
+            BookSession.log(c, "модель ролей: не загрузилась — ${t.message ?: t.javaClass.simpleName}")
             unload()
             false
         }
@@ -284,36 +341,123 @@ object RoleModel {
     /** Is this chapter worked out already? */
     fun ready(c: Context, scope: String, text: String) = scope.isNotEmpty() && cacheFile(c, scope, text).exists()
 
+    /** Room for the model (~300 MB) now? Loaded on a full phone it gets the app — and the reading — closed by the system. */
+    private fun room(c: Context): Boolean = try {
+        val mi = android.app.ActivityManager.MemoryInfo()
+        (c.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
+        !mi.lowMemory && mi.availMem > 500L * 1024 * 1024
+    } catch (_: Throwable) { true }
+
+    /** What a chapter not read to its end left: the windows done and their guesses — if it was cut into [total] windows as now. */
+    private fun readPart(f: File, total: Int): Pair<Set<Int>, Map<Int, Guess>>? = try {
+        if (!f.exists()) null else {
+            val o = org.json.JSONObject(f.readText())
+            if (o.optInt("w", -1) != total) null else {
+                val g = o.getJSONObject("g")
+                val m = HashMap<Int, Guess>()
+                for (k in g.keys()) { val a = g.getJSONArray(k); m[k.toInt()] = Guess(a.getString(0), a.getDouble(1).toFloat(), a.getInt(2)) }
+                val d = o.getJSONArray("d")
+                (0 until d.length()).map { d.getInt(it) }.filter { it in 0 until total }.toSet() to m
+            }
+        }
+    } catch (_: Exception) { null }
+
+    private fun savePart(f: File, total: Int, done: Set<Int>, m: Map<Int, Guess>) {
+        try {
+            val g = org.json.JSONObject()
+            for ((k, v) in m) g.put(k.toString(), org.json.JSONArray().put(v.speaker).put(v.prob.toDouble()).put(v.kind))
+            val d = org.json.JSONArray()
+            for (k in done) d.put(k)
+            f.parentFile?.mkdirs()
+            val tmp = File(f.path + ".tmp")
+            tmp.writeText(org.json.JSONObject().put("w", total).put("d", d).put("g", g).toString())
+            tmp.renameTo(f)
+        } catch (e: Exception) { Log.w(TAG, "save part: ${e.message}") }
+    }
+
+    /** One chapter at a time, whoever asks (the reading, the chapter ahead, preparing the book). */
+    private val lock = java.util.concurrent.locks.ReentrantLock()
+
     /**
      * The guesses for a chapter: from its file, or (with [compute]) worked out now and kept. Only windows
      * with a line the model may change are read (a line with no author words, or one the rules left).
-     * Stops (nothing kept) on a phone call or when [stop] says so.
+     *
+     * A chapter need not be read at once (1.54): every window read is kept, and a chapter left half read
+     * (a call, [stop], [limit] windows asked for) gives what it has — the lines of its other windows stay
+     * the rules'. Windows are read from the one at [from] (a place in the text: where the reading is) to
+     * the end, then those before it. [patience]: how long to wait, ms, if the model is busy with another
+     * chapter. [onStart]: the model is about to be loaded (there is work); [onWindow]: windows done, of all.
+     * Without [compute]: the chapter's file, or what a chapter half read has; null — nothing.
      */
     fun guesses(c: Context, scope: String, text: String, lines: List<RoleWindows.Line>, names: Collection<String>,
-                aliases: Map<String, String>, compute: Boolean, threads: Int, stop: () -> Boolean = { false }): Map<Int, Guess>? {
+                aliases: Map<String, String>, compute: Boolean, threads: Int, stop: () -> Boolean = { false },
+                from: Int = 0, limit: Int = Int.MAX_VALUE, patience: Long = Long.MAX_VALUE,
+                onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }): Map<Int, Guess>? {
         if (scope.isEmpty() || !enabled(c)) return null
         val f = cacheFile(c, scope, text)
         readCache(f)?.let { return it }
-        if (!compute) return null
+        val part = File(f.path + ".part")
+        if (!compute && !part.exists()) return null
         val t0 = System.currentTimeMillis()
         val ws = RoleWindows.build(text, lines, names, aliases).filter { w -> w.targets.any { it.hard || it.rules.isEmpty() } }
+        if (!compute) return readPart(part, ws.size)?.second
         if (ws.isEmpty()) { save(f, emptyMap()); return emptyMap() }
-        synchronized(this) {
-            if (!load(c, threads)) return null
+        val mine = if (patience == Long.MAX_VALUE) { lock.lock(); true }
+            else lock.tryLock(patience, java.util.concurrent.TimeUnit.MILLISECONDS)
+        if (!mine) {
+            Log.i(TAG, "busy with another chapter")
+            return readPart(part, ws.size)?.second
+        }
+        try {
+            // the other one (the reading, preparing the book) read this chapter while we waited
+            readCache(f)?.let { return it }
             val all = HashMap<Int, Guess>()
-            try {
-                for (w in ws) {
-                    if (stop() || BookPrep.inCall(c)) { Log.i(TAG, "stopped (${all.size} lines so far)"); return null }
-                    all.putAll(window(w))
+            val done = HashSet<Int>()
+            readPart(part, ws.size)?.let { done.addAll(it.first); all.putAll(it.second) }
+            val first = ws.indexOfFirst { w -> w.targets.any { w.base + it.span[1] > from } }.coerceAtLeast(0)
+            val order = (first until ws.size) + (0 until first)
+            val todo = (if (limit < ws.size) order.take(limit) else order).filter { it !in done }
+            val had = done.size
+            if (todo.isNotEmpty()) {
+                if (stop() || BookPrep.inCall(c)) return all.takeIf { it.isNotEmpty() }
+                if (!room(c)) {
+                    Log.i(TAG, "little free memory: the chapter is read by the rules")
+                    BookSession.log(c, "модель ролей: мало свободной памяти — глава по правилам")
+                    return all.takeIf { it.isNotEmpty() }
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "failed: ${t.message}"); return null
-            } finally {
-                unload()     // ~300 MB: not kept while the book is read
+                onStart()
+                if (!load(c, threads)) return all.takeIf { it.isNotEmpty() }
+                try {
+                    for (k in todo) {
+                        if (stop() || BookPrep.inCall(c)) break
+                        all.putAll(window(ws[k]))
+                        done += k
+                        if (done.size < ws.size) savePart(part, ws.size, done, all)
+                        onWindow(done.size, ws.size)
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "failed: ${t.message}")
+                    BookSession.log(c, "модель ролей: ошибка (окон ${done.size} из ${ws.size}) — ${t.message ?: t.javaClass.simpleName}")
+                    return all.takeIf { it.isNotEmpty() }
+                } finally {
+                    unload()     // ~300 MB: not kept while the book is read
+                }
+            }
+            val sec = (System.currentTimeMillis() - t0) / 1000
+            if (done.size < ws.size) {
+                if (done.size > had) {
+                    Log.i(TAG, "chapter: ${done.size} of ${ws.size} windows so far (+${done.size - had} in $sec s, $threads threads)")
+                    BookSession.log(c, "модель ролей: разобрано окон ${done.size} из ${ws.size} (+${done.size - had} за $sec с, потоков $threads)")
+                }
+                return all
             }
             save(f, all)
-            Log.i(TAG, "chapter: ${ws.size} windows, ${all.size} lines in ${(System.currentTimeMillis() - t0) / 1000} s")
+            part.delete()
+            Log.i(TAG, "chapter: ${ws.size} windows (+${done.size - had}), ${all.size} lines in $sec s, $threads threads")
+            BookSession.log(c, "модель ролей: глава разобрана — окон ${ws.size} (+${done.size - had} за $sec с, потоков $threads), реплик ${all.size}")
             return all
+        } finally {
+            lock.unlock()
         }
     }
 
@@ -329,11 +473,16 @@ object RoleModel {
     /**
      * The rules' result with the model's sure guesses put in: the lines' speakers (and their voices'
      * sex) change; a character the rules did not have in this chapter joins its list.
-     * [genderOf]: a name's sex (the whole book's roster first).
+     * [genderOf]: a name's sex (the whole book's roster first). [aliases]: other name → name, as they are
+     * now — two characters made one in the Characters window after the chapter was worked out stay one.
+     * [overrides]: the user's own "this line is said by …" (SpeakerOverrides) — the model never changes
+     * those (until 1.54 it did: a line set by hand, or set to "unknown", could get the model's speaker).
      */
     fun improve(r: DialogueAnalyzer2.Result, text: String, lines: List<RoleWindows.Line>, guesses: Map<Int, Guess>,
+                aliases: Map<String, String> = emptyMap(), overrides: Map<String, String> = emptyMap(),
                 genderOf: (String) -> DialogueAnalyzer2.Role?): DialogueAnalyzer2.Result {
         if (guesses.isEmpty()) return r
+        fun resolve(n: String): String { var c = n; repeat(8) { c = aliases[c] ?: return c }; return c }
         val startToPi = HashMap<Int, Int>()
         var o = 0
         text.split('\n').forEachIndexed { i, p -> startToPi[o] = i; o += p.length + 1 }
@@ -342,7 +491,9 @@ object RoleModel {
         var changed = 0
         for (l in lines) {
             val pi = startToPi[l.start] ?: continue
-            val g = guesses[pi] ?: continue
+            val g0 = guesses[pi] ?: continue
+            if (overrides.isNotEmpty() && l.speech.any { overrides[DialogueAnalyzer2.speechKey(text.substring(it[0], it[1]))] != null }) continue
+            val g = resolve(g0.speaker).let { if (it == g0.speaker) g0 else Guess(it, g0.prob, g0.kind) }
             if (l.quoted || g.speaker.equals(l.rules, ignoreCase = true)) continue
             val ok = if (l.rules.isEmpty()) g.prob >= FILL else g.prob >= (if (l.kind == 0) HARD_OVER else EXPL_OVER)
             if (!ok) continue
@@ -357,7 +508,7 @@ object RoleModel {
             changed++
         }
         if (changed == 0) return r
-        Log.i(TAG, "lines given by the model: $changed")
+        Log.i(TAG, "lines given by the model: $changed of ${guesses.size}")
         return DialogueAnalyzer2.Result(spans, chars.values.toList(), r.aliases)
     }
 }
@@ -388,9 +539,27 @@ object RoleModelGlue {
             val lines = linesOf(r, probes, aliases)
             val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
             val g = RoleModel.guesses(c, scope, text, lines, names, aliases, threads > 0, maxOf(1, threads), stop) ?: return r
-            RoleModel.improve(r, text, lines, g) { n -> roster?.genders?.get(n) }
+            RoleModel.improve(r, text, lines, g, aliases, SpeakerOverrides.all(c, scope)) { n -> roster?.genders?.get(n) }
         } catch (t: Throwable) {
             android.util.Log.w("RoleModel", "not used: ${t.message}"); r
+        }
+    }
+
+    /**
+     * The role model reads a chapter (or goes on with it) for the book being read — see [RoleModel.guesses]:
+     * from the window at [from], [limit] windows at most.
+     */
+    fun read(c: android.content.Context, scope: String, text: String, r: DialogueAnalyzer2.Result,
+             probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases: Map<String, String>,
+             threads: Int, from: Int, limit: Int, patience: Long, stop: () -> Boolean,
+             onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }) {
+        if (!RoleModel.enabled(c) || scope.isEmpty()) return
+        try {
+            val lines = linesOf(r, probes, aliases)
+            val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
+            RoleModel.guesses(c, scope, text, lines, names, aliases, true, maxOf(1, threads), stop, from, limit, patience, onStart, onWindow)
+        } catch (t: Throwable) {
+            android.util.Log.w("RoleModel", "not read: ${t.message}")
         }
     }
 }

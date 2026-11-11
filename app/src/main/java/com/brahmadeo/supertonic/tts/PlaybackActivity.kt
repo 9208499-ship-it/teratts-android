@@ -739,11 +739,13 @@ class PlaybackActivity : ComponentActivity() {
             val scope = com.brahmadeo.supertonic.tts.utils.BookSession.scopeFor(ctx, text)
             val roster = com.brahmadeo.supertonic.tts.utils.BookRoster.cached(ctx, scope)
             val (result, line, now) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                val r = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(
-                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyze(text,
-                        com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(roster?.genders ?: emptyMap(),
-                            com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(ctx, scope), roster?.aliases ?: emptyMap())),
-                    (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(ctx, scope))
+                val roleAliases = (roster?.aliases ?: emptyMap()) + com.brahmadeo.supertonic.tts.utils.CharacterVoices.aliases(ctx, scope)
+                val (r0, probes) = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.analyzeLines(text,
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Prior(roster?.genders ?: emptyMap(),
+                        com.brahmadeo.supertonic.tts.utils.SpeakerOverrides.all(ctx, scope), roster?.aliases ?: emptyMap()))
+                // with the role model's guesses, as the line is read (until 1.54 the window named the rules' speaker, not the one heard)
+                val r = com.brahmadeo.supertonic.tts.utils.RoleModelGlue.improve(ctx, scope, text,
+                    com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.applyAliases(r0, roleAliases), probes, roster, roleAliases, 0) { false }
                 val rg = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)[index]
                 // the whole line (a span) this phrase belongs to
                 val span = if (rg == null) null else r.spans.firstOrNull { it.start <= rg.last && it.end > rg.first &&

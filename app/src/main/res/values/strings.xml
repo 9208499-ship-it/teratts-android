@@ -141,6 +141,7 @@
 
     <!-- Notifications -->
     <string name="notif_synthesizing">Synthesizing…</string>
+    <string name="role_model_wait">The role model is reading the beginning of the chapter…</string>
     <string name="notif_playing">Playing Audio</string>
     <string name="notif_paused">Paused</string>
     <string name="notif_exporting">Exporting Audio…</string>
