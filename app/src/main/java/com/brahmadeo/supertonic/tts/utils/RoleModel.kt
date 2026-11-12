@@ -144,10 +144,27 @@ object RoleModel {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /** Set while the model is being deleted: a window being read stops, nothing new is begun. */
+    @Volatile private var aborting = false
+
+    /**
+     * The model and what it worked out, deleted — after the window being read (if any) is stopped: the model
+     * was closed under it before 1.56 (a native crash). On its own thread: the screen does not wait.
+     */
     fun delete(c: Context) {
-        unload()
-        dir(c).listFiles()?.forEach { it.delete() }
-        File(c.filesDir, "role_model_cache").deleteRecursively()
+        aborting = true
+        kotlin.concurrent.thread(name = "role-model-delete") {
+            val mine = try { lock.tryLock(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) { false }
+            try {
+                unload()
+                tok = null
+                dir(c).listFiles()?.forEach { it.delete() }
+                File(c.filesDir, "role_model_cache").deleteRecursively()
+            } finally {
+                if (mine) lock.unlock()
+                aborting = false
+            }
+        }
     }
 
     // ------------------------------------------------------------------ the model
@@ -165,12 +182,15 @@ object RoleModel {
             val d = dir(c)
             val meta = org.json.JSONObject(File(d, "roles_meta.json").readText())
             temp = meta.optDouble("T", 1.0).toFloat()
-            tok = tokenizerOf(File(d, "tokenizer.json"))
+            // the tokenizer (4.7 MB of JSON) is parsed once and kept (~10 MB): it was parsed again at every load
+            if (tok == null) tok = tokenizerOf(File(d, "tokenizer.json"))
             val e = OrtEnvironment.getEnvironment()
             env = e
             fun session(f: String): OrtSession = OrtSession.SessionOptions().use { so ->
                 so.setIntraOpNumThreads(threads)
                 so.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                // threads waiting for work sleep instead of spinning: the cores go to the voice engine
+                try { so.addConfigEntry("session.intra_op.allow_spinning", "0") } catch (_: Throwable) { }
                 e.createSession(File(d, f).absolutePath, so)
             }
             enc = session(meta.optString("enc", "roles_enc_int8.onnx"))
@@ -188,7 +208,7 @@ object RoleModel {
     fun unload() {
         try { enc?.close() } catch (_: Throwable) { }
         try { head?.close() } catch (_: Throwable) { }
-        enc = null; head = null; tok = null
+        enc = null; head = null      // the tokenizer stays (see load)
     }
 
     private fun tokenizerOf(f: File): RoleTokenizer {
@@ -281,27 +301,57 @@ object RoleModel {
         return Inputs(ids, qs, msp, kinds, dist, q, mm, ents, IntArray(mm) { eidx.getValue(ments[it].first.ent) }, tg.map { it.first })
     }
 
+    /** A window stopped midway (see [window]). */
+    private class Stopped : Exception()
+
+    /**
+     * [block] with run options that end the model's run as soon as [stop] says so (looked at every 0.2 s):
+     * a window is some ten seconds, and a reading started, a pause before a call, preparing stopped no
+     * longer wait for its end (1.56). Throws [Stopped] if it was stopped.
+     */
+    private fun <T> stoppable(stop: () -> Boolean, block: (OrtSession.RunOptions) -> T): T =
+        OrtSession.RunOptions().use { ro ->
+            val ended = java.util.concurrent.atomic.AtomicBoolean(false)
+            val watch = Thread({
+                try {
+                    while (!ended.get()) {
+                        if (stop()) { ro.setTerminate(true); break }
+                        Thread.sleep(200)
+                    }
+                } catch (_: InterruptedException) { } catch (_: Throwable) { }
+            }, "role-model-stop").apply { isDaemon = true; start() }
+            try {
+                block(ro)
+            } catch (t: Throwable) {
+                if (stop()) throw Stopped() else throw t
+            } finally {
+                ended.set(true)
+                watch.interrupt()
+                try { watch.join(1000) } catch (_: InterruptedException) { }
+            }
+        }
+
     /** One window: the guesses for its lines (paragraph number → guess). */
-    private fun window(w: RoleWindows.Window): Map<Int, Guess> {
+    private fun window(w: RoleWindows.Window, stop: () -> Boolean): Map<Int, Guess> {
         val t = tok ?: return emptyMap()
         val e = env ?: return emptyMap()
         val inp = inputs(t, w) ?: return emptyMap()
         val ids = inp.ids; val qs = inp.qs; val msp = inp.ms; val kinds = inp.kinds; val dist = inp.dist
         val q = inp.q; val mm = inp.m; val ents = inp.ents
-        val scores: Array<FloatArray> = OnnxTensor.createTensor(e, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { idT ->
-            enc!!.run(mapOf("input_ids" to idT)).use { r1 ->
+        val scores: Array<FloatArray> = stoppable(stop) { ro -> OnnxTensor.createTensor(e, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { idT ->
+            enc!!.run(mapOf("input_ids" to idT), ro).use { r1 ->
                 val hidden = r1.get(0) as OnnxTensor
                 OnnxTensor.createTensor(e, LongBuffer.wrap(qs), longArrayOf(q.toLong(), 2)).use { qT ->
                 OnnxTensor.createTensor(e, LongBuffer.wrap(msp), longArrayOf(mm.toLong(), 2)).use { mT ->
                 OnnxTensor.createTensor(e, LongBuffer.wrap(kinds), longArrayOf(q.toLong(), mm.toLong())).use { kT ->
                 OnnxTensor.createTensor(e, LongBuffer.wrap(dist), longArrayOf(q.toLong(), mm.toLong())).use { dT ->
-                    head!!.run(mapOf("hidden" to hidden, "qspans" to qT, "mspans" to mT, "kinds" to kT, "dist" to dT)).use { r2 ->
+                    head!!.run(mapOf("hidden" to hidden, "qspans" to qT, "mspans" to mT, "kinds" to kT, "dist" to dT), ro).use { r2 ->
                         @Suppress("UNCHECKED_CAST")
                         (r2.get(0).value as Array<FloatArray>)
                     }
                 } } } }
             }
-        }
+        } }
         val entOf = inp.entOf
         val out = HashMap<Int, Guess>()
         for ((qi, target) in inp.targets.withIndex()) {
@@ -348,29 +398,43 @@ object RoleModel {
         !mi.lowMemory && mi.availMem > 500L * 1024 * 1024
     } catch (_: Throwable) { true }
 
-    /** What a chapter not read to its end left: the windows done and their guesses — if it was cut into [total] windows as now. */
-    private fun readPart(f: File, total: Int): Pair<Set<Int>, Map<Int, Guess>>? = try {
+    /**
+     * What a chapter not read to its end left: where the windows done begin in the text, and the guesses (kept by
+     * paragraph). Until 1.56 the windows were kept by their number in the list of windows to read — a list the
+     * rules decide (a line set to "not a line" leaves it): with as many windows as before, a window not read
+     * passed for read, and its lines stayed the rules' for good. A file of 1.54–1.55: its guesses, no windows.
+     */
+    private fun readPart(f: File): Pair<Set<Int>, Map<Int, Guess>>? = try {
         if (!f.exists()) null else {
             val o = org.json.JSONObject(f.readText())
-            if (o.optInt("w", -1) != total) null else {
-                val g = o.getJSONObject("g")
-                val m = HashMap<Int, Guess>()
-                for (k in g.keys()) { val a = g.getJSONArray(k); m[k.toInt()] = Guess(a.getString(0), a.getDouble(1).toFloat(), a.getInt(2)) }
-                val d = o.getJSONArray("d")
-                (0 until d.length()).map { d.getInt(it) }.filter { it in 0 until total }.toSet() to m
-            }
+            val g = o.getJSONObject("g")
+            val m = HashMap<Int, Guess>()
+            for (k in g.keys()) { val a = g.getJSONArray(k); m[k.toInt()] = Guess(a.getString(0), a.getDouble(1).toFloat(), a.getInt(2)) }
+            val b = o.optJSONArray("b")
+            val at = if (b == null) emptySet() else (0 until b.length()).map { b.getInt(it) }.toSet()
+            at to m
         }
     } catch (_: Exception) { null }
 
-    private fun savePart(f: File, total: Int, done: Set<Int>, m: Map<Int, Guess>) {
+    /** The guesses a chapter half read has (they are kept by paragraph: right whatever its windows are now). */
+    private fun readPartGuesses(f: File): Map<Int, Guess>? = try {
+        if (!f.exists()) null else {
+            val g = org.json.JSONObject(f.readText()).getJSONObject("g")
+            val m = HashMap<Int, Guess>()
+            for (k in g.keys()) { val a = g.getJSONArray(k); m[k.toInt()] = Guess(a.getString(0), a.getDouble(1).toFloat(), a.getInt(2)) }
+            m
+        }
+    } catch (_: Exception) { null }
+
+    private fun savePart(f: File, total: Int, doneAt: Collection<Int>, m: Map<Int, Guess>) {
         try {
             val g = org.json.JSONObject()
             for ((k, v) in m) g.put(k.toString(), org.json.JSONArray().put(v.speaker).put(v.prob.toDouble()).put(v.kind))
-            val d = org.json.JSONArray()
-            for (k in done) d.put(k)
+            val b = org.json.JSONArray()
+            for (k in doneAt) b.put(k)
             f.parentFile?.mkdirs()
             val tmp = File(f.path + ".tmp")
-            tmp.writeText(org.json.JSONObject().put("w", total).put("d", d).put("g", g).toString())
+            tmp.writeText(org.json.JSONObject().put("w", total).put("b", b).put("g", g).toString())
             tmp.renameTo(f)
         } catch (e: Exception) { Log.w(TAG, "save part: ${e.message}") }
     }
@@ -388,59 +452,74 @@ object RoleModel {
      * the end, then those before it. [patience]: how long to wait, ms, if the model is busy with another
      * chapter. [onStart]: the model is about to be loaded (there is work); [onWindow]: windows done, of all.
      * Without [compute]: the chapter's file, or what a chapter half read has; null — nothing.
+     * [low]: the model's threads at a low priority (in the background, beside the voice engine; 1.56).
+     * The wait for the model and a window being read stop as soon as [stop] says so (1.56: preparing the
+     * book could not be stopped while the model read a chapter — "play" waited for it, a minute or more).
      */
     fun guesses(c: Context, scope: String, text: String, lines: List<RoleWindows.Line>, names: Collection<String>,
                 aliases: Map<String, String>, compute: Boolean, threads: Int, stop: () -> Boolean = { false },
                 from: Int = 0, limit: Int = Int.MAX_VALUE, patience: Long = Long.MAX_VALUE,
-                onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }): Map<Int, Guess>? {
+                onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }, low: Boolean = true): Map<Int, Guess>? {
         if (scope.isEmpty() || !enabled(c)) return null
         val f = cacheFile(c, scope, text)
         readCache(f)?.let { return it }
         val part = File(f.path + ".part")
-        if (!compute && !part.exists()) return null
+        if (!compute) return readPartGuesses(part)     // (no windows built: asked at every start and plan)
+        if (aborting) return null
+        val halt = { stop() || aborting || BookPrep.inCall(c) }
         val t0 = System.currentTimeMillis()
         val ws = RoleWindows.build(text, lines, names, aliases).filter { w -> w.targets.any { it.hard || it.rules.isEmpty() } }
-        if (!compute) return readPart(part, ws.size)?.second
         if (ws.isEmpty()) { save(f, emptyMap()); return emptyMap() }
-        val mine = if (patience == Long.MAX_VALUE) { lock.lock(); true }
-            else lock.tryLock(patience, java.util.concurrent.TimeUnit.MILLISECONDS)
+        // the model busy with another chapter: waited for no longer than [patience], and not once [stop] says so
+        var mine = lock.tryLock()
+        while (!mine && patience > 0 && !halt() && System.currentTimeMillis() - t0 < patience) {
+            mine = try { lock.tryLock(300, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: InterruptedException) { false }
+        }
         if (!mine) {
             Log.i(TAG, "busy with another chapter")
-            return readPart(part, ws.size)?.second
+            return readPart(part)?.second
         }
         try {
             // the other one (the reading, preparing the book) read this chapter while we waited
             readCache(f)?.let { return it }
             val all = HashMap<Int, Guess>()
             val done = HashSet<Int>()
-            readPart(part, ws.size)?.let { done.addAll(it.first); all.putAll(it.second) }
+            readPart(part)?.let { (at, g) -> ws.forEachIndexed { k, w -> if (w.base in at) done += k }; all.putAll(g) }
             val first = ws.indexOfFirst { w -> w.targets.any { w.base + it.span[1] > from } }.coerceAtLeast(0)
             val order = (first until ws.size) + (0 until first)
             val todo = (if (limit < ws.size) order.take(limit) else order).filter { it !in done }
             val had = done.size
+            val tid = android.os.Process.myTid()
+            val pri0 = try { android.os.Process.getThreadPriority(tid) } catch (_: Throwable) { 0 }
             if (todo.isNotEmpty()) {
-                if (stop() || BookPrep.inCall(c)) return all.takeIf { it.isNotEmpty() }
+                if (halt()) return all.takeIf { it.isNotEmpty() }
                 if (!room(c)) {
                     Log.i(TAG, "little free memory: the chapter is read by the rules")
                     BookSession.log(c, "модель ролей: мало свободной памяти — глава по правилам")
                     return all.takeIf { it.isNotEmpty() }
                 }
                 onStart()
-                if (!load(c, threads)) return all.takeIf { it.isNotEmpty() }
+                // the model's threads are made by load and take this thread's priority: in the background a low
+                // one — the reading's pool threads have the audio priority, and the model got it too (1.56)
+                try { android.os.Process.setThreadPriority(if (low) android.os.Process.THREAD_PRIORITY_BACKGROUND else 0) } catch (_: Throwable) { }
+                if (!load(c, threads)) { try { android.os.Process.setThreadPriority(pri0) } catch (_: Throwable) { }; return all.takeIf { it.isNotEmpty() } }
                 try {
                     for (k in todo) {
-                        if (stop() || BookPrep.inCall(c)) break
-                        all.putAll(window(ws[k]))
+                        if (halt()) break
+                        all.putAll(window(ws[k], halt))
                         done += k
-                        if (done.size < ws.size) savePart(part, ws.size, done, all)
+                        if (done.size < ws.size) savePart(part, ws.size, done.map { ws[it].base }, all)
                         onWindow(done.size, ws.size)
                     }
+                } catch (_: Stopped) {
+                    Log.i(TAG, "stopped midway (windows ${done.size} of ${ws.size})")
                 } catch (t: Throwable) {
                     Log.w(TAG, "failed: ${t.message}")
                     BookSession.log(c, "модель ролей: ошибка (окон ${done.size} из ${ws.size}) — ${t.message ?: t.javaClass.simpleName}")
                     return all.takeIf { it.isNotEmpty() }
                 } finally {
                     unload()     // ~300 MB: not kept while the book is read
+                    try { android.os.Process.setThreadPriority(pri0) } catch (_: Throwable) { }
                 }
             }
             val sec = (System.currentTimeMillis() - t0) / 1000
@@ -498,13 +577,24 @@ object RoleModel {
             val ok = if (l.rules.isEmpty()) g.prob >= FILL else g.prob >= (if (l.kind == 0) HARD_OVER else EXPL_OVER)
             if (!ok) continue
             val role = genderOf(g.speaker) ?: chars[g.speaker]?.role ?: DialogueAnalyzer2.Role.SPEECH
-            for (i in spans.indices) {
-                val s = spans[i]
-                if (s.role == DialogueAnalyzer2.Role.NARRATOR) continue
-                if (l.speech.none { s.start >= it[0] && s.start < it[1] }) continue
-                spans[i] = s.copy(speaker = g.speaker, role = role)
+            // the rules' pieces of this line
+            val mine = spans.indices.filter { i ->
+                spans[i].role != DialogueAnalyzer2.Role.NARRATOR && l.speech.any { spans[i].start >= it[0] && spans[i].start < it[1] }
             }
-            if (g.speaker !in chars) chars[g.speaker] = DialogueAnalyzer2.Character(g.speaker, role, 0, 1f, emptyList())
+            if (mine.isEmpty()) continue
+            // a paragraph the rules gave to two speakers (a line and the answer to it): not made one (1.56)
+            if (mine.mapNotNull { spans[it].speaker }.distinct().size > 1) continue
+            // The sex the line's author words give («спросила она», «ответил Пётр» — their first past-tense verb)
+            // or, without them, the line itself («я пришла»): not gone against. The model can only name someone
+            // named in the window — «незнакомая женщина» got a man's name and voice (1.56). A sex the rules took
+            // from the turns of a talk is not held to: there the model is the surer one (94% against 68%).
+            val sex = l.authors.firstOrNull()?.let { DialogueAnalyzer2.remarkSex(text.substring(it[0], it[1])) }
+                ?: DialogueAnalyzer2.selfSex(l.speech.joinToString(" ") { text.substring(it[0], it[1]) })
+            val known = role == DialogueAnalyzer2.Role.MALE || role == DialogueAnalyzer2.Role.FEMALE
+            if (sex != null && known && role != sex) continue
+            val newRole = if (sex != null && !known) sex else role
+            for (i in mine) spans[i] = spans[i].copy(speaker = g.speaker, role = newRole)
+            if (g.speaker !in chars) chars[g.speaker] = DialogueAnalyzer2.Character(g.speaker, newRole, 0, 1f, emptyList())
             changed++
         }
         if (changed == 0) return r
@@ -552,12 +642,12 @@ object RoleModelGlue {
     fun read(c: android.content.Context, scope: String, text: String, r: DialogueAnalyzer2.Result,
              probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases: Map<String, String>,
              threads: Int, from: Int, limit: Int, patience: Long, stop: () -> Boolean,
-             onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }) {
+             onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }, low: Boolean = true) {
         if (!RoleModel.enabled(c) || scope.isEmpty()) return
         try {
             val lines = linesOf(r, probes, aliases)
             val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
-            RoleModel.guesses(c, scope, text, lines, names, aliases, true, maxOf(1, threads), stop, from, limit, patience, onStart, onWindow)
+            RoleModel.guesses(c, scope, text, lines, names, aliases, true, maxOf(1, threads), stop, from, limit, patience, onStart, onWindow, low)
         } catch (t: Throwable) {
             android.util.Log.w("RoleModel", "not read: ${t.message}")
         }

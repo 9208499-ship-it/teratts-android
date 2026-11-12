@@ -1824,6 +1824,24 @@ object DialogueAnalyzer2 {
         return if (m && !f) G.M else if (f && !m) G.F else null
     }
 
+    /** The sex the author words give their speaker: their first past-tense verb («спросила она», «ответил Пётр»); for RoleModel (1.56). */
+    fun remarkSex(author: String): Role? {
+        val ws = WORD.findAll(author).map { it.value }.toList()
+        return when (ws.withIndex().firstNotNullOfOrNull { (i, w) -> pastGender(w, i == 0) }) {
+            G.M -> Role.MALE; G.F -> Role.FEMALE; null -> null
+        }
+    }
+
+    /** The speaker's sex by the line itself («я пришла», «я готов»), or null; for RoleModel (1.56). */
+    fun selfSex(speech: String): Role? = when (selfGender(speech)) { G.M -> Role.MALE; G.F -> Role.FEMALE; null -> null }
+
+    private fun consonantPast(w: String): G? = when {
+        w.endsWith("шла") && w.length >= 3 -> G.F                                           // пришла, ушла, шла
+        w.endsWith("гла") && w.length > 3 && w != "игла" && w != "мгла" -> G.F           // могла, легла
+        w == "мог" || w.endsWith("смог") || w.endsWith("омог") || w == "лёг" || w == "лег" -> G.M
+        else -> null
+    }
+
     private fun selfGender(speech: String): G? {
         var m: G? = likeMe(speech)?.takeIf { it == G.M }
         var f: G? = likeMe(speech)?.takeIf { it == G.F }
@@ -1839,7 +1857,9 @@ object DialogueAnalyzer2 {
                 while (j < ws.size && steps < 5) {
                     val w = ws[j].lowercase()
                     if (w in otherSubjects) break
-                    val g = selfForms[w] ?: pastGender(ws[j], false)
+                    // …and «я пришла», «я могла», «я мог»: past forms with a consonant stem, not taken for verbs
+                    // elsewhere (1.56; only here — in the narration they would change more than they mend)
+                    val g = selfForms[w] ?: pastGender(ws[j], false) ?: consonantPast(w)
                     if (g != null) { if (g == G.M) m = G.M else f = G.F; break }
                     if (w !in selfFillers && ++others > 2) break
                     j++; steps++
