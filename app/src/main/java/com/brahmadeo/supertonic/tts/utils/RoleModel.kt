@@ -28,7 +28,9 @@ object RoleModel {
     private const val RELEASE = "role-model-m8b"
     private const val BASE = "https://github.com/9208499-ship-it/teratts-android/releases/download/$RELEASE/"
     /** Bumped with the model or the rules it was trained on top of: what was worked out before is made again. */
-    private const val VERSION = "m8b-149"
+    // 1.56: the windows are those of training (the neighbours' author words are mentions again) — what was
+    // worked out on the windows of 1.50–1.55 is not taken
+    private const val VERSION = "m8b-157"
     val FILES = listOf("roles_enc_int8.onnx", "roles_head.onnx", "tokenizer.json", "roles_meta.json")
     private const val MAXTOK = 2048
     private const val NB = 12
@@ -588,7 +590,13 @@ object RoleModel {
             // or, without them, the line itself («я пришла»): not gone against. The model can only name someone
             // named in the window — «незнакомая женщина» got a man's name and voice (1.56). A sex the rules took
             // from the turns of a talk is not held to: there the model is the surer one (94% against 68%).
-            val sex = l.authors.firstOrNull()?.let { DialogueAnalyzer2.remarkSex(text.substring(it[0], it[1])) }
+            // (the remark is the author words after the speech — «— …, — окликнул он»; before it only an introduction,
+            // «Она сказала:». 1.56 took the first author words of the paragraph: «…Лэнгдона осенила мысль. — …, —
+            // окликнул он» gave a woman, and the model was not let mend the rules' «Кэтрин», 1.57)
+            val firstSpeech = l.speech.firstOrNull()?.get(0) ?: 0
+            val remark = l.authors.firstOrNull { it[0] >= firstSpeech }
+                ?: l.authors.firstOrNull { it[1] <= firstSpeech && text.substring(it[0], it[1]).trimEnd(' ', '—', '–', '-').endsWith(":") }
+            val sex = remark?.let { DialogueAnalyzer2.remarkSex(text.substring(it[0], it[1])) }
                 ?: DialogueAnalyzer2.selfSex(l.speech.joinToString(" ") { text.substring(it[0], it[1]) })
             val known = role == DialogueAnalyzer2.Role.MALE || role == DialogueAnalyzer2.Role.FEMALE
             if (sex != null && known && role != sex) continue
@@ -621,13 +629,39 @@ object RoleModelGlue {
      * (with [threads] > 0: worked out now if it is not — the next chapter while this one is read, the
      * book's chapters while it is prepared).
      */
-    fun improve(c: android.content.Context, scope: String, text: String, r: DialogueAnalyzer2.Result,
-                probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases: Map<String, String>,
+    /**
+     * A name's case form taken for a person of its own («Лэнгдона», «Майку», «Базаровым») made one with the
+     * name: the rules of a chapter made such a «person» of a name in another case, and by its ending it got a
+     * woman's voice («Лэнгдона»), and the model a candidate of its own (1.57). [r] with them merged, and the
+     * aliases with them.
+     */
+    private fun merged(r: DialogueAnalyzer2.Result, roster: BookRoster.Roster?, aliases: Map<String, String>):
+            Pair<DialogueAnalyzer2.Result, Map<String, String>> {
+        val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
+        val forms = RoleWindows.caseForms(names).filterKeys { it !in aliases }
+        if (forms.isEmpty()) return r to aliases
+        val roleOf = HashMap<String, DialogueAnalyzer2.Role>()
+        for (ch in r.characters) if (ch.role == DialogueAnalyzer2.Role.MALE || ch.role == DialogueAnalyzer2.Role.FEMALE) roleOf[ch.name] = ch.role
+        roster?.genders?.forEach { (k, v) -> roleOf[k] = v }
+        val m = DialogueAnalyzer2.applyAliases(r, forms)
+        val spans = m.spans.mapIndexed { i, s ->
+            val was = r.spans[i].speaker
+            val base = if (was != null) forms[was] else null
+            val role = if (base != null) roleOf[base] else null
+            if (role != null && s.role != DialogueAnalyzer2.Role.NARRATOR) s.copy(role = role) else s
+        }
+        android.util.Log.i("RoleModel", "case forms made one: $forms")
+        return DialogueAnalyzer2.Result(spans, m.characters, r.aliases + forms) to (forms + aliases)
+    }
+
+    fun improve(c: android.content.Context, scope: String, text: String, r0: DialogueAnalyzer2.Result,
+                probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases0: Map<String, String>,
                 threads: Int, stop: () -> Boolean): DialogueAnalyzer2.Result {
+        val (r, aliases) = try { merged(r0, roster, aliases0) } catch (t: Throwable) { r0 to aliases0 }
         if (!RoleModel.enabled(c) || scope.isEmpty()) return r
         return try {
             val lines = linesOf(r, probes, aliases)
-            val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
+            val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct().filter { it !in aliases }
             val g = RoleModel.guesses(c, scope, text, lines, names, aliases, threads > 0, maxOf(1, threads), stop) ?: return r
             RoleModel.improve(r, text, lines, g, aliases, SpeakerOverrides.all(c, scope)) { n -> roster?.genders?.get(n) }
         } catch (t: Throwable) {
@@ -639,14 +673,15 @@ object RoleModelGlue {
      * The role model reads a chapter (or goes on with it) for the book being read — see [RoleModel.guesses]:
      * from the window at [from], [limit] windows at most.
      */
-    fun read(c: android.content.Context, scope: String, text: String, r: DialogueAnalyzer2.Result,
-             probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases: Map<String, String>,
+    fun read(c: android.content.Context, scope: String, text: String, r0: DialogueAnalyzer2.Result,
+             probes: List<DialogueAnalyzer2.Probe>, roster: BookRoster.Roster?, aliases0: Map<String, String>,
              threads: Int, from: Int, limit: Int, patience: Long, stop: () -> Boolean,
              onStart: () -> Unit = {}, onWindow: (Int, Int) -> Unit = { _, _ -> }, low: Boolean = true) {
         if (!RoleModel.enabled(c) || scope.isEmpty()) return
         try {
+            val (r, aliases) = merged(r0, roster, aliases0)
             val lines = linesOf(r, probes, aliases)
-            val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct()
+            val names = ((roster?.ranking ?: emptyList()) + r.characters.map { it.name }).distinct().filter { it !in aliases }
             RoleModel.guesses(c, scope, text, lines, names, aliases, true, maxOf(1, threads), stop, from, limit, patience, onStart, onWindow, low)
         } catch (t: Throwable) {
             android.util.Log.w("RoleModel", "not read: ${t.message}")

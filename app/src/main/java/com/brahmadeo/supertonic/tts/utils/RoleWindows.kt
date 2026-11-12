@@ -39,6 +39,34 @@ object RoleWindows {
         return Regex("(?<![$L])[" + first + first.uppercaseChar() + "]" + Regex.escape(stem.substring(1)) + "[а-яё]{0,3}(?![$L])")
     }
 
+    private const val VOWELS = "аяьйоеиыуэюё"
+
+    /**
+     * Case forms of a name taken for names of their own → the name: «Лэнгдона», «Лэнгдону», «Лэнгдоном» →
+     * «Лэнгдон»; «Анну», «Анной» → «Анна»; «Базаровым» → «Базаров» (1.57). One word, capitalised, four
+     * letters or more; a known woman's name («Александра» beside «Александр») is not a form.
+     */
+    fun caseForms(names: Collection<String>): Map<String, String> {
+        val ns = names.filter { it.length >= 3 && ' ' !in it && it[0].isUpperCase() }.toSet()
+        val out = HashMap<String, String>()
+        for (n in ns) {
+            if (n.length < 4) continue
+            val lw = n.lowercase()
+            for (m in ns) {
+                if (m == n || m.length >= n.length) continue
+                val ml = m.lowercase()
+                val male = ml.last() !in VOWELS && lw.startsWith(ml) && lw.substring(ml.length) in MALE_ENDS &&
+                    !(NameGender.known(n) && NameGender.guess(n) == NameGender.G.F)
+                val female = (ml.last() == 'а' || ml.last() == 'я') && lw.length > ml.length - 1 &&
+                    lw.startsWith(ml.dropLast(1)) && lw.substring(ml.length - 1) in FEMALE_ENDS && !NameGender.known(n)
+                if (male || female) { out[n] = m; break }
+            }
+        }
+        return out
+    }
+    private val MALE_ENDS = setOf("а", "у", "ом", "е", "ым", "ем")
+    private val FEMALE_ENDS = setOf("ы", "и", "е", "у", "ю", "ой", "ей", "ою", "ею")
+
     private val HERO_PRON = Regex("(?<![$L])(я|меня|мне|мной|мною)(?![$L])", RegexOption.IGNORE_CASE)
 
     /**
@@ -61,7 +89,12 @@ object RoleWindows {
         paras.forEachIndexed { i, p -> startToPi[p[0]] = i }
         val byPi = HashMap<Int, Line>()
         for (l in lines) { val pi = startToPi[l.start] ?: continue; if (l.speech.isNotEmpty()) byPi[pi] = l }
-        val targets = byPi.filter { !it.value.quoted }.keys
+        // the targets as in training (build_joint.py «train»): every line but a quotation and a line whose
+        // author words the rules read with a pronoun («— …, — ответил он») or an introduction before it —
+        // those are the neighbours whose author words are a mention of their speaker (type 2). Until 1.56
+        // every line was a target, and the model never saw that mention: one of its strongest signs.
+        // Such a line the rules gave nobody stays a target (the model may fill it in).
+        val targets = byPi.filter { (_, l) -> !l.quoted && !((l.kind == 1 || l.kind == 5) && l.rules.isNotEmpty()) }.keys
 
         // cores
         val cores = ArrayList<List<Int>>()
