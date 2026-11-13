@@ -36,8 +36,11 @@ object Updater {
     fun auto(c: Context) = p(c).getBoolean("auto", true)
     fun setAuto(c: Context, on: Boolean) = p(c).edit().putBoolean("auto", on).apply()
     fun skip(c: Context, version: String) = p(c).edit().putString("skipped", version).apply()
-    /** Test versions too (pre-releases): off by default — most get only what was tried. */
-    fun beta(c: Context) = p(c).getBoolean("beta", false)
+    /**
+     * Test versions (pre-releases) are never offered: some of them may hardly work, and the author installs
+     * them by hand (tolyos). The old «beta versions» switch is gone; one left on no longer counts.
+     */
+    @Suppress("UNUSED_PARAMETER") fun beta(c: Context) = false
     fun setBeta(c: Context, on: Boolean) = p(c).edit().putBoolean("beta", on).putLong("checked", 0L).apply()
 
     /** This app's version: "1.21" (of "1.21-tera"). */

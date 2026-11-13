@@ -263,7 +263,7 @@ class LexiconActivity : ComponentActivity() {
                     preRollEnabled = preRollEnabledState.value,
                     preRollSentences = preRollSentencesState.value,
                     onBackClick = { finish() },
-                    onImportClick = { importLauncher.launch("application/json") },
+                    onImportClick = { importLauncher.launch("*/*") },   // .json and .txt dictionaries
                     onExportClick = { performExport() },
                     onImportAccentDictClick = { importAccentDictLauncher.launch("*/*") },
                     onDownloadAccentDictTextClick = {
@@ -501,21 +501,8 @@ class LexiconActivity : ComponentActivity() {
             reader.close()
             inputStream.close()
 
-            val jsonArray = JSONArray(jsonString)
-            val importedItems = mutableListOf<LexiconItem>()
-
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                if (obj.has("term") && obj.has("replacement")) {
-                    importedItems.add(LexiconItem(
-                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
-                        term = obj.getString("term"),
-                        replacement = obj.getString("replacement"),
-                        ignoreCase = obj.optBoolean("ignoreCase", true),
-                        isRegex = obj.optBoolean("isRegex", false)
-                    ))
-                }
-            }
+            // the app's own JSON, or a text dictionary («замок зам+ок», «замок=зам+ок», «$Имя=…»)
+            val importedItems = LexiconManager.parseImport(jsonString)
 
             if (importedItems.isEmpty()) {
                 Toast.makeText(this, getString(R.string.no_valid_rules), Toast.LENGTH_SHORT).show()

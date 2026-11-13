@@ -134,6 +134,9 @@ object BookPrep {
         } catch (e: Exception) { Log.w(TAG, "stop: ${e.message}"); now.value = null }
     }
 
+    /** Stopped from the notification a while ago: not started again on its own until the hold is over. */
+    fun held(context: Context) = System.currentTimeMillis() < context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_HOLD, 0L)
+
     fun setMode(context: Context, mode: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_MODE, mode).apply()
         schedule(context)

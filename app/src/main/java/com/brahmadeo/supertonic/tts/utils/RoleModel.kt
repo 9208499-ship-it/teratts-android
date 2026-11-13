@@ -25,33 +25,61 @@ import java.nio.LongBuffer
 object RoleModel {
     private const val TAG = "RoleModel"
     private const val PREFS = "TeraRoleModel"
-    private const val RELEASE = "role-model-m8b"
+    private const val RELEASE = "role-model-m10b"
     private const val BASE = "https://github.com/9208499-ship-it/teratts-android/releases/download/$RELEASE/"
     /** Bumped with the model or the rules it was trained on top of: what was worked out before is made again. */
     // 1.56: the windows are those of training (the neighbours' author words are mentions again) — what was
     // worked out on the windows of 1.50–1.55 is not taken
-    private const val VERSION = "m8b-157"
+    // 1.59: m10b (m8b taught on 40 more books, marked by Haiku) — its own results; the m8b of an older
+    // version, still here until m10b is downloaded, keeps its own (OLD_VERSION)
+    private const val VERSION = "m10b-159"
+    private const val OLD_VERSION = "m8b-157"
     val FILES = listOf("roles_enc_int8.onnx", "roles_head.onnx", "tokenizer.json", "roles_meta.json")
     private const val MAXTOK = 2048
     private const val NB = 12
 
-    // the policy (measured on 197 hand-checked lines and «Алиса»): a line with no author words — the
-    // model from 0.6; one with them — the rules, the model only from 0.9; the rules silent — from 0.5
-    private const val HARD_OVER = 0.6f
+    // the policy: a line with no author words — the model from HARD_OVER; one with them — the rules, the model
+    // only from 0.9; the rules silent — from FILL. m8b (197 hand-checked lines and «Алиса»): 0.6 / 0.5;
+    // m10b (1668 lines of three books outside its training, by the phone's own code, and the 197): 0.5 / 0.3 —
+    // the speaker right in 59.8 % (m8b 56.5 %), a wrong voice sex in 92 lines (m8b 108)
+    @Volatile private var HARD_OVER = 0.5f
     private const val EXPL_OVER = 0.9f
-    private const val FILL = 0.5f
+    @Volatile private var FILL = 0.3f
 
     /** The files of the release as they must be: a file cut short or damaged is not a model (1.54). */
-    private val SIZE = mapOf("roles_enc_int8.onnx" to 208313718L, "roles_head.onnx" to 4014896L,
-        "tokenizer.json" to 4753266L, "roles_meta.json" to 234L)
+    private val SIZE = mapOf("roles_enc_int8.onnx" to 208313718L, "roles_head.onnx" to 4013587L,
+        "tokenizer.json" to 4753266L, "roles_meta.json" to 233L)
     private val SHA256 = mapOf(
-        "roles_enc_int8.onnx" to "8b3d836771fb64594d4e3b3469afd8c3c998317d533b69de3f61918d27c5fcf3",
-        "roles_head.onnx" to "3106a1ffcadd44592d3ec150fb96c4174f601a002982cd5edfdcd9a2092bc8af",
+        "roles_enc_int8.onnx" to "ed0b1cfc6373631bd9e81d6b81943b192f6193baff869fe4816d5d541855819e",
+        "roles_head.onnx" to "f5f359ee8cb8e709969f2713410c18e23abc1b3024c909394e85c6ffcf248e65",
         "tokenizer.json" to "c166ae391d765915521dce27bf940cc9c7bff5050260f652f9327a7df1b9cd56",
-        "roles_meta.json" to "1d177d0b6ea006b19eea669caac0d485fa9ad606fc88da6ae0120906417a10f2")
+        "roles_meta.json" to "e404e8bb91b9175d308c4a5793e063d164fe8845448c554949285849f882a7ee")
+    /** m8b (1.48–1.58): known by its sizes (it had no mark); kept in use until m10b is downloaded. */
+    private val OLD_SIZE = mapOf("roles_enc_int8.onnx" to 208313718L, "roles_head.onnx" to 4014896L,
+        "tokenizer.json" to 4753266L, "roles_meta.json" to 234L)
+    /** Which release the files are (m10b's encoder is as long as m8b's: the size alone does not tell). */
+    private const val MARK = "release.txt"
 
     fun dir(c: Context) = File(c.filesDir, "role_model")
-    fun installed(c: Context) = FILES.all { File(dir(c), it).length() == SIZE[it] }
+    /** A new release is downloaded here, beside the model in use; it replaces it only whole and checked. */
+    private fun nextDir(c: Context) = File(c.filesDir, "role_model.next")
+
+    /** 2 — the current release, 1 — m8b of an older version, 0 — none. Sets the policy of the model found. */
+    private fun which(c: Context): Int {
+        val d = dir(c)
+        val m = when {
+            FILES.all { File(d, it).length() == SIZE[it] } &&
+                (try { File(d, MARK).readText().trim() } catch (_: Exception) { "" }) == RELEASE -> 2
+            FILES.all { File(d, it).length() == OLD_SIZE[it] } -> 1
+            else -> 0
+        }
+        if (m == 1) { HARD_OVER = 0.6f; FILL = 0.5f } else { HARD_OVER = 0.5f; FILL = 0.3f }
+        return m
+    }
+    fun installed(c: Context) = which(c) > 0
+    /** The model in use is the current release (not m8b waiting to be replaced). */
+    fun upToDate(c: Context) = which(c) == 2
+    private fun version(c: Context) = if (which(c) == 1) OLD_VERSION else VERSION
     fun size(c: Context): Long = FILES.sumOf { File(dir(c), it).length() }
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     fun wanted(c: Context) = p(c).getBoolean("on", true)
@@ -67,7 +95,9 @@ object RoleModel {
      * begun again; each file is checked by its size and SHA-256 before it is taken. Throws on failure.
      */
     suspend fun download(c: Context) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val d = dir(c).apply { mkdirs() }
+        if (upToDate(c)) return@withContext
+        // beside the model in use (m8b goes on working meanwhile); put in its place only when all is here
+        val d = nextDir(c).apply { mkdirs() }
         val all = SIZE.values.sum().toFloat()
         var before = 0L
         progress.value = 0f
@@ -95,8 +125,35 @@ object RoleModel {
                 before += size
                 progress.value = before / all
             }
+            swapIn(c)
         } finally {
             progress.value = null
+        }
+    }
+
+    /**
+     * The release downloaded in [nextDir] takes the place of the model in use — once no window is being read
+     * (the model closed under one is a native crash, 1.56). What the old model worked out goes (another VERSION).
+     */
+    private fun swapIn(c: Context) {
+        aborting = true
+        val mine = try { lock.tryLock(60, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) { false }
+        try {
+            if (!mine) throw IllegalStateException("модель ролей занята разбором главы — нажмите ещё раз через минуту")
+            unload()
+            tok = null
+            val d = dir(c).apply { mkdirs() }
+            d.listFiles()?.forEach { it.delete() }
+            for (name in FILES) if (!File(nextDir(c), name).renameTo(File(d, name))) throw IllegalStateException("$name: не удалось сохранить")
+            File(d, MARK).writeText(RELEASE)
+            nextDir(c).deleteRecursively()
+            File(c.filesDir, "role_model_cache").listFiles()?.forEach { s ->
+                s.listFiles()?.filter { !it.name.startsWith(VERSION + "_") }?.forEach { it.delete() }
+            }
+            Log.i(TAG, "model: $RELEASE in place")
+        } finally {
+            if (mine) lock.unlock()
+            aborting = false
         }
     }
 
@@ -161,6 +218,7 @@ object RoleModel {
                 unload()
                 tok = null
                 dir(c).listFiles()?.forEach { it.delete() }
+                nextDir(c).deleteRecursively()
                 File(c.filesDir, "role_model_cache").deleteRecursively()
             } finally {
                 if (mine) lock.unlock()
@@ -379,7 +437,7 @@ object RoleModel {
     // ------------------------------------------------------------------ chapters
 
     private fun cacheFile(c: Context, scope: String, text: String) =
-        File(c.filesDir, "role_model_cache/" + Integer.toHexString(scope.hashCode()) + "/" + VERSION + "_" + BookPrep.textKey(text) + ".json")
+        File(c.filesDir, "role_model_cache/" + Integer.toHexString(scope.hashCode()) + "/" + version(c) + "_" + BookPrep.textKey(text) + ".json")
 
     private fun readCache(f: File): Map<Int, Guess>? = try {
         if (!f.exists()) null else {

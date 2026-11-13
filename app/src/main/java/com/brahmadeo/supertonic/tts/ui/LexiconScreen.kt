@@ -608,14 +608,7 @@ private fun UpdateRow() {
             checked = auto,
             onToggle = { v -> auto = v; up.setAuto(context, v) }
         )
-        // test versions (GitHub pre-releases): only for those who want to try them first
-        var beta by remember { mutableStateOf(up.beta(context)) }
-        PunctuationToggleRow(
-            title = stringResource(AppR.string.update_beta_title),
-            description = stringResource(AppR.string.update_beta_desc),
-            checked = beta,
-            onToggle = { v -> beta = v; up.setBeta(context, v) }
-        )
+        // (no «beta versions» switch: test versions are tried by the author, not offered to everyone — tolyos)
     }
 }
 
@@ -892,6 +885,8 @@ private fun RoleModelRow() {
     val rm = com.brahmadeo.supertonic.tts.utils.RoleModel
     val scope = rememberCoroutineScope()
     var installed by remember { mutableStateOf(rm.installed(context)) }
+    // a model of an older version (m8b): it works until the new one (m10b) is downloaded in its place
+    var upToDate by remember { mutableStateOf(rm.upToDate(context)) }
     var on by remember { mutableStateOf(rm.wanted(context)) }
     var error by remember { mutableStateOf<String?>(null) }
     var askDelete by remember { mutableStateOf(false) }
@@ -908,6 +903,7 @@ private fun RoleModelRow() {
                     Text(
                         text = when {
                             prog != null -> stringResource(AppR.string.role_model_loading, (prog * 100).toInt())
+                            installed && !upToDate -> stringResource(AppR.string.role_model_update)
                             installed -> stringResource(AppR.string.role_model_installed, (rm.size(context) / 1_000_000L).toInt())
                             else -> stringResource(AppR.string.role_model_desc)
                         },
@@ -919,13 +915,14 @@ private fun RoleModelRow() {
             }
             if (prog != null) LinearProgressIndicator(progress = { prog }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
             Row {
-                if (!installed && prog == null) TextButton(onClick = {
+                if ((!installed || !upToDate) && prog == null) TextButton(onClick = {
                     error = null
                     scope.launch {
                         try { rm.download(context) } catch (e: Throwable) { error = e.message ?: e.javaClass.simpleName }
                         installed = rm.installed(context)
+                        upToDate = rm.upToDate(context)
                     }
-                }) { Text(stringResource(AppR.string.role_model_download)) }
+                }) { Text(stringResource(if (installed) AppR.string.role_model_update_btn else AppR.string.role_model_download)) }
                 if (installed) TextButton(onClick = { askDelete = true }) { Text(stringResource(AppR.string.role_model_delete)) }
             }
             error?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -935,7 +932,7 @@ private fun RoleModelRow() {
         onDismissRequest = { askDelete = false },
         title = { Text(stringResource(AppR.string.role_model_title)) },
         text = { Text(stringResource(AppR.string.role_model_delete_ask)) },
-        confirmButton = { TextButton(onClick = { askDelete = false; rm.delete(context); installed = false }) { Text(stringResource(AppR.string.role_model_delete)) } },
+        confirmButton = { TextButton(onClick = { askDelete = false; rm.delete(context); installed = false; upToDate = false }) { Text(stringResource(AppR.string.role_model_delete)) } },
         dismissButton = { TextButton(onClick = { askDelete = false }) { Text(stringResource(android.R.string.cancel)) } }
     )
 }

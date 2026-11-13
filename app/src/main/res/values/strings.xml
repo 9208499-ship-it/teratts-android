@@ -471,7 +471,7 @@
     <string name="settings_prep">Audio beforehand</string>
     <string name="settings_prep_desc">Voice the open book beforehand while charging — then it plays like an ordinary player</string>
     <string name="prep_title">Prepare the open book\'s audio beforehand</string>
-    <string name="prep_desc">What is ahead of your place is voiced: the next chapters, and the one being read — first if less than a third is read, otherwise last. Chapters already read are not voiced. All in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses. Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
+    <string name="prep_desc">What is ahead of your place is voiced: the next chapters, and the one being read — first if less than a third is read, otherwise last. Chapters already read are not voiced. All in the background with the same voice and roles as reading. A ready chapter plays from its file: almost no battery, no pauses — and meanwhile the next chapters are prepared further (on the charger, or on enough battery — as chosen below). Changed the voice, model, roles or dictionary — the chapter is read live and prepared again.</string>
     <string name="prep_mode_charging">Only while charging</string>
     <string name="prep_mode_half">While charging, or on the battery when charged enough</string>
     <string name="prep_status">Chapters of the open book ready: %1$d · all prepared audio takes %2$d MB</string>
@@ -582,6 +582,8 @@
     <string name="role_model_loading">Downloading: %1$d%%</string>
     <string name="role_model_installed">Downloaded (%1$d MB). The switch: use it, or read roles by the rules only.</string>
     <string name="role_model_download">Download</string>
+    <string name="role_model_update">A new role model (m10b): tells who speaks more accurately and gets the voice\'s sex wrong less often. About 217 MB; the old one works while it downloads.</string>
+    <string name="role_model_update_btn">Update</string>
     <string name="role_model_delete">Delete</string>
     <string name="role_model_delete_ask">Delete the role model and what it worked out? It can be downloaded again.</string>
     <string name="prep_note_stopped">Stopped: %1$s.</string>

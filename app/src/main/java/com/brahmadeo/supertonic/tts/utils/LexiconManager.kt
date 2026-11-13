@@ -117,6 +117,71 @@ object LexiconManager {
         }
     }
 
+    /**
+     * Rules from a file the user loads: the app's own JSON (its export), or a plain text dictionary as
+     * others keep them — one rule a line, «#» a comment:
+     *   «замок зам+ок» (RuAccent / silero-stress exceptions; a «+» in the left word is dropped),
+     *   «замок=зам+ок», «небо между=н+ебо м+ежду» (phrases, ruRoberta-GUI and the like; «==» too),
+     *   «$Шекспир=Шексп+ир» — «$» first: only in exactly that case.
+     */
+    fun parseImport(text: String): List<LexiconItem> {
+        val body = text.removePrefix("﻿")
+        val out = mutableListOf<LexiconItem>()
+        if (body.trimStart().startsWith("[")) {
+            val arr = JSONArray(body)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.has("term") && obj.has("replacement")) out.add(LexiconItem(
+                    id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                    term = obj.getString("term"),
+                    replacement = obj.getString("replacement"),
+                    ignoreCase = obj.optBoolean("ignoreCase", true),
+                    isRegex = obj.optBoolean("isRegex", false)
+                ))
+            }
+            return out
+        }
+        for (raw in body.lineSequence()) {
+            var line = raw.trim()
+            if (line.isEmpty() || line.startsWith("#")) continue
+            val strict = line.startsWith("$")
+            if (strict) line = line.substring(1).trim()
+            val eq = line.indexOf('=')
+            val (left, right) = if (eq > 0) {
+                line.substring(0, eq) to line.substring(eq + 1).trimStart('=')
+            } else {
+                val f = line.split(Regex("\\s+"))
+                if (f.size != 2) continue
+                f[0] to f[1]
+            }
+            val term = left.replace("+", "").replace("́", "").trim()
+            val rep = right.trim()
+            if (term.isEmpty() || rep.isEmpty() || term == rep) continue
+            out.add(LexiconItem(term = term, replacement = rep, ignoreCase = !strict))
+        }
+        return out
+    }
+
+    private fun folded(s: String) = s.filter { it.isLetterOrDigit() }.lowercase().replace('ё', 'е')
+
+    /**
+     * A stress rule («замок» → «зам+ок») keeps the case of the text it replaces: «Замок» → «Зам+ок»,
+     * «ЗАМОК» → «ЗАМ+ОК» (as a dictionary of exceptions does). Only when the replacement is the same
+     * letters with stress marks (and ё); any other replacement goes as written.
+     */
+    private fun keepCase(found: String, with: String): String {
+        if (folded(found) != folded(with)) return with
+        val letters = found.filter { it.isLetterOrDigit() }
+        val sb = StringBuilder(with.length)
+        var i = 0
+        for (c in with) {
+            if (!c.isLetterOrDigit()) { sb.append(c); continue }
+            val o = letters.getOrNull(i++)
+            sb.append(if (o != null && o.isUpperCase()) c.uppercaseChar() else if (o != null) c.lowercaseChar() else c)
+        }
+        return sb.toString()
+    }
+
     fun apply(text: String): String {
         // Master switch — user disabled the lexicon entirely.
         if (!enabled) return text
@@ -161,7 +226,7 @@ object LexiconManager {
             if (ok && end < text.length && wordChar(text[end])) ok = false
             if (ok) {
                 val sb = out ?: StringBuilder(text.length + 16).also { out = it }
-                sb.append(text, last, at).append(with)
+                sb.append(text, last, at).append(if (ignoreCase) keepCase(text.substring(at, end), with) else with)
                 last = end
                 from = end
             } else from = at + 1

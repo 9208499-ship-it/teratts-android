@@ -461,12 +461,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val replayAt = if (isPlaying && isSynthesizing && again != null) currentSentenceIndex.coerceAtLeast(0) else -1
             val stopping = if (isSynthesizing && replayAt < 0) stopServicePlayback(keepCard = true) else null
             val old = synthesisJob
+            val oldPrep = prepJob
             engineReady = serviceScope.launch(Dispatchers.IO) {
                 previous?.join()
                 stopping?.join()
-                if (old != null && old.isActive) {
+                for (j in listOf(old, oldPrep)) if (j != null && j.isActive) {
                     SupertonicTTS.setCancelled(true)
-                    old.cancelAndJoin()
+                    j.cancelAndJoin()
                     SupertonicTTS.setCancelled(false)
                 }
                 SupertonicTTS.release()
@@ -645,9 +646,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             // Cancel any in-flight synthesis, but keep the AudioTrack alive so the
             // next sentence can stream straight in without a re-init delay.
             if (synthesisJob?.isActive == true) {
-                SupertonicTTS.setCancelled(true)
+                // (a chapter that played from its file did not use the engine: the book being prepared
+                // alongside keeps its phrase)
+                if (!(fromFile && preparing)) SupertonicTTS.setCancelled(true)
                 synthesisJob?.cancelAndJoin()
             }
+            fromFile = false     // (until this chapter is found made beforehand)
             // paused / stopped (or started again) while the previous phrase was finishing
             if (gen != playGen.get()) return@launch
 
@@ -792,6 +796,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val prepared = prepBook?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, it, text, totalSentences, stylePath) }
                 val prepReader = prepared?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.Reader(it) }
                 if (prepared != null) Log.i(TAG, "Prepared audio: the chapter plays from its file")
+                fromFile = prepared != null
+                // made beforehand: the engine is free — the book is prepared further meanwhile (if it may);
+                // voiced now: preparing alongside the last chapter gives the engine back
+                if (prepared != null) withContext(Dispatchers.Main) { prepAlongside() } else yieldPrep()
                 // shown in the player and the notification: from the file, or voiced now — and why
                 // (a phone heating up "though the chapters were prepared" — 1.24 had made them useless)
                 com.brahmadeo.supertonic.tts.utils.BookPrep.source.value = when {
@@ -1537,6 +1545,32 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
     // ---- audio of the open book made beforehand (BookPrep) ----
     @Volatile private var preparing = false
+    /** The job preparing the book (apart from the reading's: it may go on while a chapter plays from its file). */
+    @Volatile private var prepJob: Job? = null
+    /**
+     * The chapter being read plays from its file (BookPrep): the reading does not use the engine, so the
+     * book may be prepared further meanwhile — on the charger, or on enough battery if so chosen (tolyos).
+     */
+    @Volatile private var fromFile = false
+
+    /** A chapter plays from its file: preparing goes on alongside it, if it may (the same rules as ever). */
+    private fun prepAlongside() {
+        val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
+        if (preparing || !fromFile || starting || com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere) return
+        if (!prep.enabled(this) || prep.held(this) || !prep.conditionsOk(this)) return
+        Log.i(TAG, "Prepare: the chapter plays from its file — preparing goes on alongside")
+        startPrepare(false)
+    }
+
+    /** The reading needs the engine (a chapter not made beforehand): preparing alongside it stops. */
+    private suspend fun yieldPrep() {
+        if (!preparing) return
+        Log.i(TAG, "Prepare: the reading needs the engine — preparing stops")
+        prepByHandStop = false
+        SupertonicTTS.setCancelled(true)
+        prepJob?.cancelAndJoin()
+        SupertonicTTS.setCancelled(false)
+    }
 
     private var prepWaiter: Job? = null
 
@@ -1551,7 +1585,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         val prep = com.brahmadeo.supertonic.tts.utils.BookPrep
         if (preparing) return
         val busy = isPlaying || isSynthesizing || starting
-        if (busy && !byHand) { Log.i(TAG, "Prepare: the book is being read — later"); return }
+        // a chapter playing from its file leaves the engine free: preparing goes on alongside it
+        val alongside = busy && fromFile && !starting
+        if (busy && !byHand && !alongside) { Log.i(TAG, "Prepare: the book is being read — later"); return }
         // started with startForegroundService: in the foreground within 5 seconds, whatever follows
         // (a reading service is in the foreground already: its card stays as it is)
         if (!busy) {
@@ -1566,8 +1602,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             if (!busy) stopForeground(STOP_FOREGROUND_REMOVE)
             return
         }
-        if (isPlaying || starting) { prepareAfterReading(); return }
-        if (isSynthesizing) {
+        if ((isPlaying || starting) && !alongside) { prepareAfterReading(); return }
+        if (isSynthesizing && !alongside) {
             // paused, the engine held by the phrase it was making: let it go, then prepare
             Log.i(TAG, "Prepare: the paused reading lets the engine go")
             prep.wanted = false
@@ -1597,7 +1633,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 SupertonicTTS.setCancelled(false)
             }
         }
-        synthesisJob = serviceScope.launch(Dispatchers.IO) {
+        prepJob = serviceScope.launch(Dispatchers.IO) {
             try {
                 // (this pool thread may have been given the audio priority by an earlier reading)
                 try { android.os.Process.setThreadPriority(if (com.brahmadeo.supertonic.tts.utils.BookPrep.fastNow(this@PlaybackService)) 0 else 5) } catch (_: Throwable) { }
@@ -1637,7 +1673,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             while (prep.wanted) {
                 delay(2000)
                 // two looks in a row: not the moment a phrase or a chapter is being started
-                if (isPlaying || starting || preparing) { quiet = 0; continue }
+                if (((isPlaying || starting) && !fromFile) || preparing) { quiet = 0; continue }
                 if (++quiet < 2) continue
                 startPrepare(true)
                 if (!prep.wanted || preparing) break
@@ -1673,12 +1709,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         prepWaiter?.cancel()
         if (!preparing) { prep.now.value = null; return }
         prepByHandStop = true
-        val job = synthesisJob
+        val job = prepJob
         Log.i(TAG, "Prepare: stopped by hand")
         serviceScope.launch {
             SupertonicTTS.setCancelled(true)
             job?.cancelAndJoin()
-            if (!isServiceActive() && !preparing) SupertonicTTS.setCancelled(false)
+            // (a chapter playing from its file goes on: the stop must not stay on for it)
+            if ((!isServiceActive() || fromFile) && !preparing) SupertonicTTS.setCancelled(false)
         }
     }
 
@@ -1707,6 +1744,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     /** What is being prepared: in the settings and in the notification. */
     private fun showPrepProgress(text: String, percent: Int) {
         com.brahmadeo.supertonic.tts.utils.BookPrep.now.value = text
+        // alongside a reading: its card (book, phrase, ⏮ ⏯ ⏭) stays; the progress is in the settings
+        if (isServiceActive()) return
         try {
             (attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(NOTIFICATION_ID, prepNotification(text, percent))
@@ -1766,7 +1805,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     Log.i(TAG, "Prepare: the engine is wanted elsewhere — waiting")
                     prepParked = true
                     showPrepProgress(getString(R.string.prep_paused_engine), -1)
-                    while (currentCoroutineContext().isActive && (SupertonicTTS.idleMs() < 20_000L || isServiceActive())) delay(3000)
+                    while (currentCoroutineContext().isActive && (SupertonicTTS.idleMs() < 20_000L || (isServiceActive() && !fromFile))) delay(3000)
                     prepParked = false
                     currentCoroutineContext().ensureActive()
                     SupertonicTTS.setCancelled(false)
@@ -2037,7 +2076,8 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     fun play() {
         resumeOnFocusGain = false
         pauseSeq++
-        SupertonicTTS.onEngineWanted = null
+        // (the book being prepared alongside keeps its own: it gives the engine to a reader app)
+        if (!preparing) SupertonicTTS.onEngineWanted = null
         if (!isPlaying) {
             if (requestAudioFocus()) {
                 isPlaying = true
@@ -2088,8 +2128,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 return stopServicePlayback(keepCard = true)
             }
             // another user of the engine: let it go and wait until it is free (on its thread), then
-            // clear the cancel flag the stop set — the newcomer is speaking now
-            SupertonicTTS.onEngineWanted = {
+            // clear the cancel flag the stop set — the newcomer is speaking now. A chapter playing from
+            // its file holds no engine: nothing to let go (and the book prepared alongside keeps its own)
+            if (!fromFile) SupertonicTTS.onEngineWanted = {
                 val job = letGo("wanted elsewhere")
                 if (job != null && android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
                     kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(5_000L) { job.join() } }
@@ -2168,8 +2209,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             }
         } catch (_: Exception) {}
 
+        val alongside = fromFile && preparing
         return serviceScope.launch {
-            SupertonicTTS.setCancelled(true)
+            // (a chapter played from its file: the book being prepared alongside keeps its phrase)
+            if (!alongside) SupertonicTTS.setCancelled(true)
             isSynthesizing = false
             synthesisJob?.cancelAndJoin()
             stopPlayback(removeNotification = !keepCard)
@@ -2526,9 +2569,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     /** Stops whatever is going on and takes the engine for saving; [body] runs in the background. */
     private fun runExport(body: suspend kotlinx.coroutines.CoroutineScope.() -> Pair<Boolean, String>) {
         serviceScope.launch {
-            if (synthesisJob?.isActive == true) {
+            for (j in listOf(synthesisJob, prepJob)) if (j?.isActive == true) {
                 SupertonicTTS.setCancelled(true)
-                synthesisJob?.cancelAndJoin()
+                j.cancelAndJoin()
             }
             stopPlayback(removeNotification = false)
             SupertonicTTS.setCancelled(false)

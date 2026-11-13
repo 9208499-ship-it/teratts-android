@@ -361,6 +361,9 @@ class TextNormalizer {
         var processedText = if (lowerLang != "ko") {
             var t = LexiconManager.apply(inputText)
             if (lowerLang.startsWith("ru")) {
+                // church Slavonic words of Gospel quotes («аще», «иже», «грядет») with their stress (after the
+                // user's rules, so a rule of the user's own still wins; dictionary of mr430, 4PDA)
+                t = ChurchSlavonic.apply(t)
                 // English words inside Russian text → Russian letters (after the user's rules,
                 // so a rule for "Windows" still wins)
                 t = EnglishTranscriber.apply(t)
