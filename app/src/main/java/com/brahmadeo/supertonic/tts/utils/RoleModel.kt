@@ -3,6 +3,7 @@ package com.brahmadeo.supertonic.tts.utils
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import android.util.Log
 import java.io.File
@@ -60,7 +61,10 @@ object RoleModel {
     /** Which release the files are (m10b's encoder is as long as m8b's: the size alone does not tell). */
     private const val MARK = "release.txt"
 
-    fun dir(c: Context) = File(c.filesDir, "role_model")
+    private val changes = kotlinx.coroutines.sync.Mutex()
+    private fun legacyDir(c: Context) = File(c.filesDir, "role_model")
+    private fun releaseDir(c: Context) = File(c.filesDir, RELEASE)
+    fun dir(c: Context) = releaseDir(c).takeIf { it.isDirectory } ?: legacyDir(c)
     /** A new release is downloaded here, beside the model in use; it replaces it only whole and checked. */
     private fun nextDir(c: Context) = File(c.filesDir, "role_model.next")
 
@@ -95,7 +99,11 @@ object RoleModel {
      * begun again; each file is checked by its size and SHA-256 before it is taken. Throws on failure.
      */
     suspend fun download(c: Context) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        if (upToDate(c)) return@withContext
+        changes.withLock { downloadLocked(c) }
+    }
+
+    private suspend fun downloadLocked(c: Context) {
+        if (upToDate(c)) return
         // beside the model in use (m8b goes on working meanwhile); put in its place only when all is here
         val d = nextDir(c).apply { mkdirs() }
         val all = SIZE.values.sum().toFloat()
@@ -105,7 +113,7 @@ object RoleModel {
             for (name in FILES) {
                 val f = File(d, name)
                 val size = SIZE.getValue(name)
-                if (f.length() != size) {
+                if (f.length() != size || sha256(f) != SHA256[name]) {
                     f.delete()
                     val part = File(d, "$name.part")
                     var tries = 0
@@ -142,11 +150,14 @@ object RoleModel {
             if (!mine) throw IllegalStateException("модель ролей занята разбором главы — нажмите ещё раз через минуту")
             unload()
             tok = null
-            val d = dir(c).apply { mkdirs() }
-            d.listFiles()?.forEach { it.delete() }
-            for (name in FILES) if (!File(nextDir(c), name).renameTo(File(d, name))) throw IllegalStateException("$name: не удалось сохранить")
-            File(d, MARK).writeText(RELEASE)
-            nextDir(c).deleteRecursively()
+            val staged = nextDir(c)
+            File(staged, MARK).writeText(RELEASE)
+            val target = releaseDir(c)
+            // The old layout remains usable until this single same-filesystem rename succeeds.
+            if (target.exists() && !upToDate(c) && !target.deleteRecursively())
+                throw IllegalStateException("Не удалось заменить повреждённую модель")
+            if (!staged.renameTo(target)) throw IllegalStateException("Не удалось установить модель ролей")
+            legacyDir(c).deleteRecursively()
             File(c.filesDir, "role_model_cache").listFiles()?.forEach { s ->
                 s.listFiles()?.filter { !it.name.startsWith(VERSION + "_") }?.forEach { it.delete() }
             }
@@ -210,18 +221,23 @@ object RoleModel {
      * The model and what it worked out, deleted — after the window being read (if any) is stopped: the model
      * was closed under it before 1.56 (a native crash). On its own thread: the screen does not wait.
      */
-    fun delete(c: Context) {
-        aborting = true
-        kotlin.concurrent.thread(name = "role-model-delete") {
-            val mine = try { lock.tryLock(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) { false }
+    suspend fun delete(c: Context) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        changes.withLock {
+            aborting = true
             try {
-                unload()
-                tok = null
-                dir(c).listFiles()?.forEach { it.delete() }
-                nextDir(c).deleteRecursively()
-                File(c.filesDir, "role_model_cache").deleteRecursively()
+                if (!lock.tryLock(20, java.util.concurrent.TimeUnit.SECONDS))
+                    throw IllegalStateException("Модель занята разбором главы. Повторите удаление позже.")
+                try {
+                    unload()
+                    tok = null
+                    for (dir in listOf(legacyDir(c), releaseDir(c), nextDir(c), File(c.filesDir, "role_model_cache"))) {
+                        if (dir.exists() && !dir.deleteRecursively())
+                            throw IllegalStateException("Не удалось удалить ${dir.name}")
+                    }
+                } finally {
+                    lock.unlock()
+                }
             } finally {
-                if (mine) lock.unlock()
                 aborting = false
             }
         }
@@ -540,6 +556,7 @@ object RoleModel {
             return readPart(part)?.second
         }
         try {
+            if (f != cacheFile(c, scope, text) || !enabled(c)) return null
             // the other one (the reading, preparing the book) read this chapter while we waited
             readCache(f)?.let { return it }
             val all = HashMap<Int, Guess>()

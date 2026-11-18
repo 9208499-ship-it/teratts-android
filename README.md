@@ -17,13 +17,13 @@ The on-device inference pipeline (Rust + ONNX Runtime + XNNPACK) is unchanged �
 
 ## Install
 
-Grab the signed APK from the **[Releases](https://github.com/davnozdu/supertonic-android/releases)** page.
+Grab the signed APK from the **[Releases](https://github.com/9208499-ship-it/teratts-android/releases)** page.
 
 1. On the phone: Settings → Apps → Special access → Install unknown apps → allow your file manager / browser.
 2. Tap the APK to install. If `adb install` returns `INSTALL_FAILED_VERIFICATION_FAILURE`, disable **Verify apps over USB** in Developer Options.
 3. First launch downloads ~400 MB of ONNX models from Hugging Face — needs Wi-Fi once.
 
-Releases are signed with an **ephemeral CI keystore** that rotates every build, so the upgrade flow is: `adb uninstall com.brahmadeo.supertonic.tts` → install the new APK. To make the identity stable, add `KEYSTORE_BASE64` / `KEY_ALIAS` / `KEYSTORE_PASSWORD` / `KEY_PASSWORD` as repository secrets and adjust `.github/workflows/release.yml` to import that keystore instead of generating one.
+Public TeraTTS releases use the same signing key. GitHub Actions produces an unsigned release artifact for inspection. The maintainer signs the arm64 APK on the Mac before publishing it. Beta builds are GitHub pre-releases and are installed manually.
 
 ## Use as the system TTS engine
 

@@ -923,7 +923,7 @@ private fun RoleModelRow() {
                         upToDate = rm.upToDate(context)
                     }
                 }) { Text(stringResource(if (installed) AppR.string.role_model_update_btn else AppR.string.role_model_download)) }
-                if (installed) TextButton(onClick = { askDelete = true }) { Text(stringResource(AppR.string.role_model_delete)) }
+                if (installed && prog == null) TextButton(onClick = { askDelete = true }) { Text(stringResource(AppR.string.role_model_delete)) }
             }
             error?.let { Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
@@ -932,7 +932,13 @@ private fun RoleModelRow() {
         onDismissRequest = { askDelete = false },
         title = { Text(stringResource(AppR.string.role_model_title)) },
         text = { Text(stringResource(AppR.string.role_model_delete_ask)) },
-        confirmButton = { TextButton(onClick = { askDelete = false; rm.delete(context); installed = false; upToDate = false }) { Text(stringResource(AppR.string.role_model_delete)) } },
+        confirmButton = { TextButton(onClick = { askDelete = false
+            error = null
+            scope.launch {
+                try { rm.delete(context) } catch (e: Exception) { error = e.message }
+                installed = rm.installed(context)
+                upToDate = rm.upToDate(context)
+            } }) { Text(stringResource(AppR.string.role_model_delete)) } },
         dismissButton = { TextButton(onClick = { askDelete = false }) { Text(stringResource(android.R.string.cancel)) } }
     )
 }

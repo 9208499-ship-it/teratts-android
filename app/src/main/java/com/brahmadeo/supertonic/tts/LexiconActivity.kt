@@ -43,9 +43,7 @@ import com.brahmadeo.supertonic.tts.utils.AssetManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 
 class LexiconActivity : ComponentActivity() {
     companion object {
@@ -419,39 +417,39 @@ class LexiconActivity : ComponentActivity() {
             .show()
     }
 
-    private fun saveRule(existingItem: LexiconItem?, term: String, replacement: String, ignoreCase: Boolean, isRegex: Boolean) {
-        val currentRules = rulesState.value.toMutableList()
-
-        if (existingItem != null) {
-            val index = currentRules.indexOfFirst { it.id == existingItem.id }
-            if (index != -1) {
-                currentRules[index] = existingItem.copy(
-                    term = term,
-                    replacement = replacement,
-                    ignoreCase = ignoreCase,
-                    isRegex = isRegex
-                )
+    private fun editRules(change: (MutableList<LexiconItem>) -> Unit) {
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    synchronized(LexiconManager) {
+                        val rules = LexiconManager.load(this@LexiconActivity).toMutableList()
+                        change(rules)
+                        LexiconManager.save(this@LexiconActivity, rules)
+                    }
+                }
+                if (!isDestroyed && !isFinishing) refreshRules()
+            } catch (e: Exception) {
+                android.util.Log.e("Lexicon", "Save failed", e)
+                if (!isDestroyed && !isFinishing)
+                    Toast.makeText(this@LexiconActivity, R.string.import_error, Toast.LENGTH_LONG).show()
             }
-        } else {
-            currentRules.add(LexiconItem(
-                term = term,
-                replacement = replacement,
-                ignoreCase = ignoreCase,
-                isRegex = isRegex
-            ))
         }
+    }
 
-        LexiconManager.save(this, currentRules)
-        LexiconManager.reload(this)
-        refreshRules()
+    private fun saveRule(existingItem: LexiconItem?, term: String, replacement: String, ignoreCase: Boolean, isRegex: Boolean) {
+        editRules { rules ->
+            if (existingItem == null) {
+                rules.add(LexiconItem(term = term, replacement = replacement, ignoreCase = ignoreCase, isRegex = isRegex))
+            } else {
+                val index = rules.indexOfFirst { it.id == existingItem.id }
+                if (index >= 0) rules[index] = existingItem.copy(term = term, replacement = replacement,
+                    ignoreCase = ignoreCase, isRegex = isRegex)
+            }
+        }
     }
 
     private fun deleteRule(item: LexiconItem) {
-        val currentRules = rulesState.value.toMutableList()
-        currentRules.removeIf { it.id == item.id }
-        LexiconManager.save(this, currentRules)
-        LexiconManager.reload(this)
-        refreshRules()
+        editRules { rules -> rules.removeIf { it.id == item.id } }
     }
 
     private fun performExport() {
@@ -494,59 +492,30 @@ class LexiconActivity : ComponentActivity() {
     }
 
     private fun performImport(uri: Uri) {
-        try {
-            val inputStream = contentResolver.openInputStream(uri) ?: return
-            val reader = BufferedReader(InputStreamReader(inputStream))
-            val jsonString = reader.readText()
-            reader.close()
-            inputStream.close()
-
-            // the app's own JSON, or a text dictionary («замок зам+ок», «замок=зам+ок», «$Имя=…»)
-            val importedItems = LexiconManager.parseImport(jsonString)
-
-            if (importedItems.isEmpty()) {
-                Toast.makeText(this, getString(R.string.no_valid_rules), Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            var addedCount = 0
-            var updatedCount = 0
-            val currentRules = LexiconManager.load(this).toMutableList()
-
-            for (imported in importedItems) {
-                val existingIndex = currentRules.indexOfFirst { it.term == imported.term }
-                if (existingIndex == -1) {
-                    currentRules.add(imported)
-                    addedCount++
-                } else {
-                    val existing = currentRules[existingIndex]
-                    if (existing.replacement != imported.replacement || existing.ignoreCase != imported.ignoreCase) {
-                        // Replace the item with updated values
-                        currentRules[existingIndex] = existing.copy(
-                            replacement = imported.replacement,
-                            ignoreCase = imported.ignoreCase
-                        )
-                        updatedCount++
-                    }
+        Toast.makeText(this, R.string.accent_dict_importing, Toast.LENGTH_SHORT).show()
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val counts = withContext(Dispatchers.IO) {
+                    val input = contentResolver.openInputStream(uri) ?: throw java.io.IOException()
+                    val rules = input.bufferedReader().use { LexiconManager.parseImport(it) }
+                    if (rules.isEmpty()) null else LexiconManager.mergeImport(this@LexiconActivity, rules)
                 }
+                if (isFinishing || isDestroyed) return@launch
+                if (counts == null || counts == (0 to 0)) {
+                    val msg = if (counts == null) R.string.no_valid_rules else R.string.import_no_changes
+                    Toast.makeText(this@LexiconActivity, msg, Toast.LENGTH_SHORT).show()
+                } else {
+                    refreshRules()
+                    MaterialAlertDialogBuilder(this@LexiconActivity)
+                        .setTitle(R.string.import_complete_title)
+                        .setMessage(getString(R.string.import_stats_fmt, counts.first, counts.second))
+                        .setPositiveButton(android.R.string.ok, null).show()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("Lexicon", "Import failed", e)
+                if (!isFinishing && !isDestroyed)
+                    Toast.makeText(this@LexiconActivity, R.string.import_error, Toast.LENGTH_LONG).show()
             }
-
-            if (addedCount > 0 || updatedCount > 0) {
-                LexiconManager.save(this, currentRules)
-                LexiconManager.reload(this)
-                refreshRules()
-
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(getString(R.string.import_complete_title))
-                    .setMessage(getString(R.string.import_stats_fmt, addedCount, updatedCount))
-                    .setPositiveButton(getString(R.string.ok), null)
-                    .show()
-            } else {
-                Toast.makeText(this, getString(R.string.import_no_changes), Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, getString(R.string.import_error), Toast.LENGTH_LONG).show()
         }
     }
 

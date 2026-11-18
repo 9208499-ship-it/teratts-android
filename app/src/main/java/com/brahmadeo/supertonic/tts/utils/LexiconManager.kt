@@ -28,7 +28,7 @@ object LexiconManager {
     // them once in load/save and reuse for the lifetime of the rule set.
     // null entries correspond to rules that failed to compile (malformed
     // regex from the user); apply() skips those.
-    private var compiledRules: List<Rule?> = emptyList()
+    @Volatile private var compiledRules: List<Rule?> = emptyList()
 
     /**
      * A rule ready to apply: a regular expression ([pattern]) as the user wrote it, or a plain word /
@@ -53,7 +53,7 @@ object LexiconManager {
             .apply()
     }
 
-    fun load(context: Context): List<LexiconItem> {
+    @Synchronized fun load(context: Context): List<LexiconItem> {
         // Always refresh the enabled flag from prefs — cheap and keeps the
         // switch behavior coherent if the user toggles it from elsewhere.
         enabled = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -93,28 +93,53 @@ object LexiconManager {
         return items
     }
 
-    fun save(context: Context, items: List<LexiconItem>) {
-        cachedRules = items.toList() // Update cache immediately
-        compiledRules = phrasesFirst(cachedRules).map { compileRule(it) }
-        isLoaded = true
-        
+    @Synchronized fun save(context: Context, items: List<LexiconItem>) {
+        val snapshot = items.toList()
+        val compiled = phrasesFirst(snapshot).map { compileRule(it) }
+        val file = File(context.filesDir, FILE_NAME)
+        val tmp = File(context.filesDir, "$FILE_NAME.tmp")
         try {
-            val jsonArray = JSONArray()
-            for (item in items) {
-                val obj = JSONObject()
-                obj.put("id", item.id)
-                obj.put("term", item.term)
-                obj.put("replacement", item.replacement)
-                obj.put("ignoreCase", item.ignoreCase)
-                obj.put("isRegex", item.isRegex)
-                jsonArray.put(obj)
+            tmp.bufferedWriter().use { out ->
+                out.write("[")
+                snapshot.forEachIndexed { index, item ->
+                    if (index > 0) out.write(",")
+                    out.write(JSONObject().put("id", item.id).put("term", item.term)
+                        .put("replacement", item.replacement).put("ignoreCase", item.ignoreCase)
+                        .put("isRegex", item.isRegex).toString())
+                }
+                out.write("]")
             }
-            
-            val file = File(context.filesDir, FILE_NAME)
-            file.writeText(jsonArray.toString())
-        } catch (e: Exception) {
-            e.printStackTrace()
+            android.system.Os.rename(tmp.path, file.path)
+        } finally {
+            tmp.delete()
         }
+        cachedRules = snapshot
+        compiledRules = compiled
+        isLoaded = true
+    }
+
+    @Synchronized fun mergeImport(context: Context, imported: List<LexiconItem>): Pair<Int, Int> {
+        val rules = load(context).toMutableList()
+        val indices = HashMap<String, Int>()
+        rules.forEachIndexed { index, item -> indices.putIfAbsent(item.term, index) }
+        var added = 0
+        var updated = 0
+        for (item in imported) {
+            val index = indices[item.term]
+            if (index == null) {
+                indices[item.term] = rules.size
+                rules.add(item)
+                added++
+            } else {
+                val next = item.copy(id = rules[index].id)
+                if (next != rules[index]) {
+                    rules[index] = next
+                    updated++
+                }
+            }
+        }
+        if (added + updated > 0) save(context, rules)
+        return added to updated
     }
 
     /**
@@ -124,11 +149,14 @@ object LexiconManager {
      *   «замок=зам+ок», «небо между=н+ебо м+ежду» (phrases, ruRoberta-GUI and the like; «==» too),
      *   «$Шекспир=Шексп+ир» — «$» first: only in exactly that case.
      */
-    fun parseImport(text: String): List<LexiconItem> {
-        val body = text.removePrefix("﻿")
+    fun parseImport(reader: java.io.BufferedReader): List<LexiconItem> {
+        var first = reader.read()
+        if (first == 0xfeff) first = reader.read()
+        while (first >= 0 && first.toChar().isWhitespace()) first = reader.read()
+        if (first < 0) return emptyList()
         val out = mutableListOf<LexiconItem>()
-        if (body.trimStart().startsWith("[")) {
-            val arr = JSONArray(body)
+        if (first.toChar() == '[') {
+            val arr = JSONArray("[" + reader.readText())
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 if (obj.has("term") && obj.has("replacement")) out.add(LexiconItem(
@@ -141,7 +169,8 @@ object LexiconManager {
             }
             return out
         }
-        for (raw in body.lineSequence()) {
+        val firstLine = first.toChar().toString() + reader.readLine().orEmpty()
+        for (raw in sequenceOf(firstLine) + reader.lineSequence()) {
             var line = raw.trim()
             if (line.isEmpty() || line.startsWith("#")) continue
             val strict = line.startsWith("$")
@@ -339,7 +368,7 @@ object LexiconManager {
      * The stress from the player ("гот+ов", or a phrase "у в+орот", or «ё» "вс+ё"):
      * one rule per word or phrase, the old one replaced.
      */
-    fun putStress(context: Context, word: String, stressed: String) {
+    @Synchronized fun putStress(context: Context, word: String, stressed: String) {
         val term = word.trim().replace(Regex("\\s+"), " ")
         val items = load(context).filterNot { !it.isRegex && it.term.trim().replace(Regex("\\s+"), " ").equals(term, ignoreCase = true) }.toMutableList()
         items.add(LexiconItem(term = term.lowercase(), replacement = stressed, ignoreCase = true, isRegex = false))
@@ -347,7 +376,7 @@ object LexiconManager {
     }
 
     // Force reload (useful when returning from LexiconActivity)
-    fun reload(context: Context) {
+    @Synchronized fun reload(context: Context) {
         isLoaded = false
         load(context)
     }

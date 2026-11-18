@@ -526,7 +526,13 @@ class PlaybackActivity : ComponentActivity() {
                                 .putExtra("text", stressed).putExtra("voice", currentVoicePath).putExtra("speed", currentSpeed))
                         },
                         onSave = { term, stressed ->
-                            com.brahmadeo.supertonic.tts.utils.LexiconManager.putStress(this@PlaybackActivity, term, stressed)
+                            try {
+                                com.brahmadeo.supertonic.tts.utils.LexiconManager.putStress(this@PlaybackActivity, term, stressed)
+                            } catch (e: Exception) {
+                                android.util.Log.e("Lexicon", "Could not save stress", e)
+                                Toast.makeText(this@PlaybackActivity, R.string.import_error, Toast.LENGTH_LONG).show()
+                                return@StressDialog
+                            }
                             Toast.makeText(this@PlaybackActivity, getString(R.string.stress_saved, stressed.replace(Regex("\\+(.)"), "$1\u0301")), Toast.LENGTH_SHORT).show()
                             stressDone(saved = true)
                         },

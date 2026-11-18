@@ -379,7 +379,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // the lock screen / always-on display / headset: play also after a stop
                 override fun onPlay() { this@PlaybackService.playOrResume() }
                 override fun onPause() { this@PlaybackService.pause() }
-                override fun onStop() { this@PlaybackService.stopPlayback() }
+                override fun onStop() { this@PlaybackService.stopServicePlayback() }
                 override fun onSkipToNext() { this@PlaybackService.skipPhrase(1) }
                 override fun onSkipToPrevious() { this@PlaybackService.skipPhrase(-1) }
             })
@@ -425,7 +425,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             return START_NOT_STICKY
         }
         if (intent?.action == "STOP_PLAYBACK") {
-            stopPlayback()
+            stopServicePlayback()
         } else if (intent?.action == "TERA_PLAY") {
             playOrResume()
         } else if (intent?.action == "TERA_PAUSE") {
@@ -796,6 +796,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val prepared = prepBook?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.find(this@PlaybackService, it, text, totalSentences, stylePath) }
                 val prepReader = prepared?.let { com.brahmadeo.supertonic.tts.utils.BookPrep.Reader(it) }
                 if (prepared != null) Log.i(TAG, "Prepared audio: the chapter plays from its file")
+                val playingFile = java.util.concurrent.atomic.AtomicBoolean(prepared != null)
+                fun playbackStopped() = gen != playGen.get() ||
+                    (!playingFile.get() && SupertonicTTS.isCancelled())
                 fromFile = prepared != null
                 // made beforehand: the engine is free — the book is prepared further meanwhile (if it may);
                 // voiced now: preparing alongside the last chapter gives the engine back
@@ -912,7 +915,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     }
                     if (preRollSignal != null) {
                         preRollSignal.await()
-                        if (SupertonicTTS.isCancelled() || !isActive) return@launch
+                        if (playbackStopped() || !isActive) return@launch
                         try {
                             if (audioTrack?.state == AudioTrack.STATE_INITIALIZED &&
                                 audioTrack?.playState != AudioTrack.PLAYSTATE_PLAYING) {
@@ -923,7 +926,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         }
                     }
                     for (data in channel) {
-                        if (!isActive || SupertonicTTS.isCancelled()) break
+                        if (!isActive || playbackStopped()) break
                         if (data.isEmpty()) {
                             val sub = subMarkers.remove(data)
                             if (sub != null) { timeline.add(longArrayOf(sub[0], framesWritten, sub[1])); continue }
@@ -952,7 +955,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             firstSoundLogged = true
                             Log.i("TeraStart", "first sound after ${android.os.SystemClock.elapsedRealtime() - tStart} ms")
                         }
-                        writeToTrackBlocking(data)
+                        writeToTrackBlocking(data) { !isActive || playbackStopped() }
                     }
                 }
 
@@ -960,7 +963,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 var quickStart = true      // the first phrase of this start: speak as soon as possible
                 try {
                     for (index in validStartIndex until totalSentences) {
-                        if (SupertonicTTS.isCancelled() || !isActive) break
+                        if (playbackStopped() || !isActive) break
 
                         // Honour pause without consuming CPU. Producer can pause
                         // even though consumer is still draining the buffer —
@@ -968,7 +971,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         while (!isPlaying && isSynthesizing && isActive) {
                             delay(100)
                         }
-                        if (SupertonicTTS.isCancelled() || !isActive || !isSynthesizing) break
+                        if (playbackStopped() || !isActive || !isSynthesizing) break
                         // the CPU stays awake while reading — renewed every phrase (a long chapter outlasted
                         // the single 10 minutes taken at the start, and the phone could doze off mid-chapter)
                         try { wakeLock?.acquire(10 * 60 * 1000L) } catch (_: Exception) { }
@@ -998,10 +1001,18 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         var lettersDone = 0
                         var sentenceBytes = 0L
                         // made beforehand: the phrase's sentences from the file, at the reading's pace
-                        val ready = prepReader?.phrase(index)
+                        val ready = if (playingFile.get()) prepReader?.phrase(index) else null
+                        if (ready == null && playingFile.get()) {
+                            // A damaged file falls back to live synthesis for the rest of the chapter.
+                            yieldPrep()
+                            currentCoroutineContext().ensureActive()
+                            if (gen != playGen.get()) break
+                            fromFile = false
+                            playingFile.set(false)
+                        }
                         if (ready != null) {
                             for ((charAt, pcm0) in ready) {
-                                if (SupertonicTTS.isCancelled() || !isActive) break
+                                if (playbackStopped() || !isActive) break
                                 if (sentStarts.size > 1) {
                                     val m = ByteArray(0)
                                     subMarkers[m] = longArrayOf(index.toLong(), charAt.toLong())
@@ -1013,7 +1024,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 result = pcm; sentenceBytes += pcm.size
                             }
                         } else for (pc in pieces) {
-                            if (SupertonicTTS.isCancelled() || !isActive) break
+                            if (playbackStopped() || !isActive) break
                             val pieceStyle = plan.style(pc)
                             val pieceSpeed = plan.speed(pc, pieceStyle, liveSpeed)
                             val pieceGain = plan.gain(pc, pieceStyle)
@@ -1023,7 +1034,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             var subs = com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)
                             if (quickStart) { subs = quickStartSplit(subs); quickStart = false }
                             for (sub in subs) {
-                                if (SupertonicTTS.isCancelled() || !isActive) break
+                                if (playbackStopped() || !isActive) break
                                 if (sentStarts.size > 1) {
                                     val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
                                     val m = ByteArray(0)
@@ -1087,7 +1098,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             if (index < totalSentences - 1) {
                                 try { channel.send(silenceBytes(80)) } catch (_: Exception) { break }
                             }
-                        } else if (SupertonicTTS.isCancelled()) {
+                        } else if (playbackStopped()) {
                             break
                         }
                     }
@@ -1108,7 +1119,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 // the whole chapter is made and the end of it is still playing: the next chapter's
                 // beginning is made now, so it follows without a pause (Pocket TTS needs a few seconds
                 // for a phrase — at a chapter start nothing was made ahead, and the reading stood still)
-                if (isActive && isSynthesizing && !SupertonicTTS.isCancelled() && prepReader == null) {
+                if (isActive && isSynthesizing && !playbackStopped() && prepReader == null) {
                     val spd = liveSpeed
                     val epoch = aheadEpoch
                     serviceScope.launch(Dispatchers.IO) {
@@ -1118,12 +1129,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
                 // Consumer drains anything left in the buffer; then AudioTrack itself drains.
                 playerJob.join()
-                if (sawAnyAudio) drainAudioTrack()
+                if (sawAnyAudio) drainAudioTrack(::playbackStopped)
                 spokenTicker.cancel()
 
                 withContext(Dispatchers.Main) {
                     if (isSynthesizing && isActive) {
-                        val wasCancelled = SupertonicTTS.isCancelled()
+                        val wasCancelled = playbackStopped()
                         isSynthesizing = false
                         // not one phrase made (the engine failed to load, the voice is missing): stop here —
                         // going on would run through the whole book in seconds and lose the place in it
@@ -1962,19 +1973,19 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
      * Cancel + pause are polled at the chunk granularity. Pause uses
      * Thread.sleep because this is invoked off the coroutine context.
      */
-    private fun writeToTrackBlocking(data: ByteArray): Boolean {
+    private fun writeToTrackBlocking(data: ByteArray, stopped: () -> Boolean): Boolean {
         val t = audioTrack ?: return false
         if (t.state != AudioTrack.STATE_INITIALIZED) return false
-        if (SupertonicTTS.isCancelled()) return false
+        if (stopped()) return false
 
         var offset = 0
         while (offset < data.size) {
-            if (SupertonicTTS.isCancelled()) return false
+            if (stopped()) return false
             // Pause: hold inference thread (and therefore the JNI callback) until resumed.
-            while (!isPlaying && !SupertonicTTS.isCancelled()) {
+            while (!isPlaying && !stopped()) {
                 try { Thread.sleep(50) } catch (_: InterruptedException) { return false }
             }
-            if (SupertonicTTS.isCancelled()) return false
+            if (stopped()) return false
 
             val toWrite = (data.size - offset).coerceAtMost(AUDIO_WRITE_CHUNK_SIZE)
             val written = try {
@@ -2047,14 +2058,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
      * don't transition to "stopped" while the speaker is still playing the
      * last syllable.
      */
-    private suspend fun drainAudioTrack() {
+    private suspend fun drainAudioTrack(stopped: () -> Boolean) {
         val t = audioTrack ?: return
         if (t.state != AudioTrack.STATE_INITIALIZED) return
         var lastHead = -1
         var stableTicks = 0
         // Stable means "head hasn't moved for ~150ms" — playback caught up.
         while (currentCoroutineContext().isActive && isSynthesizing) {
-            if (SupertonicTTS.isCancelled()) return
+            if (stopped()) return
             // paused near the end of a chapter: a still head is the pause, not the end —
             // wait, or the next chapter started by itself in the middle of the pause
             if (!isPlaying) { stableTicks = 0; delay(100); continue }
