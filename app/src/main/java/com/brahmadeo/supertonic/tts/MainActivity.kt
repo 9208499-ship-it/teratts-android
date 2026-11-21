@@ -848,12 +848,14 @@ class MainActivity : ComponentActivity() {
         }
         if (bookUri != null) { openBookFile(bookUri); return }
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            // a text sent from an app that read it in a wrong encoding ("Âàñèëèé") is turned back
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.let { com.brahmadeo.supertonic.tts.utils.TextEncoding.repair(it) }
             if (!sharedText.isNullOrEmpty()) {
                 viewModel.inputText.value = prepareTextForTts(sharedText, viewModel.currentLang.value)
             }
         } else {
-            val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.data?.getQueryParameter("text")
+            val text = (intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.data?.getQueryParameter("text"))
+                ?.let { com.brahmadeo.supertonic.tts.utils.TextEncoding.repair(it) }
             if (!text.isNullOrEmpty()) {
                 viewModel.inputText.value = prepareTextForTts(text, viewModel.currentLang.value)
             }

@@ -41,7 +41,16 @@ object BookConverter {
     fun outdated(epub: File): Boolean = try {
         ZipFile(epub).use { z ->
             val opf = z.getEntry("OEBPS/content.opf")?.let { e -> z.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) } } ?: return false
-            opf.contains("urn:teratts:") && !opf.contains(CONVERTER_MARK)
+            if (!opf.contains("urn:teratts:")) return false
+            if (!opf.contains(CONVERTER_MARK)) return true
+            // a text made of a .txt in a wrong encoding ("Âàñèëèé", «����»): made again, now read right
+            val firstChapters = z.entries().asSequence()
+                .filter { it.name.startsWith("OEBPS/") && it.name.endsWith(".xhtml") && it.name != "OEBPS/nav.xhtml" }
+                .take(2).toList()
+            firstChapters.any { e ->
+                val head = z.getInputStream(e).use { i -> ByteArray(8192).let { b -> String(b, 0, maxOf(i.read(b), 0), Charsets.UTF_8) } }
+                TextEncoding.looksBroken(head.replace(Regex("<[^>]*>"), " "))
+            }
         }
     } catch (e: Exception) { false }
 
@@ -272,20 +281,8 @@ object BookConverter {
 
     private val txtHeading = Regex("^(глава|часть|книга|пролог|эпилог|chapter|part|prologue|epilogue)\\b.{0,70}$", RegexOption.IGNORE_CASE)
 
-    fun decodeText(bytes: ByteArray): String {
-        // UTF-16 (Windows Notepad "Unicode"): by its byte-order mark
-        if (bytes.size >= 2 && ((bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) || (bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte())))
-            return String(bytes, Charsets.UTF_16).removePrefix("\uFEFF")
-        for (name in listOf("UTF-8", "windows-1251")) {
-            try {
-                val dec = Charset.forName(name).newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                return dec.decode(ByteBuffer.wrap(bytes)).toString().removePrefix("\uFEFF")
-            } catch (e: Exception) {}
-        }
-        return String(bytes, Charsets.UTF_8)
-    }
+    /** A .txt file's text in whatever encoding it came: UTF-8/16, windows-1251, KOI8-R, DOS (TextEncoding). */
+    fun decodeText(bytes: ByteArray): String = TextEncoding.decode(bytes).removePrefix("\uFEFF")
 
     fun parseTxt(file: File): Book {
         val text = decodeText(file.readBytes()).replace("\r\n", "\n").replace('\r', '\n')
