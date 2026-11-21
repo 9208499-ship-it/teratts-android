@@ -82,6 +82,16 @@ fun LexiconScreen(
     val back: () -> Unit = { if (page != null && initialPage == null) page = null else onBackClick() }
     androidx.activity.compose.BackHandler(enabled = page != null && initialPage == null) { page = null }
     val pages = settingsPages()
+    // own rules: the newest first; a search keeps only those with the letters typed
+    var ruleQuery by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val shownRules = remember(rules, ruleQuery) {
+        fun plain(s: String) = s.replace("+", "").replace("́", "").replace('ё', 'е').replace('Ё', 'Е')
+        val q = plain(ruleQuery.trim())
+        rules.asReversed().let { newest ->
+            if (q.isEmpty()) newest
+            else newest.filter { plain(it.term).contains(q, ignoreCase = true) || plain(it.replacement).contains(q, ignoreCase = true) }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -381,14 +391,32 @@ fun LexiconScreen(
             } else {
                 item {
                     Text(
-                        text = stringResource(AppR.string.custom_rules_header),
+                        text = stringResource(AppR.string.custom_rules_header) + " (${rules.size})",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)
                     )
                 }
+                // a word just added is to be found at once: the newest first, and a search
+                // (300 words scrolled to correct the last one, tolyos)
+                item {
+                    OutlinedTextField(
+                        value = ruleQuery,
+                        onValueChange = { ruleQuery = it },
+                        label = { Text(stringResource(AppR.string.lexicon_search_hint)) },
+                        singleLine = true,
+                        trailingIcon = if (ruleQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { ruleQuery = "" }) {
+                                    Icon(androidx.compose.material.icons.Icons.Default.Clear, contentDescription = null)
+                                }
+                            }
+                        } else null,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
 
-                items(rules) { rule ->
+                items(shownRules) { rule ->
                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         LexiconItemRow(
                             item = rule,
@@ -2076,6 +2104,7 @@ fun LexiconEditDialog(
 ) {
     var term by remember { mutableStateOf(item?.term ?: "") }
     var replacement by remember { mutableStateOf(item?.replacement ?: "") }
+    var replacementEdited by remember { mutableStateOf(false) }
     var ignoreCase by remember { mutableStateOf(item?.ignoreCase ?: true) }
     var isRegex by remember { mutableStateOf(item?.isRegex ?: false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -2087,14 +2116,19 @@ fun LexiconEditDialog(
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(
                     value = term,
-                    onValueChange = { term = it },
+                    onValueChange = {
+                        // a new rule: the replacement follows the word until it is edited itself —
+                        // the word is typed once, then only «+» or a space put in («верно п+одданной»)
+                        if (item == null && !replacementEdited) replacement = it
+                        term = it
+                    },
                     label = { Text(stringResource(if (isRegex) AppR.string.regex_pattern_label else AppR.string.term_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = replacement,
-                    onValueChange = { replacement = it },
+                    onValueChange = { replacement = it; replacementEdited = true },
                     label = { Text(stringResource(AppR.string.replacement_hint)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()

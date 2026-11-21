@@ -39,12 +39,18 @@ object SilentKeepAlive {
             t.play()
             track = t
             val silence = ByteArray(rate / 5) // 0.1 s
+            // The track is released by this thread once its last write() has returned: released
+            // from stop() while a write was still inside it, the native track was freed under the
+            // write (SIGSEGV in AudioTrack::write, seen on a Huawei, 15.11.2026).
             thread = Thread {
                 try {
                     while (track === t) {
                         if (t.write(silence, 0, silence.size) < 0) break
                     }
-                } catch (_: Throwable) { }
+                } catch (_: Throwable) {
+                } finally {
+                    try { t.release() } catch (_: Throwable) { }
+                }
             }.apply { name = "SilentKeepAlive"; isDaemon = true; start() }
             Log.i(TAG, "silent track on while saving")
         } catch (e: Throwable) {
@@ -57,9 +63,10 @@ object SilentKeepAlive {
     fun stop() {
         val t = track ?: return
         track = null
+        // stop() lets a blocked write() return; the writing thread then leaves its loop and
+        // releases the track itself (never released here while a write may be inside it)
         try { t.pause(); t.flush(); t.stop() } catch (_: Throwable) { }
-        try { thread?.join(500) } catch (_: Throwable) { }
+        try { thread?.join(1000) } catch (_: Throwable) { }
         thread = null
-        try { t.release() } catch (_: Throwable) { }
     }
 }

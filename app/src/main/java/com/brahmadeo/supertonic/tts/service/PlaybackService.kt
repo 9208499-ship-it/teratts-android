@@ -2849,10 +2849,28 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         musicHandler.removeCallbacks(musicFollower)
         com.brahmadeo.supertonic.tts.utils.BackgroundMusic.release()
         mediaSession.release()
-        try {
-            audioTrack?.release()
-        } catch (_: Exception) {}
+        // The track is let go only after the reading that writes into it has ended: released
+        // here while the consumer was still inside write(WRITE_BLOCKING), the native track was
+        // freed under it (SIGSEGV in AudioTrack::write, seen on a Huawei, 15.11.2026).
+        // stop() lets a blocked write() return; the wait runs off the main thread.
+        val track = synchronized(this) { audioTrack.also { audioTrack = null } }
+        isPlaying = false
+        try { track?.pause(); track?.flush(); track?.stop() } catch (_: Exception) {}
+        val writer = synthesisJob
         serviceScope.cancel()
         abandonAudioFocus()
+        if (track != null) Thread {
+            val ended = writer == null || try {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000L) { writer.join() } != null
+                }
+            } catch (_: Throwable) { false }
+            if (ended) {
+                try { track.release() } catch (_: Exception) {}
+            } else {
+                // still writing: better a track left to the process's end than one freed under a write
+                Log.w(TAG, "AudioTrack not released: the reading did not end in 5 s")
+            }
+        }.apply { name = "AudioTrackRelease"; isDaemon = true }.start()
     }
 }

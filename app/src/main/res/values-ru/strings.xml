@@ -244,6 +244,7 @@
     <string name="preroll_desc">Накопить несколько предложений в RAM (~1–3 МБ) перед началом воспроизведения. Сглаживает паузы между фразами на слабых устройствах. В обмен — чуть больше ожидания в самом начале.</string>
     <string name="preroll_sentences_fmt">Предложений в буфере: %1$d</string>
     <string name="custom_rules_header">Свои правила</string>
+    <string name="lexicon_search_hint">Найти слово</string>
 
     <!-- LexiconScreen menu items -->
     <string name="menu_import_json">Загрузить личный словарь из файла</string>
