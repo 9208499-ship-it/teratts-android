@@ -267,10 +267,16 @@ object RoleModel {
                 so.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
                 // threads waiting for work sleep instead of spinning: the cores go to the voice engine
                 try { so.addConfigEntry("session.intra_op.allow_spinning", "0") } catch (_: Throwable) { }
+                // "Экономить память": no memory pool kept at its peak (as for the voice engine)
+                if (com.brahmadeo.supertonic.tts.SupertonicTTS.leanMemory) try {
+                    so.setCPUArenaAllocator(false)
+                    so.setMemoryPatternOptimization(false)
+                } catch (_: Throwable) { }
                 e.createSession(File(d, f).absolutePath, so)
             }
             enc = session(meta.optString("enc", "roles_enc_int8.onnx"))
             head = session(meta.optString("head", "roles_head.onnx"))
+            android.util.Log.i("TeraMem", "roles model loaded")
             true
         } catch (t: Throwable) {
             Log.w(TAG, "load failed: ${t.message}")
@@ -281,9 +287,13 @@ object RoleModel {
     }
 
     @Synchronized
+    /** The roles' model is in memory (for the memory log). */
+    fun loaded(): Boolean = enc != null
+
     fun unload() {
         try { enc?.close() } catch (_: Throwable) { }
         try { head?.close() } catch (_: Throwable) { }
+        if (enc != null) android.util.Log.i("TeraMem", "roles model unloaded")
         enc = null; head = null      // the tokenizer stays (see load)
     }
 

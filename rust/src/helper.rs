@@ -570,7 +570,23 @@ use ort::{
 };
 
 #[cfg(feature = "xnnpack")]
-use ort::execution_providers::{CPUExecutionProvider, XNNPACKExecutionProvider};
+use ort::execution_providers::XNNPACKExecutionProvider;
+use ort::execution_providers::CPUExecutionProvider;
+
+/// Memory over speed (settings, on by default; read when the models are loaded): every session
+/// gets no CPU arena and no memory pattern. With the arena each session kept its own pool at its
+/// peak, grown by doubling, and never gave it back (the phrases' lengths vary all the time, so the
+/// pattern made for one length is no use for the next): ~1.4 GB while a book was read, up to
+/// 2.4 GB, and the phone killed the app with the screen off (Huawei, 11.2026).
+static LEAN_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_lean_memory(on: bool) {
+    LEAN_MEMORY.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn lean_memory() -> bool {
+    LEAN_MEMORY.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 #[derive(Clone)]
 pub struct Style {
@@ -1071,6 +1087,11 @@ pub(crate) fn session_builder(level: GraphOptimizationLevel, use_xnnpack: bool, 
         .with_config_entry("session.inter_op.allow_spinning", "0")?
         .with_intra_threads(ort_threads)?;
 
+    let lean = lean_memory();
+    if lean {
+        builder = builder.with_memory_pattern(false)?;
+    }
+
     if use_xnnpack {
         #[cfg(feature = "xnnpack")]
         {
@@ -1079,17 +1100,21 @@ pub(crate) fn session_builder(level: GraphOptimizationLevel, use_xnnpack: bool, 
                     XNNPACKExecutionProvider::default()
                         .with_intra_op_num_threads(xnn_threads_nz)
                         .build(),
-                    CPUExecutionProvider::default().build(),
+                    CPUExecutionProvider::default().with_arena_allocator(!lean).build(),
                 ])?;
             } else {
                 builder = builder.with_execution_providers([
                     XNNPACKExecutionProvider::default()
                         .with_intra_op_num_threads(std::num::NonZeroUsize::MIN)
                         .build(),
-                    CPUExecutionProvider::default().build(),
+                    CPUExecutionProvider::default().with_arena_allocator(!lean).build(),
                 ])?;
             }
         }
+    } else if lean {
+        builder = builder.with_execution_providers([
+            CPUExecutionProvider::default().with_arena_allocator(false).build(),
+        ])?;
     }
     Ok(builder)
 }

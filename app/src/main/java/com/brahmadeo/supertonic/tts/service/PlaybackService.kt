@@ -355,6 +355,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         com.brahmadeo.supertonic.tts.utils.CrashReport.install(this)
         com.brahmadeo.supertonic.tts.utils.VoiceLibrary.install(this)
         createNotificationChannel()
+        startMemLog()
         com.brahmadeo.supertonic.tts.utils.LexiconManager.load(this)
         com.brahmadeo.supertonic.tts.utils.AccentDictionaryManager.load(this)
         com.brahmadeo.supertonic.tts.utils.PunctuationPrefs.load(this)
@@ -2840,6 +2841,27 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             try { (attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).deleteNotificationChannel("supertonic_playback") } catch (_: Exception) {}
             val manager = attributionContext.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
+        }
+    }
+
+    /** Once a minute while the service lives: the memory and what the app is doing (MemLog). */
+    private fun startMemLog() {
+        serviceScope.launch(Dispatchers.Default) {
+            val power = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            while (isActive) {
+                val state = buildString {
+                    append(if (isPlaying) "reading" else if (isSynthesizing) "starting" else "idle")
+                    if (fromFile) append(" from file")
+                    if (preparing) append(", preparing")
+                    if (com.brahmadeo.supertonic.tts.utils.ExportJob.runningHere) append(", saving")
+                    append(if (SupertonicTTS.loaded()) ", engine" else ", no engine")
+                    if (com.brahmadeo.supertonic.tts.utils.RoleModel.loaded()) append(", roles model")
+                    append(if (SupertonicTTS.leanMemory) ", lean" else ", pools")
+                    append(if (power.isInteractive) ", screen on" else ", screen off")
+                }
+                com.brahmadeo.supertonic.tts.utils.MemLog.log(state)
+                delay(60_000L)
+            }
         }
     }
 

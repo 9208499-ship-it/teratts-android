@@ -251,6 +251,7 @@ fun LexiconScreen(
             item { LibraryFirstRow() }
             item { KeepReadyRow() }
             item { FastCoresRow() }
+            item { LeanMemoryRow() }
             item { SpeedTestRow() }
             item { RoleModelBenchRow() }
             item { RoleModelRow() }
@@ -847,6 +848,20 @@ private fun FastCoresRow() {
                       else stringResource(AppR.string.fast_cores_desc, fast.size, cores.total()),
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
+    )
+}
+
+/** "Экономить память": the models without ONNX Runtime's memory pools (CpuCores.setLean). */
+@Composable
+private fun LeanMemoryRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cores = com.brahmadeo.supertonic.tts.utils.CpuCores
+    var on by remember { mutableStateOf(cores.lean(context)) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.lean_memory_title),
+        description = stringResource(AppR.string.lean_memory_desc),
+        checked = on,
+        onToggle = { v -> on = v; cores.setLean(context, v) }
     )
 }
 

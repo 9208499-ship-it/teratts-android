@@ -23,6 +23,7 @@ object SupertonicTTS {
     private external fun getSocClass(ptr: Long): Int
     private external fun getSampleRate(ptr: Long): Int
     private external fun close(ptr: Long)
+    private external fun setLeanMemory(on: Boolean)
     private external fun reset(ptr: Long)
     private external fun setPauseScale(scale: Float)
     private external fun setNoiseScale(scale: Float)
@@ -55,6 +56,12 @@ object SupertonicTTS {
 
     /** "Fast cores only" (CpuCores): threads = the fast cores, pinned to them. */
     @Volatile var fastCoresOnly = false
+
+    /** "Экономить память" (CpuCores): the models are loaded without ONNX Runtime's memory pools. */
+    @Volatile var leanMemory = true
+
+    /** The voice engine is loaded (for the memory log). */
+    fun loaded(): Boolean = nativePtr != 0L
 
     /**
      * No lock: called from the main thread, and the engine lock can be held for
@@ -119,6 +126,8 @@ object SupertonicTTS {
         try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
         val threads = if (fast.isNotEmpty()) fast.size else ortThreads
         Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")
+        try { setLeanMemory(leanMemory) } catch (e: Throwable) { }
+        Log.i("TeraMem", "engine loading, lean memory: $leanMemory")
         val before = taskIds()
         nativePtr = init(modelPath, libPath, threads, xnnThreads)
         try {

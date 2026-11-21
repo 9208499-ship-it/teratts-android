@@ -40,8 +40,22 @@ object CpuCores {
         context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getBoolean(PREF_XNN, false) &&
             SupertonicTTS.xnnpackAvailable()
 
+    private const val PREF_LEAN = "lean_memory"
+
+    /** "Экономить память": on unless turned off (see helper.rs, LEAN_MEMORY). */
+    fun lean(context: Context): Boolean =
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).getBoolean(PREF_LEAN, true)
+
+    /** Change it: the engine is let go and loaded again on the next phrase, the roles' model at its next load. */
+    fun setLean(context: Context, on: Boolean) {
+        context.getSharedPreferences("SupertonicPrefs", Context.MODE_PRIVATE).edit().putBoolean(PREF_LEAN, on).apply()
+        SupertonicTTS.leanMemory = on
+        Thread { SupertonicTTS.release() }.start()
+    }
+
     /** Read the setting into the engine (before it loads). */
     fun applyPref(context: Context) {
+        SupertonicTTS.leanMemory = lean(context)
         SupertonicTTS.fastCoresOnly = enabled(context)
         SupertonicTTS.useXnnpack = xnnpack(context)
     }

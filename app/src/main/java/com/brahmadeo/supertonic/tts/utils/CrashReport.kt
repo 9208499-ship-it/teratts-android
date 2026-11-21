@@ -160,7 +160,10 @@ object CrashReport {
         if (crash.exists()) try { sb.append(crash.readText()).append("\n\n") } catch (_: Exception) { }
         sb.append("----- logcat -----\n")
         try {
-            val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "4000"))
+            // Huawei's touch and scheduler lines (two a frame while a page is scrolled) are silenced:
+            // they filled the 4000 lines in half a minute and pushed out the app's own log
+            val p = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "4000",
+                "DecorView:S", "AwareLog:S", "HwViewRootImpl:S", "HiTouch_PressGestureDetector:S", "*:V"))
             val log = p.inputStream.bufferedReader().readText()
             sb.append(if (log.length > 400_000) log.takeLast(400_000) else log)
         } catch (e: Exception) { sb.append("logcat: ${e.message}") }

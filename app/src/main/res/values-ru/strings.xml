@@ -214,6 +214,8 @@
     <string name="outline_continue">▶ Продолжить с места остановки</string>
     <string name="outline_chapter_n">Глава %1$d</string>
     <string name="fast_cores_title">Только быстрые ядра</string>
+    <string name="lean_memory_title">Экономить память</string>
+    <string name="lean_memory_desc">Модели голоса и ролей работают без запасов памяти ONNX Runtime: меньше памяти при чтении, чуть медленнее. Применяется со следующей фразы.</string>
     <string name="fast_cores_desc">Синтез на %1$d быстрых ядрах из %2$d вместо всех. На одних телефонах быстрее, на других медленнее — сравните скорость в уведомлении. Применяется со следующей фразы.</string>
     <string name="fast_cores_same">На этом устройстве не удалось выделить быстрые ядра — переключатель ничего не изменит.</string>
     <string name="keep_ready_title">Держать синтезатор наготове</string>

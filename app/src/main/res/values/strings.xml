@@ -202,6 +202,8 @@
     <string name="outline_continue">▶ Continue where you stopped</string>
     <string name="outline_chapter_n">Chapter %1$d</string>
     <string name="fast_cores_title">Fast cores only</string>
+    <string name="lean_memory_title">Save memory</string>
+    <string name="lean_memory_desc">The voice and roles models run without ONNX Runtime memory pools: less memory while a book is read, a little slower. Applied from the next phrase.</string>
     <string name="fast_cores_desc">Synthesis on %1$d fast cores of %2$d instead of all. Faster on some phones, slower on others — compare the speed in the notification. Applies from the next phrase.</string>
     <string name="fast_cores_same">Fast cores could not be told apart on this device: the switch changes nothing.</string>
     <string name="keep_ready_title">Keep the engine ready</string>

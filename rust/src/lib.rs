@@ -55,6 +55,16 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocket
     crate::pocket::set_brightness(value);
 }
 
+/// Memory over speed for the models loaded from now on (settings): no CPU arena, no memory pattern.
+#[no_mangle]
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setLeanMemory(
+    _env: JNIEnv,
+    _class: JClass,
+    on: jni::sys::jboolean,
+) {
+    crate::helper::set_lean_memory(on != 0);
+}
+
 /// Pocket TTS: its finished speech cleaned by the speech-enhancement network (settings).
 #[no_mangle]
 pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocketDenoise(
