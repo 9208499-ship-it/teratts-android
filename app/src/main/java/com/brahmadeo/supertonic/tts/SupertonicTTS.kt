@@ -23,7 +23,7 @@ object SupertonicTTS {
     private external fun getSocClass(ptr: Long): Int
     private external fun getSampleRate(ptr: Long): Int
     private external fun close(ptr: Long)
-    private external fun setLeanMemory(on: Boolean)
+    private external fun nativeSetLeanMemory(on: Boolean)
     private external fun reset(ptr: Long)
     private external fun setPauseScale(scale: Float)
     private external fun setNoiseScale(scale: Float)
@@ -126,7 +126,7 @@ object SupertonicTTS {
         try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
         val threads = if (fast.isNotEmpty()) fast.size else ortThreads
         Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")
-        try { setLeanMemory(leanMemory) } catch (e: Throwable) { }
+        try { nativeSetLeanMemory(leanMemory) } catch (e: Throwable) { }
         Log.i("TeraMem", "engine loading, lean memory: $leanMemory")
         val before = taskIds()
         nativePtr = init(modelPath, libPath, threads, xnnThreads)

@@ -57,7 +57,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setPocket
 
 /// Memory over speed for the models loaded from now on (settings): no CPU arena, no memory pattern.
 #[no_mangle]
-pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_setLeanMemory(
+pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_nativeSetLeanMemory(
     _env: JNIEnv,
     _class: JClass,
     on: jni::sys::jboolean,
