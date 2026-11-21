@@ -1461,6 +1461,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
 
         // Every character: their own voice (remembered for the whole book, see RoleCast) and speed
         val charVoice = HashMap<String, String>()
+        val charManual = HashSet<String>()     // voices the user chose by hand: never overruled
         val charSpeed = HashMap<String, Float>()
         var heroManual = false
         if (roleResult != null) {
@@ -1472,6 +1473,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 java.io.File(femaleStyle).name, java.io.File(unknownStyle).name)
             val cast = com.brahmadeo.supertonic.tts.utils.RoleCast.cast(this@PlaybackService, charScope, order, genders, common)
             for ((name, e) in cast.entries) e.voice?.let { com.brahmadeo.supertonic.tts.utils.RolePrefs.pathOf(this@PlaybackService, it) }?.let { charVoice[name] = it }
+            for ((name, e) in cast.entries) if (e.kind == com.brahmadeo.supertonic.tts.utils.RoleCast.Kind.MANUAL) charManual.add(name)
             heroManual = cast.kind(com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.HERO) == com.brahmadeo.supertonic.tts.utils.RoleCast.Kind.MANUAL
             Log.i(TAG, "roles: main hero ${cast.mainHero}, heroine ${cast.mainHeroine}; own voices ${cast.entries.count { it.value.voice != null }}, " +
                 "common ${cast.entries.count { it.value.kind == com.brahmadeo.supertonic.tts.utils.RoleCast.Kind.COMMON }}")
@@ -1533,7 +1535,17 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     }
                     if (own != null && !otherSex) own else heroStyle(pc.role)
                 }
-                else pc.speaker?.let { charVoice[it] } ?: when (pc.role) {
+                // a character's own voice — unless it was given by the app and is of the other sex than
+                // this line plainly is (as for the hero above): the voice given once by a guess outvoted
+                // a woman's line found right (Астра, 11.2026); one chosen by hand always stays
+                else pc.speaker?.let { sp ->
+                    charVoice[sp]?.takeIf { v ->
+                        sp in charManual || java.io.File(v).name.let { f ->
+                            !((pc.role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE && com.brahmadeo.supertonic.tts.utils.CharacterVoices.isMaleVoice(f)) ||
+                              (pc.role == com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE && com.brahmadeo.supertonic.tts.utils.CharacterVoices.isFemaleVoice(f)))
+                        }
+                    }
+                } ?: when (pc.role) {
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.MALE -> maleStyle
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.FEMALE -> femaleStyle
                     com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.Role.SPEECH -> speechStyle

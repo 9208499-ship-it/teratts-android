@@ -222,7 +222,10 @@ object DialogueAnalyzer2 {
     // ------------------------------------------------------------- lexicons
 
     private val dashes = setOf('—', '–', '-', '―')
-    private val SPACED_DASH = Regex("""[\s\u00A0\u202F][—–―-][\s\u00A0\u202F]""")
+    // a dash between the speech and the author's words; a space left out is forgiven for the long
+    // dashes — "— Я вернусь,— сказала она", "— Я вернусь, —сказала она" (both went to one voice,
+    // the remark with the line, Астра 11.2026); a hyphen needs both spaces («кто-то» is one word)
+    private val SPACED_DASH = Regex("""[\s\u00A0\u202F][—–―-][\s\u00A0\u202F]|(?<=[,.!?…])[—–―][\s\u00A0\u202F]?|[\s\u00A0\u202F][—–―](?=\p{Ll})""")
     /** A dash opening a line inside a paragraph: after ":" or the end of a sentence, before a capital or a quote. */
     private val INNER_DASH_LINE = Regex("""(?<=[:.!?…])[\s\u00A0\u202F]+[—–―][\s\u00A0\u202F]+(?=[«"„“\p{Lu}])""")
     private val WORD = Regex("""\d+[‑-][а-яё]+|[А-Яа-яЁё]+""")
@@ -1100,6 +1103,36 @@ object DialogueAnalyzer2 {
                         lineCount[other] = (lineCount[other] ?: 0) + 1
                         seenSpeakers.add(other)
                     }
+                }
+            }
+            // one paragraph, two turns, each with its own remark: "— Ты готова? — спросил он. — Да, —
+            // сказала она." — «Да» took his voice: the paragraph's one sex was given to every line in it
+            // (Астра, 11.2026). A new turn begins where the author's words close a sentence before the
+            // next line («…спросил он. — Да»); "— Я вернусь, — сказала она, — завтра" stays one turn.
+            // A later turn whose remark says the other sex gets that sex (and who of it is in the talk).
+            if (forced == null && !p.quoted && p.speech.size >= 2 && spans.size == p.pieces.size) {
+                val turns = ArrayList<IntRange>()
+                var begin = 0
+                var authorEnd: Char? = null
+                for ((i, pc) in p.pieces.withIndex()) {
+                    val piece = text.substring(pc.first, pc.second)
+                    if (pc.third) {
+                        if (authorEnd != null && authorEnd in ".!?…" && i > begin) { turns.add(begin until i); begin = i }
+                        authorEnd = null
+                    } else if (piece.any { it.isLetter() }) authorEnd = piece.trimEnd().lastOrNull()
+                }
+                turns.add(begin until p.pieces.size)
+                for (t in 1 until turns.size) {
+                    val r = turns[t]
+                    val author = r.filter { !p.pieces[it].third }.joinToString(" ") { text.substring(p.pieces[it].first, p.pieces[it].second) }
+                    val g = when (remarkSex(author)) { Role.MALE -> G.M; Role.FEMALE -> G.F; else -> null } ?: continue
+                    val lines = r.filter { p.pieces[it].third }
+                    val cur = lines.firstOrNull()?.let { spans[it] } ?: continue
+                    if (cur.role == (if (g == G.M) Role.MALE else Role.FEMALE)) continue
+                    val who = run.lastOrNull { !samePerson(it, cur.speaker) && genderOf(it) == g && isHuman(it) }
+                        ?: lastMentioned[g]?.takeIf { genderOf(it) == g && !samePerson(it, cur.speaker) }
+                    for (i in lines) spans[i] = spans[i].copy(role = if (g == G.M) Role.MALE else Role.FEMALE, speaker = who)
+                    if (who != null) { run.add(who); lineCount[who] = (lineCount[who] ?: 0) + 1 }
                 }
             }
             probeTL.get()?.add(Probe(p.start, p.end, p.speech.map { intArrayOf(it.first, it.second) }, authors.map { intArrayOf(it.first, it.second) },
