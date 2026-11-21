@@ -512,11 +512,14 @@ pub fn read_voice(path: &str) -> Result<Vec<f32>> {
     let mut r = hound::WavReader::open(path).with_context(|| format!("voice {path}"))?;
     let spec = r.spec();
     let ch = spec.channels.max(1) as usize;
+    // only what the first 30 s need (and 0.1 s more for the resampler's taps at the cut): a long
+    // recording was read, mixed and resampled whole before it was cut
+    let keep = (30 * spec.sample_rate as usize + spec.sample_rate as usize / 10) * ch;
     let raw: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => r.samples::<f32>().collect::<std::result::Result<_, _>>()?,
+        hound::SampleFormat::Float => r.samples::<f32>().take(keep).collect::<std::result::Result<_, _>>()?,
         hound::SampleFormat::Int => {
             let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
-            r.samples::<i32>().map(|s| s.map(|v| v as f32 * scale)).collect::<std::result::Result<_, _>>()?
+            r.samples::<i32>().take(keep).map(|s| s.map(|v| v as f32 * scale)).collect::<std::result::Result<_, _>>()?
         }
     };
     let mono: Vec<f32> = raw.chunks(ch).map(|c| c.iter().sum::<f32>() / ch as f32).collect();

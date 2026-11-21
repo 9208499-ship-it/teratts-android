@@ -257,6 +257,7 @@ pub extern "system" fn Java_com_brahmadeo_supertonic_tts_SupertonicTTS_init(
     // XNNPACK only when compiled in (cargo feature) and requested (xnn_threads > 0)
     let use_xnnpack = cfg!(feature = "xnnpack") && xnn_threads > 0;
     log::info!("XNNPACK: {}", if use_xnnpack { "on" } else { "off" });
+    log::info!("lean memory (no CPU arena, no memory pattern): {}", if crate::helper::lean_memory() { "on" } else { "off" });
     // ONNX Runtime's worker threads are created here and inherit this thread's CPU mask
     let pin = cores::pin_current();
     let loaded = load_text_to_speech(&model_path, false, use_xnnpack, ort_threads as usize, xnn_threads as usize);

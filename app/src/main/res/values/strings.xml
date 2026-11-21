@@ -591,6 +591,11 @@
     <string name="role_model_delete_ask">Delete the role model and what it worked out? It can be downloaded again.</string>
     <string name="prep_note_stopped">Stopped: %1$s.</string>
     <string name="prep_note_done">Done: the book is voiced from the current chapter to the end.</string>
+    <string name="prep_failed_phrase">phrase %1$d of %2$d («%3$s») gave no sound</string>
+    <string name="prep_failed_chapter">chapter %1$d: %2$s</string>
+    <string name="prep_why_engine">the voice engine could not be loaded</string>
+    <string name="prep_why_write">chapter %1$d could not be saved (out of space?)</string>
+    <string name="prep_note_done_except">Ready, except: %1$s. These chapters are read live and prepared again next time.</string>
     <string name="prep_note_reading">Stopped: the reading started. It goes on after it, if the phone is on the charger.</string>
     <string name="prep_note_hand">Stopped by hand.</string>
     <string name="prep_note_failed">Error: %1$s</string>

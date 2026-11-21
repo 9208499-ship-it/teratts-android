@@ -591,6 +591,11 @@
     <string name="role_model_delete_ask">Удалить модель ролей и то, что она уже разобрала? Её можно скачать снова.</string>
     <string name="prep_note_stopped">Остановлено: %1$s.</string>
     <string name="prep_note_done">Готово: книга озвучена от текущей главы до конца.</string>
+    <string name="prep_failed_phrase">фраза %1$d из %2$d («%3$s») не озвучилась</string>
+    <string name="prep_failed_chapter">глава %1$d: %2$s</string>
+    <string name="prep_why_engine">движок озвучки не загрузился</string>
+    <string name="prep_why_write">не удалось сохранить главу %1$d (мало места?)</string>
+    <string name="prep_note_done_except">Готово, кроме: %1$s. Эти главы прочитаются вживую и подготовятся заново в следующий раз.</string>
     <string name="prep_note_reading">Остановлено: началось чтение. Продолжится после него, если телефон на зарядке.</string>
     <string name="prep_note_hand">Остановлено вручную.</string>
     <string name="prep_note_failed">Ошибка: %1$s</string>

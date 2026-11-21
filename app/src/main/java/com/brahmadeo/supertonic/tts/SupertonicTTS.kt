@@ -126,8 +126,11 @@ object SupertonicTTS {
         try { setFastCores(fast.toIntArray()) } catch (e: Throwable) { }
         val threads = if (fast.isNotEmpty()) fast.size else ortThreads
         Log.i("SupertonicTTS", "threads: $threads" + if (fast.isNotEmpty()) " on fast cores $fast" else " (all cores)")
-        try { nativeSetLeanMemory(leanMemory) } catch (e: Throwable) { }
-        Log.i("TeraMem", "engine loading, lean memory: $leanMemory")
+        // what the engine is told, and whether it took it (the native side logs what it loads with)
+        val leanSet = try { nativeSetLeanMemory(leanMemory); "lean memory: $leanMemory" } catch (e: Throwable) {
+            Log.e("TeraMem", "lean memory not passed to the engine: $e"); "lean memory NOT applied (pools)"
+        }
+        Log.i("TeraMem", "engine loading, $leanSet")
         val before = taskIds()
         nativePtr = init(modelPath, libPath, threads, xnnThreads)
         try {

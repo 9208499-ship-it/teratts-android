@@ -262,6 +262,7 @@ object RoleModel {
             if (tok == null) tok = tokenizerOf(File(d, "tokenizer.json"))
             val e = OrtEnvironment.getEnvironment()
             env = e
+            var leanNote = if (com.brahmadeo.supertonic.tts.SupertonicTTS.leanMemory) "lean" else "pools"
             fun session(f: String): OrtSession = OrtSession.SessionOptions().use { so ->
                 so.setIntraOpNumThreads(threads)
                 so.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
@@ -271,12 +272,15 @@ object RoleModel {
                 if (com.brahmadeo.supertonic.tts.SupertonicTTS.leanMemory) try {
                     so.setCPUArenaAllocator(false)
                     so.setMemoryPatternOptimization(false)
-                } catch (_: Throwable) { }
+                } catch (t: Throwable) {
+                    leanNote = "lean not applied: ${t.message}"
+                    android.util.Log.e("TeraMem", "roles model: lean memory not applied: ${t.message}")
+                }
                 e.createSession(File(d, f).absolutePath, so)
             }
             enc = session(meta.optString("enc", "roles_enc_int8.onnx"))
             head = session(meta.optString("head", "roles_head.onnx"))
-            android.util.Log.i("TeraMem", "roles model loaded")
+            android.util.Log.i("TeraMem", "roles model loaded ($leanNote)")
             true
         } catch (t: Throwable) {
             Log.w(TAG, "load failed: ${t.message}")
@@ -286,10 +290,10 @@ object RoleModel {
         }
     }
 
-    @Synchronized
-    /** The roles' model is in memory (for the memory log). */
+    /** The roles' model is in memory (for the memory log; a plain read, no lock). */
     fun loaded(): Boolean = enc != null
 
+    @Synchronized
     fun unload() {
         try { enc?.close() } catch (_: Throwable) { }
         try { head?.close() } catch (_: Throwable) { }

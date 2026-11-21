@@ -1791,6 +1791,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
         Log.i(TAG, "Prepare: from chapter ${current + 1} (${if (begun) "read further than a third: it goes last" else "from its start"}), ${chapters.size} of ${all.size}")
         var k = 0
+        val failed = ArrayList<String>()     // chapters not kept (a phrase gave no sound): «глава N — …»
         while (k < chapters.size) {
             val c = chapters[k]
             currentCoroutineContext().ensureActive()
@@ -1810,6 +1811,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             when (end) {
                 PrepEnd.DONE -> k++
                 PrepEnd.CONDITIONS -> { stopWhy(prep.why(this) ?: getString(R.string.prep_why_off)); return }
+                PrepEnd.FAILED_PHRASE -> {
+                    // the engine itself is gone (it could not be loaded again): no use going on
+                    if (!SupertonicTTS.loaded()) { stopWhy(getString(R.string.prep_why_engine)); return }
+                    // one phrase the engine cannot voice: this chapter is read live, the rest go on;
+                    // it is tried again at the next preparing
+                    failed.add(getString(R.string.prep_failed_chapter, n, prepFailure))
+                    k++
+                }
+                // no room, most likely: every next chapter would be made for nothing
+                PrepEnd.FAILED_WRITE -> { stopWhy(getString(R.string.prep_why_write, n)); return }
                 PrepEnd.INTERRUPTED -> {
                     // the engine was wanted elsewhere (a reader app, the system's speech) or stopped from
                     // there: wait until it has been free for a while, then this chapter again (it used
@@ -1824,8 +1835,13 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 }
             }
         }
-        Log.i(TAG, "Prepare: the book is ready from the current chapter on")
-        prep.setNote(this, getString(R.string.prep_note_done))
+        if (failed.isEmpty()) {
+            Log.i(TAG, "Prepare: the book is ready from the current chapter on")
+            prep.setNote(this, getString(R.string.prep_note_done))
+        } else {
+            Log.w(TAG, "Prepare: ready but for ${failed.size} chapter(s): ${failed.joinToString("; ")}")
+            prep.setNote(this, getString(R.string.prep_note_done_except, failed.joinToString("; ")))
+        }
     }
 
     /** A chapter's text as the player gets it (MainActivity.prepareTextForTts), its language and phrases. */
@@ -1841,7 +1857,15 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         com.brahmadeo.supertonic.tts.utils.BookPrep.setNote(this, getString(R.string.prep_note_stopped, why))
     }
 
-    private enum class PrepEnd { DONE, CONDITIONS, INTERRUPTED }
+    /**
+     * How a chapter's preparing ended. FAILED_PHRASE: a phrase with words in it gave no sound, twice —
+     * the chapter is not kept (it used to be kept without the phrase, and read so ever after).
+     * FAILED_WRITE: the file could not be finished (no room?) — the chapter is not kept either.
+     */
+    private enum class PrepEnd { DONE, CONDITIONS, INTERRUPTED, FAILED_PHRASE, FAILED_WRITE }
+
+    /** What failed in the last chapter (for the note shown in the settings). */
+    @Volatile private var prepFailure = ""
 
     /** One chapter into its file, phrase by phrase, with the index BookPrep plays it by. */
     private suspend fun prepareChapter(book: String, scope: String, text: String, sentences: List<String>,
@@ -1889,9 +1913,21 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         } else if (subsHere.isEmpty()) subsHere.add(0 to samples)
                         lettersDone += sub.count { it.isLetterOrDigit() }
                         val normalized = textNormalizer.normalize(sub, lang, isAdvancedEnabled)
-                        val r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                        // a piece with no letters or digits («…», «—») may give no sound by right
+                        val hasWords = normalized.any { it.isLetterOrDigit() }
+                        var r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                        if ((r == null || r.isEmpty()) && hasWords && !SupertonicTTS.isCancelled() && currentCoroutineContext().isActive) {
+                            Log.w(TAG, "Prepare: phrase ${index + 1} of ${sentences.size} gave no sound — once more")
+                            delay(500)
+                            r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                        }
                         if (r != null && r.isNotEmpty()) { writer.write(r); samples += r.size / 2 }
-                        else if (SupertonicTTS.isCancelled()) return PrepEnd.INTERRUPTED
+                        else if (SupertonicTTS.isCancelled() || !currentCoroutineContext().isActive) return PrepEnd.INTERRUPTED
+                        else if (hasWords) {
+                            prepFailure = getString(R.string.prep_failed_phrase, index + 1, sentences.size, sub.trim().take(40))
+                            Log.e(TAG, "Prepare: phrase ${index + 1} of ${sentences.size} gave no sound twice — the chapter is not kept: ${sub.trim().take(80)}")
+                            return PrepEnd.FAILED_PHRASE
+                        }
                     }
                 }
                 if (subsHere.isEmpty()) subsHere.add(0 to starts.last())
@@ -1905,10 +1941,14 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         }
         // stopped half-way: nothing to finish (finishing an aborted WAV made an empty file again)
         if (!ok) return PrepEnd.INTERRUPTED
-        if (writer.finish()) {
-            prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath, madeWith)
-            Log.i(TAG, "Prepare: chapter ready (${samples / rate} s): ${made.name}")
-        } else made.delete()
+        if (!writer.finish()) {
+            // not finished: no file, no index — not ready (it used to count as done, silently)
+            made.delete()
+            Log.e(TAG, "Prepare: the chapter's file could not be finished: ${made.name}")
+            return PrepEnd.FAILED_WRITE
+        }
+        prep.saveIndex(this, book, text, made, rate, starts, subsAll, stylePath, madeWith)
+        Log.i(TAG, "Prepare: chapter ready (${samples / rate} s): ${made.name}")
         return PrepEnd.DONE
     }
 
@@ -2505,7 +2545,11 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             val end = prepareChapter(book, scope, text, sentences, effectiveLang, stylePath, steps, forExport = true) { done ->
                 progress(done, sentences.size)
             }
-            if (end != PrepEnd.DONE) return null
+            if (end != PrepEnd.DONE) {
+                if (end == PrepEnd.FAILED_PHRASE || end == PrepEnd.FAILED_WRITE)
+                    Log.e(TAG, "Export: the chapter could not be voiced whole ($end): $prepFailure")
+                return null
+            }
             index = prep.find(this, book, text, sentences.size, stylePath) ?: return null
         } else Log.i(TAG, "Export: the chapter is prepared already — saved from its file")
         return savePrepared(index, sentences.size, speed, relDir, baseName, tags, hidden, progress)
