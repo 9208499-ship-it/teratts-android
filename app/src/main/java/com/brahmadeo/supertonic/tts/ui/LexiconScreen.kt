@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -408,7 +409,7 @@ fun LexiconScreen(
                         trailingIcon = if (ruleQuery.isNotEmpty()) {
                             {
                                 IconButton(onClick = { ruleQuery = "" }) {
-                                    Icon(androidx.compose.material.icons.Icons.Default.Clear, contentDescription = null)
+                                    Icon(Icons.Default.Clear, contentDescription = null)
                                 }
                             }
                         } else null,
