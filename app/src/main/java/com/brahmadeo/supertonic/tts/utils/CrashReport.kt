@@ -158,6 +158,13 @@ object CrashReport {
         }
         val crash = File(context.filesDir, FILE)
         if (crash.exists()) try { sb.append(crash.readText()).append("\n\n") } catch (_: Exception) { }
+        // the book's journal (chapters, and who moved the place and where): its last 300 lines —
+        // "the place flew away after a few hours" can only be told from it (4PDA, 11.2026)
+        try {
+            val book = File(context.filesDir, "book.log")
+            if (book.exists()) sb.append("----- book.log -----\n")
+                .append(book.readLines().takeLast(300).joinToString("\n")).append("\n\n")
+        } catch (_: Exception) { }
         sb.append("----- logcat -----\n")
         try {
             // Huawei's touch and scheduler lines (two a frame while a page is scrolled) are silenced:

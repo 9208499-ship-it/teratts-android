@@ -291,8 +291,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 idx = savedPosition(context, text)
                 savedAt = savedTime(context, text)
             }
-            com.brahmadeo.supertonic.tts.utils.BookSession.log(context, "resume: book=${scope.isNotEmpty()} place=${idx ?: "none"} of ${sentences.size}")
-            return idx?.let { rewindIndex(sentences, it, rewindSecondsFor(savedAt), speed) }
+            val back = rewindSecondsFor(savedAt)
+            val result = idx?.let { rewindIndex(sentences, it, back, speed) }
+            val ago = if (savedAt > 0L) "${(System.currentTimeMillis() - savedAt) / 60000} min ago" else "time unknown"
+            com.brahmadeo.supertonic.tts.utils.BookSession.log(context, "resume: book=${scope.isNotEmpty()} " +
+                "saved place=${idx?.let { it + 1 } ?: "none"} of ${sentences.size} ($ago), back ${back.toInt()} s → phrase ${result?.let { it + 1 } ?: "start"}")
+            return result
         }
 
         /** When the place in [text] was saved (ms), 0 if unknown. */
@@ -742,6 +746,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val chunkRanges = if (bookScope.isNotEmpty()) com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences) else emptyList()
                 fun savePosition(idx: Int) {
                     val now = System.currentTimeMillis()
+                    // the place's journal: the voice's place every 2 minutes (and at the stop, see stopPlayback)
+                    if (now - placeLoggedAt > 120_000L) {
+                        placeLoggedAt = now
+                        com.brahmadeo.supertonic.tts.utils.BookSession.log(this@PlaybackService,
+                            "place: voice → chapter $bookChapter, phrase ${idx + 1}/${sentences.size} «${sentences.getOrNull(idx)?.take(40) ?: ""}»")
+                    }
                     positions.edit().putInt(posKey, idx).putLong(posKey + "_t", now)
                         .putString("last_pos_prefix", text.trim().take(160)).putInt("last_pos_index", idx)
                         .putLong("last_pos_time", now).apply()
@@ -1876,6 +1886,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
      */
     private enum class PrepEnd { DONE, CONDITIONS, INTERRUPTED, FAILED_PHRASE, FAILED_WRITE }
 
+    /** When the voice's place was last written to the book's journal (every 2 minutes, not every phrase). */
+    @Volatile private var placeLoggedAt = 0L
+
     /** What failed in the last chapter (for the note shown in the settings). */
     @Volatile private var prepFailure = ""
 
@@ -2234,6 +2247,9 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
     @Volatile private var pauseSeq = 0
 
     fun stopPlayback(removeNotification: Boolean = true) {
+        if (currentSentenceIndex >= 0) com.brahmadeo.supertonic.tts.utils.BookSession.log(this,
+            "place: stop at phrase ${currentSentenceIndex + 1}")
+        placeLoggedAt = 0L
         synchronized(this) {
             isPlaying = false
             try {

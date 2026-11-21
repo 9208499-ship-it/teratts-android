@@ -23,8 +23,10 @@ object BookSession {
     /** Diagnostics: every step of moving between chapters goes to files/book.log. */
     fun log(context: Context, msg: String) {
         try {
-            File(context.filesDir, "book.log").appendText(
-                String.format(java.util.Locale.US, "%tT  %s%n", java.util.Date(), msg))
+            val f = File(context.filesDir, "book.log")
+            // kept small: the last part only (it now gets the place's moves too)
+            if (f.length() > 512 * 1024) f.writeText(f.readLines().takeLast(2000).joinToString("\n", postfix = "\n"))
+            f.appendText(String.format(java.util.Locale.US, "%1\$td.%1\$tm %1\$tT  %2\$s%n", java.util.Date(), msg))
         } catch (e: Exception) { }
     }
 

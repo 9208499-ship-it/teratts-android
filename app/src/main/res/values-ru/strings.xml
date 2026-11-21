@@ -208,6 +208,8 @@
     <string name="speaker_narrator">Это не реплика (читает рассказчик)</string>
     <string name="speaker_no_line">В этой фразе нет прямой речи</string>
     <string name="player_to_current">К текущему месту</string>
+    <string name="player_nav_lock">Заблокировать переходы</string>
+    <string name="player_nav_unlock">Разблокировать переходы</string>
     <string name="characters_reset">Сбросить голоса и пересобрать персонажей</string>
     <string name="characters_reset_done">Голоса сброшены. Персонажи книги пересоберутся при следующем запуске чтения; ваши поправки и объединения сохранены.</string>
     <string name="open_player">Плеер</string>

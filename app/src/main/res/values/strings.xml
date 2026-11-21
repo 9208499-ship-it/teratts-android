@@ -196,6 +196,8 @@
     <string name="speaker_narrator">Not a line (narrator reads it)</string>
     <string name="speaker_no_line">There is no direct speech in this phrase</string>
     <string name="player_to_current">Back to the voice</string>
+    <string name="player_nav_lock">Lock the jumps</string>
+    <string name="player_nav_unlock">Unlock the jumps</string>
     <string name="characters_reset">Reset voices and rebuild characters</string>
     <string name="characters_reset_done">Voices reset. The book is re-analysed next time reading starts; your corrections and merges are kept.</string>
     <string name="open_player">Player</string>

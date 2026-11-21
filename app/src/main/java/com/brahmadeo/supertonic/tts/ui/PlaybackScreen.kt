@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
@@ -373,6 +375,10 @@ fun PlaybackScreen(
     }
     LaunchedEffect(speaking) { if (speaking) { pageAnchor = -1; eyeAt = null } }
     var chrome by remember { mutableStateOf(false) }
+    // 🔒 while reading: the jumps are locked — ‹ › ⏪ ⏮ ⏭ ⏩, the slider, a tap on the text and
+    // «К текущему месту»; a stray tap while looking for a place lost the place (4PDA, 11.2026).
+    // Pause, ⚙ and ■ still work.
+    var navLocked by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // reading starts: the bars go; it stops (■, the sleep timer, a long pause): they come back, so
     // "play" is at hand at once
     var wasSpeaking by remember { mutableStateOf(speaking) }
@@ -384,7 +390,7 @@ fun PlaybackScreen(
     val shown = if (!speaking && !followVoice) (eyeAt ?: index) else index
     // a long press on the text: read from here / who says this
     var longFor by remember { mutableStateOf<Int?>(null) }
-    val tapText: (Int) -> Unit = { i -> if (speaking) playFrom(i) else chrome = !chrome }
+    val tapText: (Int) -> Unit = { i -> if (speaking) { if (!navLocked) playFrom(i) } else chrome = !chrome }
     // reading by eye: the screen stays on; listening: it may go dark
     val view = androidx.compose.ui.platform.LocalView.current
     DisposableEffect(speaking) {
@@ -509,6 +515,7 @@ fun PlaybackScreen(
                     fraction = currentFraction,
                     heardAt = if (pageAnchor >= 0) pageAnchor else heard?.first ?: book.ranges.getOrNull(index)?.first ?: -1,
                     speaking = speaking, followVoice = followVoice, onFollow = { followVoice = it },
+                    toCurrent = !navLocked,
                     anim = pageAnim, pageStyle = pageStyle,
                     // only the line of the place under the text: the bars, when shown, lie over the page
                     reserve = 28.dp,
@@ -552,7 +559,7 @@ fun PlaybackScreen(
                                 )
                             }
                         }
-                        ToCurrentButton(!followVoice && speaking, listState.isScrollInProgress) { followVoice = true }
+                        ToCurrentButton(!followVoice && speaking && !navLocked, listState.isScrollInProgress) { followVoice = true }
                     } else if (showList) {
                         LazyColumn(
                             state = listState,
@@ -567,7 +574,7 @@ fun PlaybackScreen(
                                 }, onLongClick = { longFor = i })
                             }
                         }
-                        ToCurrentButton(!followVoice && speaking, listState.isScrollInProgress) { followVoice = true }
+                        ToCurrentButton(!followVoice && speaking && !navLocked, listState.isScrollInProgress) { followVoice = true }
                     } else {
                         KaraokeText(sentences, index, onClick = { if (speaking) showList = true else chrome = !chrome },
                             onLongClick = { longFor = index }, fraction = currentFraction)
@@ -590,9 +597,17 @@ fun PlaybackScreen(
                             var seeking by remember { mutableStateOf<Float?>(null) }
                             val fraction = if (n > 1) shown.toFloat() / (n - 1) else 0f
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (speaking) {
+                                    IconButton(onClick = { navLocked = !navLocked }, modifier = Modifier.size(36.dp)) {
+                                        Icon(if (navLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                            contentDescription = stringResource(if (navLocked) AppR.string.player_nav_unlock else AppR.string.player_nav_lock),
+                                            tint = if (navLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                val jumpsOn = !(speaking && navLocked)
                                 // ‹ › around the line: the chapter before / after, as in Moon+
                                 if (onPrevChapter != null) {
-                                    IconButton(onClick = onPrevChapter, modifier = Modifier.size(36.dp)) {
+                                    IconButton(onClick = onPrevChapter, enabled = jumpsOn, modifier = Modifier.size(36.dp)) {
                                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                                             contentDescription = stringResource(AppR.string.player_prev_chapter))
                                     }
@@ -623,7 +638,7 @@ fun PlaybackScreen(
                                         }
                                         seeking = null
                                     },
-                                    enabled = n > 1,
+                                    enabled = n > 1 && jumpsOn,
                                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                                 )
                                 Text(
@@ -632,7 +647,7 @@ fun PlaybackScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 if (onNextChapter != null) {
-                                    IconButton(onClick = onNextChapter, modifier = Modifier.size(36.dp)) {
+                                    IconButton(onClick = onNextChapter, enabled = jumpsOn, modifier = Modifier.size(36.dp)) {
                                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                             contentDescription = stringResource(AppR.string.player_next_chapter))
                                     }
@@ -652,14 +667,14 @@ fun PlaybackScreen(
                                     SkipButton(
                                         icon = Icons.Default.FastRewind,
                                         description = stringResource(AppR.string.player_prev_para),
-                                        enabled = index > 0,
+                                        enabled = !navLocked && index > 0,
                                         onClick = { playFrom(paraStep(-1)) },
                                         onLongClick = { playFrom(paraStep(-1)) }
                                     )
                                     SkipButton(
                                         icon = Icons.Default.SkipPrevious,
                                         description = stringResource(AppR.string.player_prev),
-                                        enabled = index > 0,
+                                        enabled = !navLocked && index > 0,
                                         onClick = { playFrom((index - 1).coerceAtLeast(0)) },
                                         onLongClick = { playFrom((index - 5).coerceAtLeast(0)) }
                                     )
@@ -682,14 +697,14 @@ fun PlaybackScreen(
                                     SkipButton(
                                         icon = Icons.Default.SkipNext,
                                         description = stringResource(AppR.string.player_next),
-                                        enabled = index < n - 1,
+                                        enabled = !navLocked && index < n - 1,
                                         onClick = { playFrom((index + 1).coerceAtMost(n - 1)) },
                                         onLongClick = { playFrom((index + 5).coerceAtMost(n - 1)) }
                                     )
                                     SkipButton(
                                         icon = Icons.Default.FastForward,
                                         description = stringResource(AppR.string.player_next_para),
-                                        enabled = index < n - 1,
+                                        enabled = !navLocked && index < n - 1,
                                         onClick = { playFrom(paraStep(1)) },
                                         onLongClick = { playFrom(paraStep(1)) }
                                     )
@@ -892,6 +907,7 @@ private fun PagedBookView(
     cache: PageCache = PageCache(),
     onAnchor: (Int) -> Unit = {},
     onBlankTap: () -> Unit = {},
+    toCurrent: Boolean = true,      // «К текущему месту» may be shown (not while the jumps are locked)
     modifier: Modifier = Modifier
 ) {
     val dens = LocalDensity.current
@@ -1043,7 +1059,7 @@ private fun PagedBookView(
                         }
                     }
                 }
-                if (!followVoice && speaking) {
+                if (!followVoice && speaking && toCurrent) {
                     ExtendedFloatingActionButton(
                         onClick = { onFollow(true) },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)

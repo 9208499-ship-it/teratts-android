@@ -325,6 +325,8 @@ class PlaybackActivity : ComponentActivity() {
         }
         if (intent.getBooleanExtra("is_resume", false)) {
             // the place reached by the voice in this text, a minute back — shown and lit before "Play"
+            com.brahmadeo.supertonic.tts.utils.BookSession.log(this, "reader opened to resume" +
+                if (savedInstanceState != null) " (recreated after the app was closed by the system)" else "")
             com.brahmadeo.supertonic.tts.utils.BookSession.adopt(this, currentText)
             PlaybackService.resumeIndex(this, currentText, sentencesState.value, currentSpeed)?.let {
                 currentIndexState.intValue = it
@@ -701,6 +703,9 @@ class PlaybackActivity : ComponentActivity() {
                 // only while this text is the session's chapter: a late save after another book was
                 // opened wrote that book's chapter number into this book's place — and coming back,
                 // the book began from the start
+                // the place's journal: who moved it (reading by eye: a scroll, a page turned, the slider)
+                com.brahmadeo.supertonic.tts.utils.BookSession.log(ctx, "place: eye → phrase ${i + 1}/${s.size} «${s[i].take(40)}»" +
+                    if (scope.isNotEmpty() && com.brahmadeo.supertonic.tts.utils.BookSession.isCurrent(ctx, text)) "" else " (not the book's chapter: only this text's place)")
                 if (scope.isNotEmpty() && com.brahmadeo.supertonic.tts.utils.BookSession.isCurrent(ctx, text))
                     com.brahmadeo.supertonic.tts.utils.BookPositions.save(ctx, scope,
                     com.brahmadeo.supertonic.tts.utils.BookSession.currentIndex(ctx),
