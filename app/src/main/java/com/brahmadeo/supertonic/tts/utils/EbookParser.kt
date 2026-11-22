@@ -74,11 +74,13 @@ class EbookParser(private val context: Context) {
                 }
                 
                 val result = chapterText.toString().trim()
-                if (result.isNotBlank()) return@withContext Result.success(result)
+                // obvious mistakes in the words put right (WordFixer): the same for the screen, the
+                // voice and the chapters made beforehand — all of them take the text from here
+                if (result.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, result))
             }
 
             val fallbackText = extractFallback(publication, link)
-            if (fallbackText.isNotBlank()) return@withContext Result.success(fallbackText)
+            if (fallbackText.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, fallbackText))
 
             Result.failure(Exception("No text content could be extracted."))
         } catch (e: Exception) {
@@ -90,7 +92,7 @@ class EbookParser(private val context: Context) {
         val isPdf = publication.metadata.conformsTo.contains(Publication.Profile.PDF) ||
                     publication.readingOrder.firstOrNull()?.mediaType?.matches(org.readium.r2.shared.util.mediatype.MediaType.PDF) == true
 
-        return@withContext extractPagesReadium(publication, pageIndices, isPdf)
+        return@withContext extractPagesReadium(publication, pageIndices, isPdf).map { WordFixer.apply(context, it) }
     }
 
     suspend fun extractPages(file: File, publication: Publication, pageIndices: List<Int>): Result<String> = withContext(Dispatchers.IO) {
@@ -98,10 +100,11 @@ class EbookParser(private val context: Context) {
                     publication.metadata.conformsTo.contains(Publication.Profile.PDF) ||
                     publication.readingOrder.firstOrNull()?.mediaType?.matches(org.readium.r2.shared.util.mediatype.MediaType.PDF) == true
 
+        // a PDF's words broken at line ends («хлес-\nтнут») are the commonest of all
         if (isPdf) {
-            return@withContext extractPagesPdfBox(file, pageIndices)
+            return@withContext extractPagesPdfBox(file, pageIndices).map { WordFixer.apply(context, it) }
         } else {
-            return@withContext extractPagesReadium(publication, pageIndices, isPdf)
+            return@withContext extractPagesReadium(publication, pageIndices, isPdf).map { WordFixer.apply(context, it) }
         }
     }
 

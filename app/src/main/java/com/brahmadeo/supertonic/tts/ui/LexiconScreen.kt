@@ -391,6 +391,7 @@ fun LexiconScreen(
                     }
                 }
             } else {
+                item { FixTyposRow() }
                 item {
                     Text(
                         text = stringResource(AppR.string.custom_rules_header) + " (${rules.size})",
@@ -848,6 +849,19 @@ private fun FastCoresRow() {
                       else stringResource(AppR.string.fast_cores_desc, fast.size, cores.total()),
         checked = on,
         onToggle = { v -> on = v; cores.set(context, v) }
+    )
+}
+
+/** «Исправлять опечатки» (WordFixer): one-letter typos put right by the dictionary; hyphen breaks and digits always. */
+@Composable
+private fun FixTyposRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var on by remember { mutableStateOf(com.brahmadeo.supertonic.tts.utils.WordFixer.typos(context)) }
+    PunctuationToggleRow(
+        title = stringResource(AppR.string.fix_typos_title),
+        description = stringResource(AppR.string.fix_typos_desc),
+        checked = on,
+        onToggle = { v -> on = v; com.brahmadeo.supertonic.tts.utils.WordFixer.setTypos(context, v) }
     )
 }
 
