@@ -235,7 +235,7 @@
     <string name="punct_pause_scale_title">Длина пауз</string>
     <string name="punct_pause_scale_desc">Паузы после . ! ? : ; — … и вокруг (скобок). ×1 — по умолчанию; ×0 — только паузы самой модели.</string>
     <string name="punct_paragraph_pause_title">Пауза между абзацами</string>
-    <string name="punct_paragraph_pause_desc">Тишина после последнего предложения абзаца, в секундах. Работает, когда читалка передаёт текст абзацами (как FBReader).</string>
+    <string name="punct_paragraph_pause_desc">Тишина после последнего предложения абзаца, в секундах: между репликами диалога, после заголовка, после строки без точки. Работает и в плеере программы, и для других читалок (как FBReader).</string>
     <string name="punct_force_space_title">Принудительный пробел перед знаком препинания</string>
     <string name="punct_force_space_desc">Вставлять пробел между словом и идущим за ним «.,;:!?». Подсказка для токенизатора модели (удивлён, → удивлён ,). Не трогает повторяющиеся знаки (..., ?!) и числа (3,14, 1.5). По умолчанию выключено.</string>
     <string name="chunk_size_title">Размер блока</string>

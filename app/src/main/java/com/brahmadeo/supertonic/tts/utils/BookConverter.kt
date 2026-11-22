@@ -36,6 +36,8 @@ object BookConverter {
      * same file is opened once more ([outdated]).
      */
     private const val CONVERTER_MARK = "teratts-converter"
+    /** 3: a .txt's paragraphs found by indents and line ends, not by blank lines only (11.2026). */
+    private const val CONVERTER_VERSION = 3
 
     /** An EPUB this converter made before covers were kept: convert the book again if its file is at hand. */
     fun outdated(epub: File): Boolean = try {
@@ -43,6 +45,15 @@ object BookConverter {
             val opf = z.getEntry("OEBPS/content.opf")?.let { e -> z.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) } } ?: return false
             if (!opf.contains("urn:teratts:")) return false
             if (!opf.contains(CONVERTER_MARK)) return true
+            val version = Regex("name=\"$CONVERTER_MARK\" content=\"(\\d+)\"").find(opf)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            // made before 3 of a .txt cut by blank lines only: a paragraph pages long (a whole talk in
+            // one) — made again. Only such books: an FB2 with its own paragraphs stays as it is
+            if (version < 3 && z.entries().asSequence()
+                    .filter { it.name.startsWith("OEBPS/") && it.name.endsWith(".xhtml") && it.name != "OEBPS/nav.xhtml" }
+                    .take(40)
+                    .any { e -> z.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) }
+                        .split("</p>").any { seg -> seg.length - seg.lastIndexOf("<p").coerceAtLeast(0) > 2500 } }
+            ) return true
             // a text made of a .txt in a wrong encoding ("Âàñèëèé", «����»): made again, now read right
             val firstChapters = z.entries().asSequence()
                 .filter { it.name.startsWith("OEBPS/") && it.name.endsWith(".xhtml") && it.name != "OEBPS/nav.xhtml" }
@@ -309,6 +320,47 @@ object BookConverter {
         }
         .replace(HTML_TAG, " ")
 
+    private val TXT_TERMINAL = ".!?…:;»\"”)'"
+
+    /**
+     * A .txt's paragraphs. Only blank lines used to part them: a lib.ru text — a paragraph begins with
+     * an indented line, a long one goes on over several lines, blank lines few — came as a handful
+     * of pages-long paragraphs; the lines of a talk ran into one another, a chapter "began in its
+     * middle", a line with no full stop ran into the next (4PDA, 11.2026). Now:
+     *  - a blank line always ends a paragraph;
+     *  - indented text (a fifth of the lines or more, not all): an indented line begins a paragraph,
+     *    the lines under it go on with it;
+     *  - otherwise a line goes on with the one before only if that one ends with no full stop (.!?…:;»)
+     *    and this one goes on in lower case ("…перенесённый / на следующую строку"); a line in capitals,
+     *    a dash with a capital («- Спасибо»), a line after a full stop — a new paragraph.
+     */
+    fun txtParagraphs(text: String): List<String> {
+        val lines = text.split('\n')
+        var nonEmpty = 0; var indented = 0
+        for (l in lines) if (l.isNotBlank()) { nonEmpty++; if (l[0] == ' ' || l[0] == '\t' || l[0] == '\u3000') indented++ }
+        val byIndent = indented * 5 >= nonEmpty && indented * 10 < nonEmpty * 9
+        val out = ArrayList<String>()
+        val cur = StringBuilder()
+        var prev = ""
+        fun flush() { if (cur.isNotEmpty()) out.add(cur.toString()); cur.setLength(0) }
+        for (l in lines) {
+            if (l.isBlank()) { flush(); prev = ""; continue }
+            val t = l.trim()
+            val newPara = when {
+                cur.isEmpty() -> true
+                byIndent -> l[0] == ' ' || l[0] == '\t' || l[0] == '\u3000'
+                else -> (prev.trimEnd().lastOrNull()?.let { it in TXT_TERMINAL } ?: true) ||
+                    !(t.firstOrNull { it.isLetter() }?.isLowerCase() ?: false)
+            }
+            if (newPara) flush()
+            if (cur.isNotEmpty()) cur.append(' ')
+            cur.append(t)
+            prev = t
+        }
+        flush()
+        return out
+    }
+
     private val txtHeading = Regex("^(глава|часть|книга|пролог|эпилог|chapter|part|prologue|epilogue)\\b.{0,70}$", RegexOption.IGNORE_CASE)
 
     /** A .txt file's text in whatever encoding it came: UTF-8/16, windows-1251, KOI8-R, DOS (TextEncoding). */
@@ -320,8 +372,7 @@ object BookConverter {
         // the tags were shown and read aloud (4PDA, 11.2026): headings become chapters, the rest goes
         val html = HTML_TAG.findAll(text).take(2).count() >= 2
         if (html) text = HTML_HEADING.replace(text) { m -> "\n\n" + HEADING_MARK + stripMarkup(m.groupValues[1]) + "\n\n" }
-        var blocks = text.split(Regex("\\n\\s*\\n"))
-        if (blocks.size < 10) blocks = text.split("\n")
+        val blocks = txtParagraphs(text)
         val chapters = ArrayList<Chapter>()
         var cur: Chapter? = null
         for (b in blocks) {
@@ -479,7 +530,7 @@ object BookConverter {
                 .append("<dc:language>ru</dc:language>\n")
             if (book.author.isNotEmpty()) opf.append("<dc:creator>").append(esc(book.author)).append("</dc:creator>\n")
             if (cover != null) opf.append("<meta name=\"cover\" content=\"cover-image\"/>\n")
-            opf.append("<meta name=\"$CONVERTER_MARK\" content=\"2\"/>\n")
+            opf.append("<meta name=\"$CONVERTER_MARK\" content=\"$CONVERTER_VERSION\"/>\n")
             opf.append("<meta property=\"dcterms:modified\">2026-01-01T00:00:00Z</meta>\n</metadata>\n<manifest>\n")
                 .append("<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n")
                 .append("<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n")

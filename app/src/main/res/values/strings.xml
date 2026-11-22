@@ -223,7 +223,7 @@
     <string name="punct_pause_scale_title">Pause length</string>
     <string name="punct_pause_scale_desc">Pauses after . ! ? : ; — … and around (brackets). ×1 is the default; ×0 leaves only the voice model’s own pauses.</string>
     <string name="punct_paragraph_pause_title">Pause between paragraphs</string>
-    <string name="punct_paragraph_pause_desc">Silence after the last sentence of a paragraph, in seconds. Used when the reader sends whole paragraphs (FBReader does).</string>
+    <string name="punct_paragraph_pause_desc">Silence after the last sentence of a paragraph, in seconds: between the lines of a dialogue, after a heading, after a line with no full stop. Works in the player of the app and for other readers (like FBReader).</string>
     <string name="punct_force_space_title">Force space before punctuation</string>
     <string name="punct_force_space_desc">Insert a space between any word and a trailing `.,;:!?`. Belt-and-braces hint for the model\'s text tokenizer (`удивлён,` → `удивлён ,`). Leaves consecutive marks (`...`, `?!`) and numbers (`3,14`, `1.5`) alone. Off by default.</string>
     <string name="chunk_size_title">Chunk size</string>

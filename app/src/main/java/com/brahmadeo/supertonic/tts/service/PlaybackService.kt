@@ -258,6 +258,28 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
             }
         }
 
+        /**
+         * Which of [sentences] end a paragraph of [text] (a line break, or the text's end, after them):
+         * those get the paragraph's pause (U+2029 to the engine, "Пауза между абзацами"). Only the
+         * system TTS service marked them; the player's own reading ran the paragraphs — the lines of
+         * a talk — on with no pause but the full stop's (4PDA, 11.2026).
+         */
+        fun paragraphEnds(text: String, sentences: List<String>): BooleanArray {
+            val ranges = com.brahmadeo.supertonic.tts.utils.DialogueAnalyzer2.locateRanges(text, sentences)
+            return BooleanArray(sentences.size) { i ->
+                val r = ranges.getOrNull(i) ?: return@BooleanArray false
+                var j = r.last + 1
+                var ends = true
+                while (j < text.length) {
+                    val c = text[j]
+                    if (c == '\n') break
+                    if (c.isLetterOrDigit()) { ends = false; break }
+                    j++
+                }
+                ends
+            }
+        }
+
         /** The phrase about [seconds] of reading before [index] (≈14 characters a second at 1×). */
         fun rewindIndex(sentences: List<String>, index: Int, seconds: Float, speed: Float): Int {
             if (sentences.isEmpty()) return 0
@@ -725,6 +747,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 } catch (_: Throwable) { }
                 val sentences = textNormalizer.splitIntoSentences(text, effectiveLang)
                 val totalSentences = sentences.size
+                val paraEnds = paragraphEnds(text, sentences)
                 // Where reading stopped in this very text is remembered, so going to the
                 // settings (another voice, roles…) and pressing play again continues
                 // from the same sentence instead of the beginning.
@@ -1034,7 +1057,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                 try { channel.send(pcm) } catch (_: Exception) { break }
                                 result = pcm; sentenceBytes += pcm.size
                             }
-                        } else for (pc in pieces) {
+                        } else for ((pcAt, pc) in pieces.withIndex()) {
                             if (playbackStopped() || !isActive) break
                             val pieceStyle = plan.style(pc)
                             val pieceSpeed = plan.speed(pc, pieceStyle, liveSpeed)
@@ -1044,8 +1067,10 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                             // sentence ends anyway, so this costs nothing)
                             var subs = com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)
                             if (quickStart) { subs = quickStartSplit(subs); quickStart = false }
-                            for (sub in subs) {
+                            for ((subAt, sub) in subs.withIndex()) {
                                 if (playbackStopped() || !isActive) break
+                                // the last bit of a paragraph's last phrase: the paragraph's pause after it
+                                val paraEnd = paraEnds.getOrElse(index) { false } && pcAt == pieces.lastIndex && subAt == subs.lastIndex
                                 if (sentStarts.size > 1) {
                                     val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
                                     val m = ByteArray(0)
@@ -1066,7 +1091,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                                     try { channel.send(made) } catch (_: Exception) { break }
                                     made
                                 } else SupertonicTTS.generateAudio(
-                                    normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
+                                    if (paraEnd) normalizedText + "\u2029" else normalizedText, effectiveLang, pieceStyle, pieceSpeed, 0.0f, steps,
                                     pieceGain, streamingListener
                                 )
                                 if (r != null && r.isNotEmpty()) {
@@ -1904,6 +1929,7 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
         // preparing (1.56: it could not be — a reading started waited for the model to finish the chapter)
         val prepCtx = currentCoroutineContext()
         val plan = voicePlan(text, sentences, stylePath, scope, 2) { SupertonicTTS.isCancelled() || !prepCtx.isActive }
+        val paraEnds = paragraphEnds(text, sentences)
         val rate = SupertonicTTS.getAudioSampleRate()
         val dir = prep.bookDir(this, book).apply { mkdirs() }
         val key = prep.textKey(text)
@@ -1926,12 +1952,16 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                 val startLetters = sentStarts.map { p -> chunkText.substring(0, p).count { it.isLetterOrDigit() } }
                 var lettersDone = 0
                 val subsHere = ArrayList<Pair<Int, Long>>()
-                for (pc in plan.pieces(index)) {
+                val piecesHere = plan.pieces(index)
+                for ((pcAt, pc) in piecesHere.withIndex()) {
                     val pieceStyle = plan.style(pc)
                     // made at 1×: the reading's pace is applied when it is played
                     val pieceSpeed = plan.speed(pc, pieceStyle, 1f)
                     val pieceGain = plan.gain(pc, pieceStyle)
-                    for (sub in com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)) {
+                    val subsOfPiece = com.brahmadeo.supertonic.tts.utils.SpokenProgress.splitSentences(pc.text)
+                    for ((subAt, sub) in subsOfPiece.withIndex()) {
+                        // the paragraph's pause after its last bit, as when it is read live
+                        val paraEnd = paraEnds.getOrElse(index) { false } && pcAt == piecesHere.lastIndex && subAt == subsOfPiece.lastIndex
                         if (sentStarts.size > 1) {
                             val k = startLetters.indexOfLast { it <= lettersDone + 1 }.coerceAtLeast(0)
                             subsHere.add(sentStarts[k] to samples)
@@ -1940,11 +1970,12 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                         val normalized = textNormalizer.normalize(sub, lang, isAdvancedEnabled)
                         // a piece with no letters or digits («…», «—») may give no sound by right
                         val hasWords = normalized.any { it.isLetterOrDigit() }
-                        var r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                        val toEngine = if (paraEnd) normalized + "\u2029" else normalized
+                        var r = SupertonicTTS.generateAudio(toEngine, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
                         if ((r == null || r.isEmpty()) && hasWords && !SupertonicTTS.isCancelled() && currentCoroutineContext().isActive) {
                             Log.w(TAG, "Prepare: phrase ${index + 1} of ${sentences.size} gave no sound — once more")
                             delay(500)
-                            r = SupertonicTTS.generateAudio(normalized, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
+                            r = SupertonicTTS.generateAudio(toEngine, lang, pieceStyle, pieceSpeed, 0.0f, steps, pieceGain, null)
                         }
                         if (r != null && r.isNotEmpty()) { writer.write(r); samples += r.size / 2 }
                         else if (SupertonicTTS.isCancelled() || !currentCoroutineContext().isActive) return PrepEnd.INTERRUPTED

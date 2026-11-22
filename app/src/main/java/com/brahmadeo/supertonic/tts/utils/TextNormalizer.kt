@@ -436,6 +436,13 @@ class TextNormalizer {
     }
 
     fun splitIntoSentences(text: String, lang: String = "en"): List<String> {
+        // a paragraph is a hard border: no phrase runs over a line break. A line with no full stop
+        // ("Ну, а теперь давайте рассмотрим…" opening a chapter) ran into the next sentence, and short
+        // phrases of two paragraphs were joined into one piece — with no pause between (4PDA, 11.2026)
+        if (text.indexOf('\n') >= 0) {
+            val paras = text.split('\n').filter { it.isNotBlank() }
+            if (paras.size > 1) return paras.flatMap { splitIntoSentences(it, lang) }
+        }
         // Per-call chunk limit. SMALL gives sub-second first-audio for short
         // notifications; LARGE merges multiple sentences for audiobook
         // narration with continuous intonation; DEFAULT is the legacy 300-char
