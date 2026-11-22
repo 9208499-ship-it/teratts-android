@@ -47,10 +47,20 @@ object BookConverter {
             val firstChapters = z.entries().asSequence()
                 .filter { it.name.startsWith("OEBPS/") && it.name.endsWith(".xhtml") && it.name != "OEBPS/nav.xhtml" }
                 .take(2).toList()
-            firstChapters.any { e ->
+            if (firstChapters.any { e ->
                 val head = z.getInputStream(e).use { i -> ByteArray(8192).let { b -> String(b, 0, maxOf(i.read(b), 0), Charsets.UTF_8) } }
                 TextEncoding.looksBroken(head.replace(Regex("<[^>]*>"), " "))
-            }
+            }) return true
+            // HTML tags left in the text of a .txt ("&lt;h2&gt;6.&lt;/h2&gt;" in the chapters): made again,
+            // now without them; up to 4 MB of chapters looked through, the first one found is enough
+            // a whole tag (closed, as stripMarkup takes it): a lone "<a" in the text must not make the
+            // book "outdated" at every opening
+            val escapedTag = Regex("&lt;/?(a|p|br|h[1-6]|ul|ol|li|div|center|pre|font|i|b)\\b(?:(?!&lt;|&gt;).){0,300}&gt;", RegexOption.IGNORE_CASE)
+            var seen = 0L
+            z.entries().asSequence()
+                .filter { it.name.startsWith("OEBPS/") && it.name.endsWith(".xhtml") && it.name != "OEBPS/nav.xhtml" }
+                .takeWhile { seen < 4L * 1024 * 1024 }
+                .any { e -> seen += e.size.coerceAtLeast(0); escapedTag.containsMatchIn(z.getInputStream(e).use { it.readBytes().toString(Charsets.UTF_8) }) }
         }
     } catch (e: Exception) { false }
 
@@ -279,20 +289,51 @@ object BookConverter {
 
     // ------------------------------------------------------------------ TXT
 
+    private val HTML_TAG = Regex("""</?(a|p|br|h[1-6]|ul|ol|li|div|span|i|b|em|strong|center|pre|font|dd|dt|dl|blockquote|hr|tt|small|big|sup|sub|u|table|tr|td|img|html|body|head|title|meta)\b[^<>]*>""", RegexOption.IGNORE_CASE)
+    private val HTML_HEADING = Regex("""<h[1-6]\b[^>]*>(.*?)</h[1-6]\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private const val HEADING_MARK = "\u0002"
+    private val ENTITIES = mapOf("nbsp" to " ", "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'",
+        "laquo" to "«", "raquo" to "»", "mdash" to "—", "ndash" to "–", "hellip" to "…", "shy" to "", "copy" to "©",
+        "bdquo" to "„", "ldquo" to "“", "rdquo" to "”", "lsquo" to "‘", "rsquo" to "’", "minus" to "−", "deg" to "°", "times" to "×")
+
+    /** HTML markup out of a piece of text: comments, tags, character entities as characters. */
+    fun stripMarkup(s: String): String = s
+        .replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), " ")
+        .replace(Regex("&(#[0-9]{1,6}|#[xX][0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});")) { m ->
+            val e = m.groupValues[1]
+            when {
+                e.startsWith("#x") || e.startsWith("#X") -> e.drop(2).toIntOrNull(16)?.takeIf { it in 1..0x10FFFF }?.let { String(Character.toChars(it)) } ?: m.value
+                e.startsWith("#") -> e.drop(1).toIntOrNull()?.takeIf { it in 1..0x10FFFF }?.let { String(Character.toChars(it)) } ?: m.value
+                else -> ENTITIES[e.lowercase()] ?: m.value
+            }
+        }
+        .replace(HTML_TAG, " ")
+
     private val txtHeading = Regex("^(глава|часть|книга|пролог|эпилог|chapter|part|prologue|epilogue)\\b.{0,70}$", RegexOption.IGNORE_CASE)
 
     /** A .txt file's text in whatever encoding it came: UTF-8/16, windows-1251, KOI8-R, DOS (TextEncoding). */
     fun decodeText(bytes: ByteArray): String = TextEncoding.decode(bytes).removePrefix("\uFEFF")
 
     fun parseTxt(file: File): Book {
-        val text = decodeText(file.readBytes()).replace("\r\n", "\n").replace('\r', '\n')
+        var text = decodeText(file.readBytes()).replace("\r\n", "\n").replace('\r', '\n')
+        // a .txt with HTML in it (lib.ru: "<ul><a name=8></a><h2>6.</h2></ul>" between the parts) —
+        // the tags were shown and read aloud (4PDA, 11.2026): headings become chapters, the rest goes
+        val html = HTML_TAG.findAll(text).take(2).count() >= 2
+        if (html) text = HTML_HEADING.replace(text) { m -> "\n\n" + HEADING_MARK + stripMarkup(m.groupValues[1]) + "\n\n" }
         var blocks = text.split(Regex("\\n\\s*\\n"))
         if (blocks.size < 10) blocks = text.split("\n")
         val chapters = ArrayList<Chapter>()
         var cur: Chapter? = null
         for (b in blocks) {
-            val t = cleanWs(b)
+            val t = cleanWs(if (html) stripMarkup(b) else b)
             if (t.isEmpty()) continue
+            if (t.startsWith(HEADING_MARK)) {
+                val title = t.removePrefix(HEADING_MARK).trim()
+                if (title.isEmpty()) continue
+                cur = Chapter(title)
+                chapters.add(cur)
+                continue
+            }
             if (txtHeading.matches(t)) {
                 cur = Chapter(t)
                 chapters.add(cur)
@@ -312,6 +353,16 @@ object BookConverter {
     private const val MAX_CHAPTER_CHARS = 40_000
 
     fun postprocess(book: Book): Book {
+        // HTML tags left in the text of any format (a .txt or FB2 made of lib.ru's HTML): out — they
+        // were read aloud; and a book with them is made again on opening (outdated), so none may stay
+        for (c in book.chapters) {
+            for (i in c.paragraphs.indices) {
+                val p = c.paragraphs[i]
+                if (p.indexOf('<') >= 0 || p.indexOf('&') >= 0) c.paragraphs[i] = cleanWs(stripMarkup(p))
+            }
+            c.paragraphs.removeAll { it.isEmpty() }
+            if (c.title.indexOf('<') >= 0 || c.title.indexOf('&') >= 0) c.title = cleanWs(stripMarkup(c.title))
+        }
         // merge empty / tiny chapters into the following one
         val merged = ArrayList<Chapter>()
         var carryTitle = ""
