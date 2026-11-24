@@ -165,6 +165,13 @@ object CrashReport {
             if (book.exists()) sb.append("----- book.log -----\n")
                 .append(book.readLines().takeLast(300).joinToString("\n")).append("\n\n")
         } catch (_: Exception) { }
+        // synthesis speed with the screen on / off, by the clock: "slow in the evening once the
+        // screen is off" can only be told from it (tolyos, 23.11.2026)
+        try {
+            val rtf = File(context.filesDir, "rtf.log")
+            if (rtf.exists()) sb.append("----- rtf.log -----\n")
+                .append(rtf.readLines().takeLast(400).joinToString("\n")).append("\n\n")
+        } catch (_: Exception) { }
         sb.append("----- logcat -----\n")
         try {
             // Huawei's touch and scheduler lines (two a frame while a page is scrolled) are silenced:

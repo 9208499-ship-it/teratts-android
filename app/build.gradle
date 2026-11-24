@@ -98,6 +98,21 @@ android {
         }
     }
 
+    // A build on GitHub is signed with the same debug key as on the Mac (secret DEBUG_KEYSTORE_B64 →
+    // a file, its path in TERA_DEBUG_KEYSTORE): the new version then installs over the old one and the
+    // phone keeps its settings and books. Without the variable — this computer's own key, as before.
+    signingConfigs {
+        debug {
+            def ks = System.getenv('TERA_DEBUG_KEYSTORE')
+            if (ks && file(ks).exists()) {
+                storeFile file(ks)
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+
     defaultConfig {
         // applicationId is forked so the fork installs side-by-side with the
         // upstream Supertonic TTS APK. The Kotlin/Java namespace above stays
@@ -107,8 +122,8 @@ android {
         applicationId "ru.tolyos.teratts"
         minSdk 24
         targetSdk 36
-        versionCode 218
-        versionName "1.66-tera"
+        versionCode 219
+        versionName "1.67-tera"
 
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"

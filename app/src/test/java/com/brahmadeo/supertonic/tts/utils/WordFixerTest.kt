@@ -6,7 +6,7 @@ import org.junit.Test
 /** Obvious mistakes in words put right by a dictionary (4PDA, 11.2026). Run: ./gradlew testDebugUnitTest */
 class WordFixerTest {
     private val dict = ("хлестнут здесь он был то подполковник командирском ещё стоял стол кто-то кто " +
-        "юго северо и западный танковые снаряды боевой тревоги сидел").split(' ').toSet()
+        "юго северо и западный танковые снаряды боевой тревоги сидел внове").split(' ').toSet()
     private fun fix(t: String, typos: Boolean = true, keep: Set<String> = emptySet()) =
         WordFixer.fix(t, { it in dict }, typos, keep)
 
@@ -36,6 +36,11 @@ class WordFixerTest {
         assertEquals("подполковнкк", fix("подполковнкк", typos = false))
         assertEquals("подполковнкк", fix("подполковнкк", keep = setOf("подполковнкк")))
         assertEquals("хлестнут", fix("хлес- тнут", typos = false))   // hyphen breaks always
+    }
+
+    // one-syllable words are not in the dictionary — not a typo: «вновь» was «put right» to «внове» (tolyos)
+    @Test fun oneSyllableNotATypo() {
+        assertEquals("Вновь и вновь, сквозь.", fix("Вновь и вновь, сквозь."))
     }
 
     @Test fun latinTextUntouched() {

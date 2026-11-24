@@ -62,6 +62,18 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Debug signing key (the Mac's, from the secret)
+        env:
+          KS: ${{ secrets.DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/debug.keystore"
+            echo "TERA_DEBUG_KEYSTORE=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+            echo "Signing with the key from DEBUG_KEYSTORE_B64"
+          else
+            echo "::warning::No DEBUG_KEYSTORE_B64 secret — the APK will not install over the phone's app"
+          fi
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 

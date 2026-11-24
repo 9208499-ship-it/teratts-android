@@ -2961,6 +2961,17 @@ class PlaybackService : Service(), SupertonicTTS.ProgressListener, AudioManager.
                     if (com.brahmadeo.supertonic.tts.utils.RoleModel.loaded()) append(", roles model")
                     append(if (SupertonicTTS.leanMemory) ", lean" else ", pools")
                     append(if (power.isInteractive) ", screen on" else ", screen off")
+                    // what slows the phone down with the screen off (evenings, tolyos 23.11.2026):
+                    // power saving, the system's deep sleep, heat, the battery
+                    if (power.isPowerSaveMode) append(", power saving")
+                    if (power.isDeviceIdleMode) append(", doze")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && power.currentThermalStatus > 0)
+                        append(", heat ${power.currentThermalStatus}")
+                    try {
+                        val bm = getSystemService(android.os.BatteryManager::class.java)
+                        append(", battery ${bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)}%")
+                        if (bm?.isCharging == true) append(" charging")
+                    } catch (_: Exception) { }
                 }
                 com.brahmadeo.supertonic.tts.utils.MemLog.log(state)
                 delay(60_000L)

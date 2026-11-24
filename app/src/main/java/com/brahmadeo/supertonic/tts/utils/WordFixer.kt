@@ -12,7 +12,8 @@ import java.io.File
  *  2. digits for letters after scanning: «3десь» → «здесь», «0н» → «он», «6ыл» → «был» — only when
  *     the word comes out a dictionary word;
  *  3. a typo of one letter (a letter missed, one too many, two swapped, a wrong one): only a word in
- *     small letters (a capital — most likely a name), five letters or more, not in the dictionary,
+ *     small letters (a capital — most likely a name), five letters or more, of two syllables or more
+ *     (the dictionary has no words of one: «вновь», «сквозь» are not typos), not in the dictionary,
  *     with exactly one dictionary word one letter away; not a word of the personal dictionary
  *     (a rule for a word keeps it as it is). It can be turned off (settings: «Исправлять опечатки»).
  *
@@ -27,6 +28,7 @@ object WordFixer {
     private val HYPHEN_BREAK = Regex("""([А-Яа-яЁё]+)-([ \t]+|[ \t]*\n[ \t]*)?([а-яё]+)""")
     private val WITH_DIGITS = Regex("""(?<![\p{L}\d])[А-Яа-яЁё0-9]*[0-9][А-Яа-яЁё0-9]*(?![\p{L}\d])""")
     private val LOWER_WORD = Regex("""(?<![\p{L}\d\-])[а-яё]{5,}(?![\p{L}\d\-])""")
+    private const val VOWELS = "аеёиоуыэюя"
     private val DIGIT_LETTER = mapOf('0' to 'о', '3' to 'з', '6' to 'б', '4' to 'ч')
 
     /** The text with the obvious mistakes put right; [isWord] answers for a word in small letters. */
@@ -63,7 +65,9 @@ object WordFixer {
                 val w = m.value
                 if (w in keep) return@replace w
                 memo.getOrPut(w) {
-                    if (known(w)) w else {
+                    // one syllable: the dictionary has no such words at all, so «not in it» says nothing —
+                    // «вновь» was «put right» to «внове» (tolyos)
+                    if (known(w) || w.count { it in VOWELS } <= 1) w else {
                         val found = HashSet<String>()
                         for (c in edits1(w)) if (c != w && known(c)) { found.add(c.replace('ё', 'е')); if (found.size > 1) break }
                         // ё / е are one word: the dictionary's spelling of it, if it has one

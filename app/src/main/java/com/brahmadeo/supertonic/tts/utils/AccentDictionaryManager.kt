@@ -432,7 +432,10 @@ object AccentDictionaryManager {
                 bin.lookup(lower.toByteArray(Charsets.UTF_8))
             } else {
                 map[lower]
-            } ?: continue
+            }
+                // one-syllable words are not in the dictionary — and with them the ё («рев» → «рёв»)
+                ?: (if (lang.isEmpty() || lang.startsWith("ru")) YoMono.lookup(lower) else null)
+                ?: continue
             val cased = applyCasing(original, dictHit)
             // appendReplacement treats $ and \ specially — quoteReplacement
             // does the escape in a single pass without two intermediate Strings.
