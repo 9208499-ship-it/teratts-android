@@ -69,3 +69,44 @@ jobs:
           name: TeraTTS-unsigned-arm64-${{ github.sha }}
           path: app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
           if-no-files-found: error
+
+      # The phone's app is signed with the owner's own key (certificate «tolyos»). With the secrets
+      # RELEASE_KEYSTORE_B64 (the key file) and RELEASE_KEYSTORE_PASSWORD (optionally RELEASE_KEY_PASSWORD if the
+      # key has its own password) the APK is signed here with that key, so it installs over the old version.
+      - name: Sign arm64 APK with the owner's key
+        env:
+          KS_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASS_SECRET: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then
+            echo "::warning::No RELEASE_KEYSTORE_B64 / RELEASE_KEYSTORE_PASSWORD secrets — APK left unsigned"
+            exit 0
+          fi
+          KS="$RUNNER_TEMP/release.keystore"
+          echo "$KS_B64" | base64 -d > "$KS"
+          export KEY_PASS="${KEY_PASS_SECRET:-$KS_PASS}"
+          ALIAS=$(keytool -list -keystore "$KS" -storepass:env KS_PASS 2>/dev/null \
+                  | grep -iE 'PrivateKeyEntry' | head -1 | cut -d, -f1)
+          [ -n "$ALIAS" ] || { echo "::error::Could not read the key (wrong password?)"; exit 1; }
+          BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)
+          VER=$(grep -m1 versionName app/build.gradle | sed -E 's/.*"([0-9.]+).*/\1/')
+          OUT="TeraTTS-$VER-arm64.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-pass env:KS_PASS --ks-key-alias "$ALIAS" --key-pass env:KEY_PASS \
+            --out "$OUT" app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+          rm -f "$KS"
+          FP=$("$BT/apksigner" verify --print-certs "$OUT" | grep -m1 'SHA-256' | awk '{print $NF}')
+          echo "Signed $OUT, certificate SHA-256 $FP"
+          if [ "$FP" != "81149a16e5bf1c64b08c3cc7fefcbda5bbe7ad7c341ba01c4f87fac5d5ce4266" ]; then
+            echo "::error::This is not the key the phone's app was signed with — it would not install over it"
+            exit 1
+          fi
+          echo "SIGNED_APK=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload signed arm64 APK
+        if: env.SIGNED_APK != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: TeraTTS-signed-arm64-${{ github.sha }}
+          path: ${{ env.SIGNED_APK }}
+          if-no-files-found: error
