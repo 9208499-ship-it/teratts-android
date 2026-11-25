@@ -144,6 +144,8 @@ class EbookOutlineActivity : ComponentActivity() {
         var publication by remember { mutableStateOf<Publication?>(null) }
         var isLoading by remember { mutableStateOf(true) }
         var isExtracting by remember { mutableStateOf(false) }
+        // «Сохранить исправленную книгу»: what the overlay says while the book is gone through
+        var fixSaving by remember { mutableStateOf<String?>(null) }
         var selectedTabIndex by remember { mutableIntStateOf(0) }
         
         var isPdf by remember { mutableStateOf(ebookFile.extension.lowercase() == "pdf") }
@@ -203,6 +205,17 @@ class EbookOutlineActivity : ComponentActivity() {
                             IconButton(onClick = onBack) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                             }
+                        },
+                        actions = {
+                            val pub = publication
+                            if (!isLoading && pub != null) {
+                                IconButton(enabled = fixSaving == null, onClick = {
+                                    saveFixedBook(ebookFile, pub, isPdf) { fixSaving = it }
+                                }) {
+                                    Icon(androidx.compose.material.icons.Icons.Default.Spellcheck,
+                                        contentDescription = getString(R.string.book_fix_save))
+                                }
+                            }
                         }
                     )
                     if (!isLoading && publication != null) {
@@ -234,7 +247,7 @@ class EbookOutlineActivity : ComponentActivity() {
                     }
                 }
 
-                if (isExtracting) {
+                if (isExtracting || fixSaving != null) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
@@ -246,10 +259,36 @@ class EbookOutlineActivity : ComponentActivity() {
                         ) {
                             CircularProgressIndicator()
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text(getString(R.string.outline_opening), fontWeight = FontWeight.Bold)
+                            Text(fixSaving ?: getString(R.string.outline_opening), fontWeight = FontWeight.Bold)
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /** «Сохранить исправленную книгу» (BookFixExport); [status] — the overlay's words, null when done. */
+    private fun saveFixedBook(file: File, publication: Publication, isPdf: Boolean, status: (String?) -> Unit) {
+        val ctx = this@EbookOutlineActivity
+        if (!com.brahmadeo.supertonic.tts.utils.WordFixer.available(ctx)) {
+            Toast.makeText(ctx, getString(R.string.book_fix_no_dict), Toast.LENGTH_LONG).show()
+            return
+        }
+        val title = EbookManager.customName(ctx, file.absolutePath)
+            ?: EbookManager.readableTitle(publication.metadata.title?.takeIf { !it.startsWith("book_") })
+            ?: EbookManager.readableTitle(EbookManager.originalName(ctx, file.absolutePath))
+            ?: file.nameWithoutExtension
+        status(getString(R.string.book_fix_saving, 0))
+        CoroutineScope(Dispatchers.Main).launch {
+            val result = com.brahmadeo.supertonic.tts.utils.BookFixExport.save(ctx, file, publication, title, isPdf) { done, all ->
+                val pct = if (all > 0) done * 100 / all else 0
+                runOnUiThread { status(getString(R.string.book_fix_saving, pct)) }
+            }
+            status(null)
+            result.onSuccess {
+                Toast.makeText(ctx, getString(R.string.book_fix_saved, it.fixes, it.folder), Toast.LENGTH_LONG).show()
+            }.onFailure {
+                Toast.makeText(ctx, getString(R.string.book_fix_failed), Toast.LENGTH_LONG).show()
             }
         }
     }

@@ -6,7 +6,7 @@ import org.junit.Test
 /** Obvious mistakes in words put right by a dictionary (4PDA, 11.2026). Run: ./gradlew testDebugUnitTest */
 class WordFixerTest {
     private val dict = ("хлестнут здесь он был то подполковник командирском ещё стоял стол кто-то кто " +
-        "юго северо и западный танковые снаряды боевой тревоги сидел внове").split(' ').toSet()
+        "юго северо и западный танковые снаряды боевой тревоги сидел внове знаю было будет мог хороший неделя").split(' ').toSet()
     private fun fix(t: String, typos: Boolean = true, keep: Set<String> = emptySet()) =
         WordFixer.fix(t, { it in dict }, typos, keep)
 
@@ -46,5 +46,23 @@ class WordFixerTest {
     @Test fun latinTextUntouched() {
         val t = "Hello 3D world, co-operation."
         assertEquals(t, fix(t))
+    }
+
+    // «не» run into a verb (owner, 11.2026)
+    @Test fun neWithVerbSplit() {
+        assertEquals("Не знаю, не было, не будет, не мог.", fix("Незнаю, небыло, небудет, немог."))
+    }
+
+    @Test fun neNotVerbOrKnownStays() {
+        // an adjective, a dictionary word, typos off, a personal word
+        assertEquals("нехороший неделя", fix("нехороший неделя"))
+        assertEquals("незнаю", fix("незнаю", typos = false))
+        assertEquals("незнаю", fix("незнаю", keep = setOf("незнаю")))
+    }
+
+    @Test fun fixesKeepTheWordsAround() {
+        val out = ArrayList<WordFixer.Fix>()
+        WordFixer.fix("Он сказал: незнаю.", { it in dict }, true, emptySet(), out)
+        assertEquals(listOf(WordFixer.Fix("незнаю", "не знаю", "Он сказал: незнаю.")), out)
     }
 }

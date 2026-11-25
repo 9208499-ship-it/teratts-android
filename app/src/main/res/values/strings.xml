@@ -236,7 +236,18 @@
     <string name="preroll_desc">Build up several sentences of synthesized audio in RAM (~1-3 MB) before playback starts. Smooths out pauses between sentences on weak devices. Costs a longer wait at the very beginning of playback.</string>
     <string name="preroll_sentences_fmt">Sentences buffered before start: %1$d</string>
     <string name="fix_typos_title">Fix typos</string>
-    <string name="fix_typos_desc">A word with a one-letter mistake (missing, extra, swapped, wrong) is put right if the Silero dictionary has exactly one word that fits. Only words in small letters, 5 letters or more: names are left alone. A word of the personal dictionary stays as it is. Broken hyphenation and digits for letters are always fixed. Needs the Silero stress dictionary. Applies to a chapter the next time it is opened.</string>
+    <string name="fix_typos_desc">A word with a one-letter mistake (missing, extra, swapped, wrong) is put right if the Silero dictionary has exactly one word that fits. Only words in small letters, 5 letters or more: names are left alone. A word of the personal dictionary stays as it is. «не» run into a verb is split («незнаю» → «не знаю»). Broken hyphenation and digits for letters are always fixed. Needs the Silero stress dictionary. Applies to a chapter the next time it is opened.</string>
+    <string name="book_fix_save">Save the corrected book</string>
+    <string name="book_fix_saving">Correcting the book… %1$d%%</string>
+    <string name="book_fix_saved">Saved to %2$s: the book and the list of fixes (%1$d)</string>
+    <string name="book_fix_failed">Could not save the corrected book</string>
+    <string name="book_fix_no_dict">Needs the Silero stress dictionary (Stress and dictionary)</string>
+    <string name="book_fix_pages">Pages %1$d–%2$d</string>
+    <string name="book_fix_suffix_book">corrected</string>
+    <string name="book_fix_suffix_list">fixes</string>
+    <string name="book_fix_list_header">Fixes in «%1$s»: %2$d</string>
+    <string name="book_fix_list_note">Words TeraTTS put right by itself. Look through the doubtful ones: a word of the personal dictionary is never changed.</string>
+    <string name="book_fix_list_none">Nothing was put right.</string>
     <string name="custom_rules_header">Custom Rules</string>
     <string name="lexicon_search_hint">Search my words</string>
 

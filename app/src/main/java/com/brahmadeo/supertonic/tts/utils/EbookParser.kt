@@ -48,7 +48,8 @@ class EbookParser(private val context: Context) {
         }
     }
 
-    suspend fun extractText(publication: Publication, link: Link? = null): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun extractText(publication: Publication, link: Link? = null,
+                            fixes: MutableList<WordFixer.Fix>? = null): Result<String> = withContext(Dispatchers.IO) {
         try {
             val startUrl = link?.url()?.toString()
             val startPath = startUrl?.substringBefore('#')
@@ -76,11 +77,11 @@ class EbookParser(private val context: Context) {
                 val result = chapterText.toString().trim()
                 // obvious mistakes in the words put right (WordFixer): the same for the screen, the
                 // voice and the chapters made beforehand — all of them take the text from here
-                if (result.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, result))
+                if (result.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, result, fixes))
             }
 
             val fallbackText = extractFallback(publication, link)
-            if (fallbackText.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, fallbackText))
+            if (fallbackText.isNotBlank()) return@withContext Result.success(WordFixer.apply(context, fallbackText, fixes))
 
             Result.failure(Exception("No text content could be extracted."))
         } catch (e: Exception) {
@@ -95,16 +96,17 @@ class EbookParser(private val context: Context) {
         return@withContext extractPagesReadium(publication, pageIndices, isPdf).map { WordFixer.apply(context, it) }
     }
 
-    suspend fun extractPages(file: File, publication: Publication, pageIndices: List<Int>): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun extractPages(file: File, publication: Publication, pageIndices: List<Int>,
+                             fixes: MutableList<WordFixer.Fix>? = null): Result<String> = withContext(Dispatchers.IO) {
         val isPdf = file.extension.lowercase() == "pdf" ||
                     publication.metadata.conformsTo.contains(Publication.Profile.PDF) ||
                     publication.readingOrder.firstOrNull()?.mediaType?.matches(org.readium.r2.shared.util.mediatype.MediaType.PDF) == true
 
         // a PDF's words broken at line ends («хлес-\nтнут») are the commonest of all
         if (isPdf) {
-            return@withContext extractPagesPdfBox(file, pageIndices).map { WordFixer.apply(context, it) }
+            return@withContext extractPagesPdfBox(file, pageIndices).map { WordFixer.apply(context, it, fixes) }
         } else {
-            return@withContext extractPagesReadium(publication, pageIndices, isPdf).map { WordFixer.apply(context, it) }
+            return@withContext extractPagesReadium(publication, pageIndices, isPdf).map { WordFixer.apply(context, it, fixes) }
         }
     }
 
