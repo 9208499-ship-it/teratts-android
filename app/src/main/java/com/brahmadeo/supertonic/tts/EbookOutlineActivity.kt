@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Spellcheck
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -212,7 +213,7 @@ class EbookOutlineActivity : ComponentActivity() {
                                 IconButton(enabled = fixSaving == null, onClick = {
                                     saveFixedBook(ebookFile, pub, isPdf) { fixSaving = it }
                                 }) {
-                                    Icon(androidx.compose.material.icons.Icons.Default.Spellcheck,
+                                    Icon(Icons.Default.Spellcheck,
                                         contentDescription = getString(R.string.book_fix_save))
                                 }
                             }
