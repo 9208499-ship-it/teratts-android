@@ -6,9 +6,13 @@ import org.junit.Test
 /** Obvious mistakes in words put right by a dictionary (4PDA, 11.2026). Run: ./gradlew testDebugUnitTest */
 class WordFixerTest {
     private val dict = ("хлестнут здесь он был то подполковник командирском ещё стоял стол кто-то кто " +
-        "юго северо и западный танковые снаряды боевой тревоги сидел внове знаю было будет мог хороший неделя").split(' ').toSet()
+        "юго северо и западный танковые снаряды боевой тревоги сидел внове знаю было будет мог хороший неделя болото незнаю наконецто").split(' ').toSet()
+    // the Silero dictionary has «незнаю» and «наконецто» too: rules 4 and 5 go by their lists
+    private val neVerbs = setOf("знаю", "было", "будет", "мог")
+    private val hyphened = mapOf("наконецто" to "наконец-то", "коекто" to "кое-кто", "ктонибудь" to "кто-нибудь",
+        "всетаки" to "всё-таки")
     private fun fix(t: String, typos: Boolean = true, keep: Set<String> = emptySet()) =
-        WordFixer.fix(t, { it in dict }, typos, keep)
+        WordFixer.fix(t, { it in dict }, typos, keep, null, neVerbs, hyphened)
 
     @Test fun hyphenBreaks() {
         assertEquals("Так хлестнут и хлестнут.", fix("Так хлес- тнут и хлес-тнут."))
@@ -54,7 +58,7 @@ class WordFixerTest {
     }
 
     @Test fun neNotVerbOrKnownStays() {
-        // an adjective, a dictionary word, typos off, a personal word
+        // not in the list (an adjective, «неделю»), typos off, a personal word
         assertEquals("нехороший неделя", fix("нехороший неделя"))
         assertEquals("незнаю", fix("незнаю", typos = false))
         assertEquals("незнаю", fix("незнаю", keep = setOf("незнаю")))
@@ -62,7 +66,14 @@ class WordFixerTest {
 
     @Test fun fixesKeepTheWordsAround() {
         val out = ArrayList<WordFixer.Fix>()
-        WordFixer.fix("Он сказал: незнаю.", { it in dict }, true, emptySet(), out)
+        WordFixer.fix("Он сказал: незнаю.", { it in dict }, true, emptySet(), out, neVerbs)
         assertEquals(listOf(WordFixer.Fix("незнаю", "не знаю", "Он сказал: незнаю.")), out)
+    }
+
+    // a particle's lost hyphen (owner's screenshot, 11.2026)
+    @Test fun particleHyphen() {
+        assertEquals("Наконец-то, наконец-то, кое-кто, кто-нибудь, всё-таки, болото.",
+            fix("Наконецто, наконецто, коекто, ктонибудь, всетаки, болото.", typos = false))
+        assertEquals("гдето", fix("гдето"))   // not in the list
     }
 }
