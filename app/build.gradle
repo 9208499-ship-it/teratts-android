@@ -122,8 +122,8 @@ android {
         applicationId "ru.tolyos.teratts"
         minSdk 24
         targetSdk 36
-        versionCode 221
-        versionName "1.69-tera"
+        versionCode 222
+        versionName "1.70-tera"
 
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a", "x86", "x86_64"

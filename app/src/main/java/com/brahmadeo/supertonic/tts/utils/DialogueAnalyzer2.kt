@@ -2002,6 +2002,18 @@ object DialogueAnalyzer2 {
         val voiceIdx = head.indexOfFirst { it.lowercase() == "голос" }
         val owner = if (voiceIdx >= 0) head.getOrNull(voiceIdx + 1) else null
         var firstVerbG: G? = null
+        // «один из бойцов Первого Легиона указал», «спросила одна из девушек»: someone of a group speaks,
+        // not «Легиона» (a capital word of the group's name) — only the sex is known (tolyos, 11.2026)
+        run {
+            val v = head.withIndex().firstOrNull { (i, w) -> pastGender(w, i == 0) != null }?.index ?: -1
+            val k = head.indices.firstOrNull { k -> head[k].lowercase().replace('ё', 'е') in ONE_OF &&
+                head.getOrNull(k + 1)?.lowercase() == "из" && (v < 0 || k < v || k == v + 1) && !afterPreposition(head, k) }
+            if (k != null) {
+                val vg = if (v >= 0) pastGender(head[v], v == 0) else null
+                val g = when (head[k].lowercase()) { "один" -> G.M; "одна" -> G.F; else -> vg }
+                return Hint(null, null, null, g ?: vg)
+            }
+        }
         if (owner != null) {
             val forms = baseForms(owner)
             val g = (0 until voiceIdx).firstNotNullOfOrNull { pastGender(head[it], it == 0) }
@@ -2064,6 +2076,8 @@ object DialogueAnalyzer2 {
         if (head.take(6).any { it == "я" || it == "Я" }) return Hint(null, null, null, tagG, hero = true)
         return Hint(null, null, null, tagG)
     }
+
+    private val ONE_OF = setOf("один", "одна", "кто-то", "кто-нибудь", "некто")
 
     /** Machines and acronyms ("ИИ", "компьютер") are rarely what "он/она" refers to. */
     /**

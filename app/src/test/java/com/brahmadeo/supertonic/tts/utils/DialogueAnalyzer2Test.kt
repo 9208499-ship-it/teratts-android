@@ -53,4 +53,13 @@ class DialogueAnalyzer2Test {
         assertEquals(Role.MALE, roleAt(t, "Кто-то"))
         assertEquals(Role.NARRATOR, roleAt(t, "сказал"))
     }
+
+    // «один из бойцов Первого Легиона указал»: not «Легиона» (a woman's name by its «-а») — a man of the group (tolyos, 11.2026)
+    @Test fun oneOfAGroupIsNotTheGroupsName() {
+        val t = "– Его убил не ты, а застрелил герд Тарасов! – один из бойцов Первого Легиона указал на своего командира."
+        assertEquals(Role.MALE, roleAt(t, "Его убил"))
+        assertEquals(null, DialogueAnalyzer2.analyze(t).spans.first { it.role == Role.MALE }.speaker)
+        val u = "– Куда теперь? – спросила одна из девушек Северной Стражи."
+        assertEquals(Role.FEMALE, roleAt(u, "Куда теперь"))
+    }
 }
