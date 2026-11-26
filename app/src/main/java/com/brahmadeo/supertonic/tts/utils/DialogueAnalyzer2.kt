@@ -821,6 +821,8 @@ object DialogueAnalyzer2 {
 
             var speaker: String? = null
             var gender: G? = null
+            // the speaker came from the paragraph before («я постарался предостеречь свою подругу:»)
+            var byIntro = false
             val forced = prior?.overrides?.takeIf { it.isNotEmpty() }?.let { ov ->
                 p.speech.asSequence().mapNotNull { (a, b, _) -> ov[speechKey(text.substring(a, b))] }.firstOrNull()
             }
@@ -903,6 +905,7 @@ object DialogueAnalyzer2 {
             } else if (authors.isEmpty() && pendingQuoteSpeaker != null && pendingFromIntro) {
                 // "Раздался голос 896‑го:" followed by a dash line
                 speaker = pendingQuoteSpeaker
+                byIntro = true
                 gender = genderOf(speaker)
                 pendingQuoteSpeaker = null
                 pendingFromIntro = false
@@ -1136,7 +1139,9 @@ object DialogueAnalyzer2 {
                 }
             }
             probeTL.get()?.add(Probe(p.start, p.end, p.speech.map { intArrayOf(it.first, it.second) }, authors.map { intArrayOf(it.first, it.second) },
-                when { ownHint == null -> if (authors.isEmpty() && introBefore != null) 5 else 0
+                // an introduction before — the role model leaves it (it gave «— Иришка, …» after «я постарался
+                // предостеречь свою подругу:» to Иришка herself, tolyos 11.2026)
+                when { ownHint == null -> if (authors.isEmpty() && (introBefore != null || byIntro)) 5 else 0
                        ownHint.name != null -> 4; ownHint.noun != null -> 3; ownHint.hero -> 2; ownHint.pronoun != null -> 1; else -> 0 },
                 p.quoted, speaker))
             out.addAll(spans)
