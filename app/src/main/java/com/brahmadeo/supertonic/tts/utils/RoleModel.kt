@@ -665,6 +665,10 @@ object RoleModel {
             if (overrides.isNotEmpty() && l.speech.any { overrides[DialogueAnalyzer2.speechKey(text.substring(it[0], it[1]))] != null }) continue
             val g = resolve(g0.speaker).let { if (it == g0.speaker) g0 else Guess(it, g0.prob, g0.kind) }
             if (l.quoted || g.speaker.equals(l.rules, ignoreCase = true)) continue
+            // a line the model is not asked about now (RoleWindows' targets): a guess kept from before a rules'
+            // change does not count — after 1.72 the hero's line «Я вздохнул и проговорил:» kept the girl's voice
+            // from the chapter's stored guesses until they were made anew
+            if ((l.kind == 1 || l.kind == 5) && l.rules.isNotEmpty()) continue
             val ok = if (l.rules.isEmpty()) g.prob >= FILL else g.prob >= (if (l.kind == 0) HARD_OVER else EXPL_OVER)
             if (!ok) continue
             val role = genderOf(g.speaker) ?: chars[g.speaker]?.role ?: DialogueAnalyzer2.Role.SPEECH
