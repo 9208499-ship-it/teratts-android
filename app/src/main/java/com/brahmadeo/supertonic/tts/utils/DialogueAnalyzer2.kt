@@ -907,6 +907,17 @@ object DialogueAnalyzer2 {
                 speaker = pendingQuoteSpeaker
                 byIntro = true
                 gender = genderOf(speaker)
+                // «Я вздохнул и проговорил грустно:» — the hero speaks: the book is told by him as surely as with
+                // «— …, — сказал я» (a chapter with no such remark lost the hero's lines to «unknown», and the role
+                // model gave them to the girl he was talking to, tolyos 11.2026); his sex from that verb
+                if (speaker == HERO && !third) {
+                    heroAttributed++
+                    if (gender == null && pi > 0) {
+                        val q = parsed[pi - 1]
+                        val last = text.substring(q.start, q.end).trimEnd().split(Regex("""(?<=[.!?…])\s+""")).last()
+                        gender = when (remarkSex(last)) { Role.MALE -> G.M; Role.FEMALE -> G.F; else -> null }
+                    }
+                }
                 pendingQuoteSpeaker = null
                 pendingFromIntro = false
             } else if (h != null) {

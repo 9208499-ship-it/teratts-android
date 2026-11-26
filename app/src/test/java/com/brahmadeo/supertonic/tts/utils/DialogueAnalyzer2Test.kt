@@ -71,4 +71,14 @@ class DialogueAnalyzer2Test {
         // the object of someone's verb stays not the speaker
         assertEquals(Role.MALE, roleAt("– Пойдём, – я обнял Тамару.", "Пойдём"))
     }
+
+    // «Я вздохнул и проговорил грустно:» and a line with no remark: the hero's, a man's — the chapter had no
+    // «сказал я», his line was left «unknown» and the role model gave it to the girl (tolyos, 11.2026)
+    @Test fun heroIntroWithoutAnyRemarkIsTheHeros() {
+        val t = "Иришка смотрела на меня и молчала. Я вздохнул и проговорил грустно:\n" +
+            "– Получается, я уже тут тридцать часов прохлаждаюсь… Постойте, друзья, неужели вы всё это время были со мной?!\n" +
+            "Девушка почему-то смутилась и ответила не сразу."
+        assertEquals(Role.MALE, roleAt(t, "Получается"))
+        assertEquals("Я", DialogueAnalyzer2.analyze(t).spans.first { it.role == Role.MALE }.speaker)
+    }
 }
