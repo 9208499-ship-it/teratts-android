@@ -62,4 +62,13 @@ class DialogueAnalyzer2Test {
         val u = "– Куда теперь? – спросила одна из девушек Северной Стражи."
         assertEquals(Role.FEMALE, roleAt(u, "Куда теперь"))
     }
+
+    // «— Жаль… — кажется, Тамару мой отказ расстроил»: hers, not a man's by «расстроил» (tolyos, 11.2026)
+    @Test fun nameInAnotherCaseBeforeAThingsVerb() {
+        val t = "– Жаль… – кажется, Тамару мой отказ расстроил. – Хотя, наверное, ты прав."
+        assertEquals(Role.FEMALE, roleAt(t, "Жаль"))
+        assertEquals(Role.FEMALE, roleAt(t, "Хотя"))
+        // the object of someone's verb stays not the speaker
+        assertEquals(Role.MALE, roleAt("– Пойдём, – я обнял Тамару.", "Пойдём"))
+    }
 }

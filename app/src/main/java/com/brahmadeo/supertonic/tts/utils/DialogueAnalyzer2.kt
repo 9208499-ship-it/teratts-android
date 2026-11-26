@@ -1860,7 +1860,8 @@ object DialogueAnalyzer2 {
     /** The sex the author words give their speaker: their first past-tense verb («спросила она», «ответил Пётр»); for RoleModel (1.56). */
     fun remarkSex(author: String): Role? {
         val ws = WORD.findAll(author).map { it.value }.toList()
-        return when (ws.withIndex().firstNotNullOfOrNull { (i, w) -> pastGender(w, i == 0) }) {
+        // «Тамару мой отказ расстроил»: her sex, not the verb's
+        return when (experiencer(ws.take(16))?.verbGender ?: ws.withIndex().firstNotNullOfOrNull { (i, w) -> pastGender(w, i == 0) }) {
             G.M -> Role.MALE; G.F -> Role.FEMALE; null -> null
         }
     }
@@ -2051,6 +2052,9 @@ object DialogueAnalyzer2 {
                 }
             }
         }
+        // «кажется, Тамару мой отказ расстроил»: a name in another case before a verb whose subject is
+        // some thing («отказ») — the line is hers, and «расстроил» says nothing of her sex (tolyos, 11.2026)
+        experiencer(head)?.let { return it }
         // the speech verb's sex when there is one ("…из которой я не выбрался…, предложила" is hers)
         val tagG = speechG ?: firstVerbG
         // no verb+subject pair: a name, then a role noun (the last one), then pronouns
@@ -2075,6 +2079,30 @@ object DialogueAnalyzer2 {
         }
         if (head.take(6).any { it == "я" || it == "Я" }) return Hint(null, null, null, tagG, hero = true)
         return Hint(null, null, null, tagG)
+    }
+
+    /** [hint]: «Тамару мой отказ расстроил», «Оле этот ответ не понравился» — the name's own form and sex. */
+    private fun experiencer(head: List<String>): Hint? {
+        for (k in head.indices) {
+            val w = head[k]
+            if (w.length < 4 || !w[0].isUpperCase() || k > 0 && !head[k - 1].any { it.isLetter() }) continue
+            val lw = w.lowercase()
+            val stem = lw.dropLast(1)
+            val noms = when (lw.last()) { 'у' -> listOf(stem + "а"); 'ю' -> listOf(stem + "я"); 'е' -> listOf(stem + "а", stem + "я"); else -> emptyList() }
+            val nom = noms.firstOrNull { NameGender.known(it) && !NameGender.known(lw) } ?: continue
+            val sex = when (NameGender.guess(nom)) { NameGender.G.M -> G.M; NameGender.G.F -> G.F; null -> continue }
+            // not the object of a verb or a preposition before it, not «я обнял Тамару»
+            val before = head.getOrNull(k - 1)?.lowercase()
+            if (before != null && (before in prepositions || before == "я" || pastGender(before, k - 1 == 0) != null ||
+                    before.endsWith("ть") || before.endsWith("ться"))) return null
+            // its verb: past tense within four words; between them and right after it — no one who could be its subject
+            val v = (k + 1..minOf(k + 4, head.size - 1)).firstOrNull { pastGender(head[it], false) != null } ?: return null
+            fun person(x: String) = x.lowercase().let { it == "я" || it == "он" || it == "она" || it in speakerNouns } ||
+                (x[0].isUpperCase() && x.any { it.isLetter() } && isNameWord(x))
+            if ((k + 1 until v).any { person(head[it]) } || head.getOrNull(v + 1)?.let { person(it) } == true) return null
+            return Hint(nom.replaceFirstChar { it.uppercase() }, null, null, sex)
+        }
+        return null
     }
 
     private val ONE_OF = setOf("один", "одна", "кто-то", "кто-нибудь", "некто")
