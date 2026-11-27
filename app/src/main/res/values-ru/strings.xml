@@ -469,6 +469,8 @@
     <string name="library_title">Библиотека</string>
     <string name="library_empty">Здесь будут открытые книги</string>
     <string name="library_open_first">Открыть книгу</string>
+    <string name="web_loading">Загружаю страницу…</string>
+    <string name="web_failed">Не удалось открыть страницу: %1$s</string>
     <string name="settings_voice">Голос и модель</string>
     <string name="settings_voice_desc">Основной голос, модель (TeraTTS / Pocket TTS), живость, яркость, свои голоса</string>
     <string name="settings_reading">Чтение вслух</string>

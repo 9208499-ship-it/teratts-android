@@ -469,6 +469,8 @@
     <string name="library_title">Library</string>
     <string name="library_empty">Books you open will be here</string>
     <string name="library_open_first">Open a book</string>
+    <string name="web_loading">Loading the page…</string>
+    <string name="web_failed">Could not open the page: %1$s</string>
     <string name="settings_voice">Voice and model</string>
     <string name="settings_voice_desc">Main voice, model (TeraTTS / Pocket TTS), liveliness, brightness, your own voices</string>
     <string name="settings_reading">Reading aloud</string>

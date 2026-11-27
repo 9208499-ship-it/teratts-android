@@ -316,15 +316,21 @@ class MainActivity : ComponentActivity() {
                         onLibraryClick = if (AssetManager.isReady(this@MainActivity)) ({ openLibraryHome() }) else null,
                         inputText = viewModel.inputText.value,
                         onInputTextChange = { 
+                            val before = viewModel.inputText.value
                             viewModel.inputText.value = it
                             saveStringPref("last_text", it)
+                            // a link pasted into the box (not typed letter by letter): the page's text instead
+                            if (it.length - before.length >= 10) com.brahmadeo.supertonic.tts.utils.WebPage.linkIn(it)?.let { url ->
+                                if (com.brahmadeo.supertonic.tts.utils.WebPage.linkIn(before) == null) loadWebPage(url, play = false)
+                            }
                         },
                         placeholderText = placeholder,
                         isInitializing = viewModel.isInitializing.value,
                         isSynthesizing = viewModel.isSynthesizing.value,
                         onSynthesizeClick = {
                             val textToPlay = viewModel.inputText.value.ifEmpty { placeholder }
-                            generateAndPlay(textToPlay)
+                            val url = com.brahmadeo.supertonic.tts.utils.WebPage.linkIn(textToPlay)
+                            if (url != null) loadWebPage(url, play = true) else generateAndPlay(textToPlay)
                         },
 
                         languages = localizedLanguages,
@@ -566,6 +572,29 @@ class MainActivity : ComponentActivity() {
         config.setLocales(android.os.LocaleList(locale))
         val localizedContext = context.createConfigurationContext(config)
         return localizedContext.resources.getString(resId)
+    }
+
+    /**
+     * A web page by its link (shared from the browser, pasted, or played): its article into the text box,
+     * and read at once if [play]. The fetching is in the background; a page that did not open — a message.
+     */
+    private var webJob: kotlinx.coroutines.Job? = null
+    private fun loadWebPage(url: String, play: Boolean) {
+        webJob?.cancel()
+        Toast.makeText(this, getString(R.string.web_loading), Toast.LENGTH_SHORT).show()
+        webJob = CoroutineScope(Dispatchers.Main).launch {
+            val r = withContext(Dispatchers.IO) { runCatching { com.brahmadeo.supertonic.tts.utils.WebPage.load(url) } }
+            r.onSuccess { page ->
+                val text = prepareTextForTts(page.text, viewModel.currentLang.value)
+                viewModel.inputText.value = text
+                saveStringPref("last_text", text)
+                if (play) generateAndPlay(text)
+            }.onFailure { e ->
+                Log.w("MainActivity", "web page $url: ${e.message}")
+                val why = (e as? org.jsoup.HttpStatusException)?.let { "HTTP ${it.statusCode}" } ?: e.message ?: e.javaClass.simpleName
+                Toast.makeText(this@MainActivity, getString(R.string.web_failed, why), Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun saveStringPref(key: String, value: String) {
@@ -850,7 +879,9 @@ class MainActivity : ComponentActivity() {
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             // a text sent from an app that read it in a wrong encoding ("Âàñèëèé") is turned back
             val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.let { com.brahmadeo.supertonic.tts.utils.TextEncoding.repair(it) }
-            if (!sharedText.isNullOrEmpty()) {
+            val url = com.brahmadeo.supertonic.tts.utils.WebPage.linkIn(sharedText)
+            if (url != null) loadWebPage(url, play = true)
+            else if (!sharedText.isNullOrEmpty()) {
                 viewModel.inputText.value = prepareTextForTts(sharedText, viewModel.currentLang.value)
             }
         } else {

@@ -21,3 +21,6 @@
 
 # ONNX Runtime (Java API): its JNI code looks classes up by name (ai/onnxruntime/TensorInfo …) — R8 must not rename or drop them
 -keep class ai.onnxruntime.** { *; }
+
+# jsoup (WebPage): optional regex engine it can use
+-dontwarn com.google.re2j.**
