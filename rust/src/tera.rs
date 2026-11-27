@@ -963,6 +963,48 @@ pub fn speech_end(wav: &[f32], predicted: usize) -> usize {
     end
 }
 
+/// A click the vocoder makes in the very last frame of a phrase (10–12 ms, after the speech has
+/// already died away): cut off. With no room after the predicted duration ([`TAIL_ROOM_S`]) it
+/// still came in about one phrase of three for ru_f1/ru_f2 — at the period and at a comma that
+/// ends a piece of a dialogue line ("щелчки после некоторых знаков препинания", 4PDA, 11.2026).
+/// Only a short burst in the last 25 ms, after at least 60 ms of quiet: the speech itself — a
+/// word's final consonant — goes on into the end or lies further back.
+pub fn drop_end_click(wav: &[f32], end: usize) -> usize {
+    const HOP: usize = 88; // 2 ms
+    let end = end.min(wav.len());
+    let n = end / HOP;
+    if n < 40 {
+        return end;
+    }
+    let rms = |i: usize| {
+        let w = &wav[i * HOP..(i + 1) * HOP];
+        (w.iter().map(|x| x * x).sum::<f32>() / HOP as f32).sqrt()
+    };
+    let levels: Vec<f32> = (0..n).map(rms).collect();
+    let peak = levels.iter().cloned().fold(0.0f32, f32::max);
+    let thr = (peak * 0.03).max(0.002);
+    // the last audible hop, within the last 25 ms
+    let Some(last) = levels.iter().rposition(|&l| l > thr) else { return end };
+    if n - 1 - last > 12 {
+        return end;
+    }
+    // the burst: audible hops back from there (at most 16 ms of them)
+    let mut first = last;
+    while first > 0 && levels[first - 1] > thr {
+        first -= 1;
+    }
+    if last - first + 1 > 8 {
+        return end;
+    }
+    // quiet before it: at least 60 ms
+    let quiet = levels[..first].iter().rev().take_while(|&&l| l <= thr).count();
+    if quiet < 30 {
+        return end;
+    }
+    // cut in the quiet, 10 ms before the burst (the fade-out then lies in silence)
+    first.saturating_sub(5) * HOP
+}
+
 /// Linear fade over the last 10 ms: a cut inside sound does not click.
 pub fn fade_out(wav: &mut [f32]) {
     let n = wav.len().min(441);
@@ -1065,6 +1107,31 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn end_click_is_cut_but_not_the_speech() {
+        let tone = |len: usize, a: f32| -> Vec<f32> { (0..len).map(|i| a * ((i as f32) * 0.05).sin()).collect() };
+        // speech, 90 ms of quiet, a 10 ms click at the very end: cut before the click
+        let mut w = tone(44_100, 0.3);
+        w.extend(std::iter::repeat(0.0).take(3_969));
+        w.extend(tone(441, 0.5));
+        let e = super::drop_end_click(&w, w.len());
+        assert!(e > 44_100 && e <= 44_100 + 3_969, "end {e}");
+        // speech going on to the end: kept whole
+        let s = tone(44_100, 0.3);
+        assert_eq!(super::drop_end_click(&s, s.len()), s.len());
+        // a final consonant after a short closure (30 ms): kept
+        let mut k = tone(44_100, 0.3);
+        k.extend(std::iter::repeat(0.0).take(1_323));
+        k.extend(tone(600, 0.1));
+        assert_eq!(super::drop_end_click(&k, k.len()), k.len());
+        // a burst further back than the last 25 ms: not this one's business
+        let mut f = tone(44_100, 0.3);
+        f.extend(std::iter::repeat(0.0).take(3_969));
+        f.extend(tone(441, 0.5));
+        f.extend(std::iter::repeat(0.0).take(2_205));
+        assert_eq!(super::drop_end_click(&f, f.len()), f.len());
+    }
 
     #[test]
     fn punct_and_numbers() {

@@ -832,7 +832,7 @@ impl TextToSpeech {
         })?;
         let wav_all = vocoder_outputs["output"].try_extract_tensor::<f32>()?.1;
         let predicted = (duration * tera::SAMPLE_RATE as f32).round() as usize;
-        let keep = tera::speech_end(wav_all, predicted);
+        let keep = tera::drop_end_click(wav_all, tera::speech_end(wav_all, predicted));
         let mut wav = wav_all[..keep].to_vec();
         tera::fade_out(&mut wav);
         let kept = wav.len() as f32 / tera::SAMPLE_RATE as f32;
