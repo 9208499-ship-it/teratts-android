@@ -869,7 +869,20 @@ pub fn prepare_pocket(text: &str, lang: &str) -> Option<String> {
     if !t.chars().any(|c| matches!(c, 'А'..='я' | 'Ё' | 'ё')) {
         return None;
     }
-    Some(t)
+    Some(trailing_off(&t))
+}
+
+/// A phrase that trails off («…даже возможно…»): Shtorm ends "..." with a fall deeper than at a full
+/// stop, and it sounds cut short (owner, 28.11.2026). A comma keeps the voice up, as unfinished; the
+/// pause after it stays the ellipsis' (pause_split counts it from the text itself). "?.." and "!.."
+/// are left.
+fn trailing_off(t: &str) -> String {
+    let body = t.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '»' | '"' | '“' | '”' | ')'));
+    let Some(head) = body.strip_suffix("...").or_else(|| body.strip_suffix('…')) else { return t.to_string() };
+    if head.ends_with(|c: char| matches!(c, '?' | '!' | '.')) || !head.ends_with(|c: char| c.is_alphanumeric() || c == '\u{301}') {
+        return t.to_string();
+    }
+    format!("{head},{}", &t[body.len()..])
 }
 
 /// Homographs for Shtorm written as they sound before the stress ("стен+ы" → "стин+ы"; table made by
@@ -1210,6 +1223,11 @@ mod tests {
         assert_eq!(prepare_pocket("Стр+елки — 12 часов!", "ru").unwrap(), "Стре\u{301}лки, двенадцать часов!");
         assert_eq!(prepare_pocket("Замо́к", "ru").unwrap(), "Замо\u{301}к");
         assert_eq!(prepare_pocket("Hello world", "en"), None);
+        // trailing off: the ellipsis at the end as a comma; inside, after ?/! — as it is
+        assert_eq!(prepare_pocket("даже возможно...»", "ru").unwrap(), "даже возможно, »");
+        assert_eq!(prepare_pocket("даже возможно…", "ru").unwrap(), "даже возможно,");
+        assert_eq!(prepare_pocket("Ну... да", "ru").unwrap(), "Ну... да");
+        assert_eq!(prepare_pocket("Как же так?..", "ru").unwrap(), "Как же так?..");
         // a homograph: the vowels before the stress as heard; the other stress and plain words stay
         assert_eq!(prepare_pocket("у стены́, у сте́ны, СТЕН+Ы", "ru").unwrap(), "у стины\u{301}, у сте\u{301}ны, СТИНЫ\u{301}");
         assert_eq!(respell_homographs("Голов+ы и дом+а, мост"), "Галав+ы и дом+а, мост");
