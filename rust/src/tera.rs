@@ -860,6 +860,7 @@ pub fn prepare_pocket(text: &str, lang: &str) -> Option<String> {
         return None;
     }
     let (t, _) = common_front(text, lang);
+    let t = respell_homographs(&t);
     let t = plus_to_acute(&t, true);
     let t: String = t.chars().filter(|c| !c.is_ascii_alphabetic()).collect();
     let t = COMMA_RUN.replace_all(&t, ",");
@@ -869,6 +870,42 @@ pub fn prepare_pocket(text: &str, lang: &str) -> Option<String> {
         return None;
     }
     Some(t)
+}
+
+/// Homographs for Shtorm written as they sound before the stress ("стен+ы" → "стин+ы"; table made by
+/// tools/gen_pocket_respell.py). The stress mark is a hint to it: in a common word its habit wins
+/// («у стены́» read «сте́ны», owner 28.11.2026), in a spelling it has not seen it follows the mark.
+static POCKET_RESPELL: Lazy<std::collections::HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    include_str!("pocket_respell.txt").lines().filter_map(|l| l.split_once(' ')).collect()
+});
+
+/// Every stressed word ('+' before the vowel) of [s] found in the table, respelled; the case of
+/// each letter kept.
+pub fn respell_homographs(s: &str) -> String {
+    let is_w = |c: char| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё' | '+');
+    let mut out = String::with_capacity(s.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        if word.contains('+') {
+            let low: String = word.chars().flat_map(char::to_lowercase).collect();
+            if let Some(r) = POCKET_RESPELL.get(low.as_str()) {
+                if r.chars().count() == word.chars().count() {
+                    for (o, n) in word.chars().zip(r.chars()) {
+                        if o.is_uppercase() { out.extend(n.to_uppercase()) } else { out.push(n) }
+                    }
+                    word.clear();
+                    return;
+                }
+            }
+        }
+        out.push_str(word);
+        word.clear();
+    };
+    for c in s.chars() {
+        if is_w(c) { word.push(c) } else { flush(&mut word, &mut out); out.push(c) }
+    }
+    flush(&mut word, &mut out);
+    out
 }
 
 /// Stress for Shtorm: U+0301 after the vowel (what it was trained on), not '+' before it.
@@ -1173,6 +1210,9 @@ mod tests {
         assert_eq!(prepare_pocket("Стр+елки — 12 часов!", "ru").unwrap(), "Стре\u{301}лки, двенадцать часов!");
         assert_eq!(prepare_pocket("Замо́к", "ru").unwrap(), "Замо\u{301}к");
         assert_eq!(prepare_pocket("Hello world", "en"), None);
+        // a homograph: the vowels before the stress as heard; the other stress and plain words stay
+        assert_eq!(prepare_pocket("у стены́, у сте́ны, СТЕН+Ы", "ru").unwrap(), "у стины\u{301}, у сте\u{301}ны, СТИНЫ\u{301}");
+        assert_eq!(respell_homographs("Голов+ы и дом+а, мост"), "Галав+ы и дом+а, мост");
         // Latin left after the transcription is dropped, not spelled as unknown pieces
         assert_eq!(prepare_pocket("слово x-ray", "ru").unwrap(), "слово -");
     }
